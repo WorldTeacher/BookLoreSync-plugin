@@ -20,6 +20,7 @@ import {BookRuleEvaluatorService} from '../../../magic-shelf/service/book-rule-e
 import {GroupRule} from '../../../magic-shelf/component/magic-shelf-component';
 import {DialogLauncherService} from '../../../../shared/services/dialog-launcher.service';
 import {SortService} from '../../../book/service/sort.service';
+import { PageTitleService } from "../../../../shared/service/page-title.service";
 import {SortDirection, SortOption} from '../../../book/model/sort.model';
 
 const DEFAULT_MAX_ITEMS = 20;
@@ -47,6 +48,7 @@ export class MainDashboardComponent implements OnInit {
   private magicShelfService = inject(MagicShelfService);
   private ruleEvaluatorService = inject(BookRuleEvaluatorService);
   private sortService = inject(SortService);
+  private pageTitle = inject(PageTitleService);
 
   bookState$ = this.bookService.bookState$;
   dashboardConfig$ = this.dashboardConfigService.config$;
@@ -60,6 +62,8 @@ export class MainDashboardComponent implements OnInit {
   ScrollerType = ScrollerType;
 
   ngOnInit(): void {
+    this.pageTitle.setPageTitle('Dashboard');
+
     this.dashboardConfig$.subscribe(() => {
       this.scrollerBooksCache.clear();
     });
@@ -72,7 +76,7 @@ export class MainDashboardComponent implements OnInit {
   private getLastReadBooks(maxItems: number, sortBy?: string): Observable<Book[]> {
     return this.bookService.bookState$.pipe(
       map((state: BookState) => {
-        let books = (state.books || []).filter(book => book.lastReadTime);
+        let books = (state.books || []).filter(book => book.lastReadTime && (book.readStatus === ReadStatus.READING || book.readStatus === ReadStatus.RE_READING || book.readStatus === ReadStatus.PAUSED));
         books = books.sort((a, b) => {
           const aTime = new Date(a.lastReadTime!).getTime();
           const bTime = new Date(b.lastReadTime!).getTime();

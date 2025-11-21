@@ -28,7 +28,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URL;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -107,9 +107,7 @@ public class EpubMetadataWriter implements MetadataWriter {
                 hasChanges[0] = true;
             });
 
-            helper.copySeriesName(clear != null && clear.isSeriesName(), val -> {
-                replaceMetaElement(metadataElement, opfDoc, "calibre:series", val, hasChanges);
-            });
+            helper.copySeriesName(clear != null && clear.isSeriesName(), val -> replaceMetaElement(metadataElement, opfDoc, "calibre:series", val, hasChanges));
 
             helper.copySeriesNumber(clear != null && clear.isSeriesNumber(), val -> {
                 String formatted = val != null ? String.format("%.1f", val) : null;
@@ -136,24 +134,12 @@ public class EpubMetadataWriter implements MetadataWriter {
                 };
 
                 switch (scheme) {
-                    case "AMAZON" -> helper.copyAsin(clearFlag, idValue -> {
-                        updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges);
-                    });
-                    case "GOOGLE" -> helper.copyGoogleId(clearFlag, idValue -> {
-                        updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges);
-                    });
-                    case "GOODREADS" -> helper.copyGoodreadsId(clearFlag, idValue -> {
-                        updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges);
-                    });
-                    case "COMICVINE" -> helper.copyComicvineId(clearFlag, idValue -> {
-                        updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges);
-                    });
-                    case "HARDCOVER" -> helper.copyHardcoverId(clearFlag, idValue -> {
-                        updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges);
-                    });
-                    case "ISBN" -> helper.copyIsbn13(clearFlag, idValue -> {
-                        updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges);
-                    });
+                    case "AMAZON" -> helper.copyAsin(clearFlag, idValue -> updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges));
+                    case "GOOGLE" -> helper.copyGoogleId(clearFlag, idValue -> updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges));
+                    case "GOODREADS" -> helper.copyGoodreadsId(clearFlag, idValue -> updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges));
+                    case "COMICVINE" -> helper.copyComicvineId(clearFlag, idValue -> updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges));
+                    case "HARDCOVER" -> helper.copyHardcoverId(clearFlag, idValue -> updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges));
+                    case "ISBN" -> helper.copyIsbn13(clearFlag, idValue -> updateIdentifier(metadataElement, opfDoc, scheme, idValue, hasChanges));
                 }
             }
 
@@ -476,7 +462,7 @@ public class EpubMetadataWriter implements MetadataWriter {
     }
 
     private byte[] loadImage(String pathOrUrl) {
-        try (InputStream stream = pathOrUrl.startsWith("http") ? new URL(pathOrUrl).openStream() : new FileInputStream(pathOrUrl)) {
+        try (InputStream stream = pathOrUrl.startsWith("http") ? URI.create(pathOrUrl).toURL().openStream() : new FileInputStream(pathOrUrl)) {
             return stream.readAllBytes();
         } catch (IOException e) {
             log.warn("Failed to load image from {}: {}", pathOrUrl, e.getMessage());

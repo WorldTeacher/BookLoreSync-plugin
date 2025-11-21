@@ -36,6 +36,8 @@ class TaskCronServiceTest {
 
     private AutoCloseable mocks;
 
+    private static final LocalDateTime FIXED_TIME = LocalDateTime.of(2025, 1, 1, 12, 0, 0);
+
     @BeforeEach
     void setUp() {
         mocks = MockitoAnnotations.openMocks(this);
@@ -55,8 +57,8 @@ class TaskCronServiceTest {
                 .cronExpression(cron)
                 .enabled(enabled)
                 .createdBy(10L)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
+                .createdAt(FIXED_TIME)
+                .updatedAt(FIXED_TIME)
                 .build();
     }
 
@@ -69,7 +71,7 @@ class TaskCronServiceTest {
 
         List<TaskCronConfigurationEntity> result = service.getAllEnabledCronConfigs();
         assertEquals(1, result.size());
-        assertEquals(TaskType.CLEAR_CBX_CACHE, result.get(0).getTaskType());
+        assertEquals(TaskType.CLEAR_CBX_CACHE, result.getFirst().getTaskType());
     }
 
     @Test
@@ -115,7 +117,7 @@ class TaskCronServiceTest {
     @Test
     void testPatchCronConfig_updateExisting() {
         TaskType type = TaskType.CLEAR_CBX_CACHE;
-        BookLoreUser user = BookLoreUser.builder().id(10L).build();
+        BookLoreUser user = BookLoreUser.builder().id(10L).isDefaultPassword(false).build();
         TaskCronConfigurationEntity entity = buildEntity(type, "0 0 1 * * *", false);
 
         when(authService.getAuthenticatedUser()).thenReturn(user);
@@ -134,7 +136,7 @@ class TaskCronServiceTest {
     @Test
     void testPatchCronConfig_createNew() {
         TaskType type = TaskType.CLEAR_CBX_CACHE;
-        BookLoreUser user = BookLoreUser.builder().id(10L).build();
+        BookLoreUser user = BookLoreUser.builder().id(10L).isDefaultPassword(false).build();
 
         when(authService.getAuthenticatedUser()).thenReturn(user);
         when(repository.findByTaskType(type)).thenReturn(Optional.empty());
@@ -153,7 +155,7 @@ class TaskCronServiceTest {
     @Test
     void testPatchCronConfig_invalidCronExpression_throws() {
         TaskType type = TaskType.CLEAR_CBX_CACHE;
-        BookLoreUser user = BookLoreUser.builder().id(10L).build();
+        BookLoreUser user = BookLoreUser.builder().id(10L).isDefaultPassword(false).build();
 
         when(authService.getAuthenticatedUser()).thenReturn(user);
         when(repository.findByTaskType(type)).thenReturn(Optional.empty());

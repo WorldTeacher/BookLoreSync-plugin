@@ -16,6 +16,7 @@ import com.adityachandel.booklore.model.enums.BookFileType;
 import com.adityachandel.booklore.model.enums.ReadStatus;
 import com.adityachandel.booklore.model.enums.ResetProgressType;
 import com.adityachandel.booklore.repository.*;
+import com.adityachandel.booklore.service.kobo.KoboReadingStateService;
 import com.adityachandel.booklore.service.user.UserProgressService;
 import com.adityachandel.booklore.service.monitoring.MonitoringRegistrationService;
 import com.adityachandel.booklore.util.FileService;
@@ -62,6 +63,7 @@ public class BookService {
     private final UserProgressService userProgressService;
     private final BookDownloadService bookDownloadService;
     private final MonitoringRegistrationService monitoringRegistrationService;
+    private final KoboReadingStateService koboReadingStateService;
 
 
     private void setBookProgress(Book book, UserBookProgressEntity progress) {
@@ -407,6 +409,7 @@ public class BookService {
             progress.setUser(userEntity);
             progress.setBook(book);
             progress.setReadStatus(readStatus);
+            progress.setReadStatusModifiedTime(Instant.now());
 
             if (readStatus == ReadStatus.READ) {
                 progress.setDateFinished(Instant.now());
@@ -452,6 +455,11 @@ public class BookService {
 
             progress.setBook(bookEntity);
             progress.setUser(userEntity.orElseThrow());
+            
+            if (progress.getReadStatus() != null) {
+                progress.setReadStatusModifiedTime(Instant.now());
+            }
+            
             progress.setReadStatus(null);
             progress.setLastReadTime(null);
             progress.setDateFinished(null);
@@ -473,7 +481,8 @@ public class BookService {
                 progress.setKoboLocation(null);
                 progress.setKoboLocationType(null);
                 progress.setKoboLocationSource(null);
-                progress.setKoboLastSyncTime(null);
+                progress.setKoboProgressReceivedTime(null);
+                koboReadingStateService.deleteReadingState(bookId);
             }
             userBookProgressRepository.save(progress);
             updatedBooks.add(bookMapper.toBook(bookEntity));

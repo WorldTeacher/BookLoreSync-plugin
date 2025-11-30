@@ -795,7 +795,7 @@ class FileServiceTest {
             }
 
             @Test
-            void mixedExistingAndNonExisting_deletesExisting() throws IOException {
+            void mixedExistingAndNonExisting_deletesExisting() throws Exception {
                 BufferedImage image = createTestImage(100, 100);
                 fileService.saveCoverImages(image, 20L);
                 

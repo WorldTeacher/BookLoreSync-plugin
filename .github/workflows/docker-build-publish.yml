@@ -276,7 +276,9 @@ jobs:
           push: true
           tags: |
             booklore/booklore:latest
+            booklore/booklore:${{ env.new_tag }}
             ghcr.io/booklore-app/booklore:latest
+            ghcr.io/booklore-app/booklore:${{ env.new_tag }}
           build-args: |
             APP_VERSION=${{ env.new_tag }}
             APP_REVISION=${{ github.sha }}

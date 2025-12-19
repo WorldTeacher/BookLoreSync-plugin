@@ -14,7 +14,6 @@ import {BookService} from "../../../../book/service/book.service";
 import {ProgressSpinner} from "primeng/progressspinner";
 import {Tooltip} from "primeng/tooltip";
 import {filter, take} from "rxjs/operators";
-import {DialogService} from "primeng/dynamicdialog";
 import {takeUntilDestroyed} from "@angular/core/rxjs-interop";
 import {MetadataRefreshType} from "../../../model/request/metadata-refresh-type.enum";
 import {AutoComplete} from "primeng/autocomplete";
@@ -22,8 +21,12 @@ import {DatePicker} from "primeng/datepicker";
 import {Textarea} from "primeng/textarea";
 import {Image} from "primeng/image";
 import {LazyLoadImageModule} from "ng-lazyload-image";
-import {CoverSearchComponent} from '../../cover-search/cover-search.component';
 import {TaskHelperService} from '../../../../settings/task-management/task-helper.service';
+import {BookDialogHelperService} from "../../../../book/components/book-browser/BookDialogHelperService";
+import {BookNavigationService} from '../../../../book/service/book-navigation.service';
+import {BookMetadataHostService} from '../../../../../shared/service/book-metadata-host-service';
+import {Router} from '@angular/router';
+import {UserService} from '../../../../settings/user-management/user.service';
 
 @Component({
   selector: "app-metadata-editor",
@@ -61,7 +64,11 @@ export class MetadataEditorComponent implements OnInit {
   private bookService = inject(BookService);
   private taskHelperService = inject(TaskHelperService);
   protected urlHelper = inject(UrlHelperService);
-  private dialogService = inject(DialogService);
+  private bookDialogHelperService = inject(BookDialogHelperService);
+  private bookNavigationService = inject(BookNavigationService);
+  private metadataHostService = inject(BookMetadataHostService);
+  private router = inject(Router);
+  private userService = inject(UserService);
   private destroyRef = inject(DestroyRef);
 
   metadataForm: FormGroup;
@@ -87,6 +94,9 @@ export class MetadataEditorComponent implements OnInit {
   filteredTags: string[] = [];
   filteredPublishers: string[] = [];
   filteredSeries: string[] = [];
+  private metadataCenterViewMode: 'route' | 'dialog' = 'route';
+
+  navigationState$ = this.bookNavigationService.getNavigationState();
 
   filterCategories(event: { query: string }) {
     const query = event.query.toLowerCase();
@@ -153,6 +163,7 @@ export class MetadataEditorComponent implements OnInit {
       goodreadsRating: new FormControl(""),
       goodreadsReviewCount: new FormControl(""),
       hardcoverId: new FormControl(""),
+      hardcoverBookId: new FormControl(""),
       hardcoverRating: new FormControl(""),
       hardcoverReviewCount: new FormControl(""),
       googleId: new FormControl(""),
@@ -182,6 +193,7 @@ export class MetadataEditorComponent implements OnInit {
       goodreadsRatingLocked: new FormControl(false),
       goodreadsReviewCountLocked: new FormControl(false),
       hardcoverIdLocked: new FormControl(false),
+      hardcoverBookIdLocked: new FormControl(false),
       hardcoverRatingLocked: new FormControl(false),
       hardcoverReviewCountLocked: new FormControl(false),
       googleIdLocked: new FormControl(false),
@@ -207,6 +219,15 @@ export class MetadataEditorComponent implements OnInit {
     });
 
     this.prepareAutoComplete();
+
+    this.userService.userState$
+      .pipe(
+        filter(userState => !!userState?.user && userState.loaded),
+        take(1)
+      )
+      .subscribe(userState => {
+        this.metadataCenterViewMode = userState.user?.userSettings.metadataCenterViewMode ?? 'route';
+      });
   }
 
   private prepareAutoComplete(): void {
@@ -272,6 +293,7 @@ export class MetadataEditorComponent implements OnInit {
       goodreadsRating: metadata.goodreadsRating ?? null,
       goodreadsReviewCount: metadata.goodreadsReviewCount ?? null,
       hardcoverId: metadata.hardcoverId ?? null,
+      hardcoverBookId: metadata.hardcoverBookId ?? null,
       hardcoverRating: metadata.hardcoverRating ?? null,
       hardcoverReviewCount: metadata.hardcoverReviewCount ?? null,
       googleId: metadata.googleId ?? null,
@@ -299,6 +321,7 @@ export class MetadataEditorComponent implements OnInit {
       goodreadsRatingLocked: metadata.goodreadsRatingLocked ?? false,
       goodreadsReviewCountLocked: metadata.goodreadsReviewCountLocked ?? false,
       hardcoverIdLocked: metadata.hardcoverIdLocked ?? false,
+      hardcoverBookIdLocked: metadata.hardcoverBookIdLocked ?? false,
       hardcoverRatingLocked: metadata.hardcoverRatingLocked ?? false,
       hardcoverReviewCountLocked: metadata.hardcoverReviewCountLocked ?? false,
       googleIdLocked: metadata.googleIdLocked ?? false,
@@ -329,6 +352,7 @@ export class MetadataEditorComponent implements OnInit {
       {key: "goodreadsReviewCountLocked", control: "goodreadsReviewCount"},
       {key: "goodreadsRatingLocked", control: "goodreadsRating"},
       {key: "hardcoverIdLocked", control: "hardcoverId"},
+      {key: "hardcoverBookIdLocked", control: "hardcoverBookId"},
       {key: "hardcoverReviewCountLocked", control: "hardcoverReviewCount"},
       {key: "hardcoverRatingLocked", control: "hardcoverRating"},
       {key: "googleIdLocked", control: "googleId"},
@@ -467,6 +491,7 @@ export class MetadataEditorComponent implements OnInit {
       goodreadsRating: form.get("goodreadsRating")?.value,
       goodreadsReviewCount: form.get("goodreadsReviewCount")?.value,
       hardcoverId: form.get("hardcoverId")?.value,
+      hardcoverBookId: form.get("hardcoverBookId")?.value,
       hardcoverRating: form.get("hardcoverRating")?.value,
       hardcoverReviewCount: form.get("hardcoverReviewCount")?.value,
       googleId: form.get("googleId")?.value,
@@ -498,6 +523,7 @@ export class MetadataEditorComponent implements OnInit {
       goodreadsRatingLocked: form.get("goodreadsRatingLocked")?.value,
       goodreadsReviewCountLocked: form.get("goodreadsReviewCountLocked")?.value,
       hardcoverIdLocked: form.get("hardcoverIdLocked")?.value,
+      hardcoverBookIdLocked: form.get("hardcoverBookIdLocked")?.value,
       hardcoverRatingLocked: form.get("hardcoverRatingLocked")?.value,
       hardcoverReviewCountLocked: form.get("hardcoverReviewCountLocked")?.value,
       googleIdLocked: form.get("googleIdLocked")?.value,
@@ -684,27 +710,51 @@ export class MetadataEditorComponent implements OnInit {
   }
 
   openCoverSearch() {
-    const ref = this.dialogService.open(CoverSearchComponent, {
-      header: "Search Cover",
-      modal: true,
-      closable: true,
-      data: {
-        bookId: [this.currentBookId],
-      },
-      style: {
-        width: "90vw",
-        height: "90vh",
-        maxWidth: "1200px",
-        position: "absolute",
-      },
-    });
-
+    const ref = this.bookDialogHelperService.openCoverSearchDialog(this.currentBookId);
     ref?.onClose.subscribe((result) => {
       if (result) {
         this.metadataForm.get("thumbnailUrl")?.setValue(result);
         this.onSave();
       }
     });
+  }
+
+  canNavigatePrevious(): boolean {
+    return this.bookNavigationService.canNavigatePrevious();
+  }
+
+  canNavigateNext(): boolean {
+    return this.bookNavigationService.canNavigateNext();
+  }
+
+  navigatePrevious(): void {
+    const prevBookId = this.bookNavigationService.getPreviousBookId();
+    if (prevBookId) {
+      this.navigateToBook(prevBookId);
+    }
+  }
+
+  navigateNext(): void {
+    const nextBookId = this.bookNavigationService.getNextBookId();
+    if (nextBookId) {
+      this.navigateToBook(nextBookId);
+    }
+  }
+
+  private navigateToBook(bookId: number): void {
+    this.bookNavigationService.updateCurrentBook(bookId);
+    if (this.metadataCenterViewMode === 'route') {
+      this.router.navigate(['/book', bookId], {
+        queryParams: {tab: 'edit'}
+      });
+    } else {
+      this.metadataHostService.switchBook(bookId);
+    }
+  }
+
+  getNavigationPosition(): string {
+    const position = this.bookNavigationService.getCurrentPosition();
+    return position ? `${position.current} of ${position.total}` : '';
   }
 
   protected readonly sample = sample;

@@ -3,7 +3,7 @@ import {CbxBackgroundColor, CbxFitMode, CbxPageSpread, CbxPageViewMode, CbxScrol
 import {BookReview} from '../components/book-reviews/book-review-service';
 import {ZoomType} from 'ngx-extended-pdf-viewer';
 
-export type BookType = "PDF" | "EPUB" | "CBX";
+export type BookType = "PDF" | "EPUB" | "CBX" | "FB2";
 
 export enum AdditionalFileType {
   ALTERNATIVE_FORMAT = 'ALTERNATIVE_FORMAT',
@@ -88,6 +88,7 @@ export interface BookMetadata {
   goodreadsId?: string;
   comicvineId?: string;
   hardcoverId?: string;
+  hardcoverBookId?: number | null;
   googleId?: string;
   pageCount?: number | null;
   language?: string;
@@ -122,6 +123,7 @@ export interface BookMetadata {
   comicvineIdLocked?: boolean;
   goodreadsIdLocked?: boolean;
   hardcoverIdLocked?: boolean;
+  hardcoverBookIdLocked?: boolean;
   googleIdLocked?: boolean;
   pageCountLocked?: boolean;
   languageLocked?: boolean;
@@ -156,6 +158,7 @@ export interface MetadataClearFlags {
   goodreadsId?: boolean;
   comicvineId?: boolean;
   hardcoverId?: boolean;
+  hardcoverBookId?: boolean;
   googleId?: boolean;
   pageCount?: boolean;
   language?: boolean;

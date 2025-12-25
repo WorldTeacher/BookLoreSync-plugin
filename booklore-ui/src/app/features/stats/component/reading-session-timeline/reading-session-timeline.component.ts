@@ -1,6 +1,6 @@
 import {Component, inject, Input, OnInit} from '@angular/core';
 import {CommonModule} from '@angular/common';
-import {UserStatsService, ReadingSessionTimelineResponse} from '../../../settings/user-management/user-stats.service';
+import {ReadingSessionTimelineResponse, UserStatsService} from '../../../settings/user-management/user-stats.service';
 import {UrlHelperService} from '../../../../shared/service/url-helper.service';
 import {BookType} from '../../../book/model/book.model';
 
@@ -44,11 +44,12 @@ interface DayTimeline {
 export class ReadingSessionTimelineComponent implements OnInit {
   @Input() initialYear: number = new Date().getFullYear();
   @Input() weekNumber: number = this.getCurrentWeekNumber();
+  @Input() userName: string = '';
 
   private userStatsService = inject(UserStatsService);
   private urlHelperService = inject(UrlHelperService);
 
-  public daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  public daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   public hourLabels: string[] = [];
   public timelineData: DayTimeline[] = [];
   public currentYear: number = new Date().getFullYear();
@@ -88,8 +89,8 @@ export class ReadingSessionTimelineComponent implements OnInit {
 
     response.forEach((item) => {
       const startTime = new Date(item.startDate);
-      const endTime = new Date(item.endDate);
-      const duration = Math.floor((endTime.getTime() - startTime.getTime()) / (1000 * 60));
+      const duration = item.totalDurationSeconds / 60;
+      const endTime = new Date(startTime.getTime() + item.totalDurationSeconds * 1000);
 
       sessions.push({
         startTime,
@@ -198,13 +199,15 @@ export class ReadingSessionTimelineComponent implements OnInit {
     });
 
     this.timelineData = [];
+    const displayOrder = [1, 2, 3, 4, 5, 6, 0];
     for (let i = 0; i < 7; i++) {
-      const sessionsForDay = dayMap.get(i) || [];
+      const dayOfWeek = displayOrder[i];
+      const sessionsForDay = dayMap.get(dayOfWeek) || [];
       const timelineSessions = this.layoutSessionsForDay(sessionsForDay);
 
       this.timelineData.push({
         day: this.daysOfWeek[i],
-        dayOfWeek: i,
+        dayOfWeek: dayOfWeek,
         sessions: timelineSessions
       });
     }
@@ -291,15 +294,41 @@ export class ReadingSessionTimelineComponent implements OnInit {
   }
 
   public formatDuration(minutes: number): string {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    if (hours > 0) {
-      return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-    }
-    return `${mins}m`;
+    const totalSeconds = Math.round(minutes * 60);
+    const hours = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+
+    const parts: string[] = [];
+    if (hours) parts.push(`${hours}H`);
+    if (mins || hours) parts.push(`${mins}M`);
+    parts.push(`${secs}S`);
+
+    return parts.join(' ');
+  }
+
+  public formatDurationCompact(minutes: number): string {
+    const totalSeconds = Math.round(minutes * 60);
+    const hours = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+
+    if (hours > 0) return `${hours}h${mins > 0 ? mins + 'm' : ''}`;
+    if (mins > 0) return `${mins}m${secs > 0 ? secs + 's' : ''}`;
+    return `${secs}s`;
+  }
+
+  public isDurationGreaterThanOneHour(minutes: number): boolean {
+    return minutes >= 60;
   }
 
   public getCoverUrl(bookId: number): string {
     return this.urlHelperService.getThumbnailUrl1(bookId);
+  }
+
+  public getTitle(): string {
+    return this.userName
+      ? `${this.userName}'s Reading Session Timeline`
+      : 'Reading Session Timeline';
   }
 }

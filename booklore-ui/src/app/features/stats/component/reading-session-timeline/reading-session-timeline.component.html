@@ -1,8 +1,11 @@
 <div class="timeline-container">
   <div class="timeline-header">
     <div class="header-title">
-      <h3>Reading Session Timeline</h3>
-      <p class="timeline-subtitle">Your reading schedule throughout the week</p>
+      <h3>
+        <i class="pi pi-clock timeline-title-icon"></i>
+        {{ getTitle() }}
+      </h3>
+      <p class="timeline-subtitle">Weekly overview of your reading sessions and patterns</p>
     </div>
     <div class="week-selector">
       <button type="button"
@@ -55,14 +58,16 @@
                      [style.width.%]="session.width"
                      [style.top]="session.totalLevels > 1 ? 'calc(' + session.level + ' / ' + session.totalLevels + ' * 100% + ' + session.level * 2 + 'px)' : '0'"
                      [style.height]="session.totalLevels > 1 ? 'calc((1 / ' + session.totalLevels + ' * 100%) - ' + (session.totalLevels - 1) * 2 / session.totalLevels + 'px)' : '100%'">
-                  <div class="session-content">
-                    <span class="session-time">
-                      {{ formatTime(session.startHour, session.startMinute) }}
-                    </span>
-                    <span class="session-duration">
-                      {{ formatDuration(session.duration) }}
-                    </span>
-                  </div>
+                  @if (isDurationGreaterThanOneHour(session.duration)) {
+                    <div class="session-content">
+                      <span class="session-time">
+                        {{ formatTime(session.startHour, session.startMinute) }}
+                      </span>
+                      <span class="session-duration">
+                        {{ formatDurationCompact(session.duration) }}
+                      </span>
+                    </div>
+                  }
 
                   <div class="session-tooltip">
                     <div class="tooltip-content">

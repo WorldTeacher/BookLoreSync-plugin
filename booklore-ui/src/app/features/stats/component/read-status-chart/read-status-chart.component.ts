@@ -1,11 +1,11 @@
-import {inject, Injectable, OnDestroy} from '@angular/core';
+import {Component, inject, OnDestroy, OnInit} from '@angular/core';
+import {CommonModule} from '@angular/common';
+import {BaseChartDirective} from 'ng2-charts';
 import {BehaviorSubject, EMPTY, Observable, Subject} from 'rxjs';
-import {map, takeUntil, catchError, filter, first, switchMap} from 'rxjs/operators';
-import {ChartConfiguration, ChartData, ChartType} from 'chart.js';
-
-import {LibraryFilterService} from './library-filter.service';
-import {BookService} from '../../book/service/book.service';
-import {Book, ReadStatus} from '../../book/model/book.model';
+import {catchError, filter, first, takeUntil} from 'rxjs/operators';
+import {ChartConfiguration, ChartData} from 'chart.js';
+import {BookService} from '../../../book/service/book.service';
+import {Book, ReadStatus} from '../../../book/model/book.model';
 
 interface ReadingStatusStats {
   status: string;
@@ -27,19 +27,25 @@ const CHART_DEFAULTS = {
 
 type StatusChartData = ChartData<'doughnut', number[], string>;
 
-@Injectable({
-  providedIn: 'root'
+@Component({
+  selector: 'app-read-status-chart',
+  standalone: true,
+  imports: [CommonModule, BaseChartDirective],
+  templateUrl: './read-status-chart.component.html',
+  styleUrls: ['./read-status-chart.component.scss']
 })
-export class ReadStatusChartService implements OnDestroy {
+export class ReadStatusChartComponent implements OnInit, OnDestroy {
   private readonly bookService = inject(BookService);
-  private readonly libraryFilterService = inject(LibraryFilterService);
   private readonly destroy$ = new Subject<void>();
 
-  public readonly statusChartType: ChartType = 'doughnut';
+  public readonly chartType = 'doughnut' as const;
 
-  public readonly statusChartOptions: ChartConfiguration['options'] = {
+  public readonly chartOptions: ChartConfiguration['options'] = {
     responsive: true,
     maintainAspectRatio: false,
+    layout: {
+      padding: {top: 15}
+    },
     plugins: {
       legend: {
         display: true,
@@ -47,6 +53,11 @@ export class ReadStatusChartService implements OnDestroy {
         labels: {
           padding: 15,
           usePointStyle: true,
+          color: '#ffffff',
+          font: {
+            family: "'Inter', sans-serif",
+            size: 12
+          },
           generateLabels: this.generateLegendLabels.bind(this)
         }
       },
@@ -62,7 +73,6 @@ export class ReadStatusChartService implements OnDestroy {
         padding: 12,
         titleFont: {size: 14, weight: 'bold'},
         bodyFont: {size: 13},
-        position: 'nearest',
         callbacks: {
           title: (context) => context[0]?.label || '',
           label: this.formatTooltipLabel
@@ -75,7 +85,7 @@ export class ReadStatusChartService implements OnDestroy {
     }
   };
 
-  private readonly statusChartDataSubject = new BehaviorSubject<StatusChartData>({
+  private readonly chartDataSubject = new BehaviorSubject<StatusChartData>({
     labels: [],
     datasets: [{
       data: [],
@@ -84,22 +94,18 @@ export class ReadStatusChartService implements OnDestroy {
     }]
   });
 
-  public readonly statusChartData$: Observable<StatusChartData> = this.statusChartDataSubject.asObservable();
+  public readonly chartData$: Observable<StatusChartData> = this.chartDataSubject.asObservable();
 
-  constructor() {
+  ngOnInit(): void {
     this.bookService.bookState$
       .pipe(
         filter(state => state.loaded),
         first(),
-        switchMap(() =>
-          this.libraryFilterService.selectedLibrary$.pipe(
-            takeUntil(this.destroy$)
-          )
-        ),
         catchError((error) => {
           console.error('Error processing reading status stats:', error);
           return EMPTY;
-        })
+        }),
+        takeUntil(this.destroy$)
       )
       .subscribe(() => {
         const stats = this.calculateReadingStatusStats();
@@ -118,7 +124,7 @@ export class ReadStatusChartService implements OnDestroy {
       const dataValues = stats.map(s => s.count);
       const colors = this.getColorsForData(stats.length);
 
-      this.statusChartDataSubject.next({
+      this.chartDataSubject.next({
         labels,
         datasets: [{
           data: dataValues,
@@ -141,24 +147,16 @@ export class ReadStatusChartService implements OnDestroy {
 
   private calculateReadingStatusStats(): ReadingStatusStats[] {
     const currentState = this.bookService.getCurrentBookState();
-    const selectedLibraryId = this.libraryFilterService.getCurrentSelectedLibrary();
 
     if (!this.isValidBookState(currentState)) {
       return [];
     }
 
-    const filteredBooks = this.filterBooksByLibrary(currentState.books!, String(selectedLibraryId));
-    return this.processReadingStatusStats(filteredBooks);
+    return this.processReadingStatusStats(currentState.books!);
   }
 
   private isValidBookState(state: any): boolean {
     return state?.loaded && state?.books && Array.isArray(state.books) && state.books.length > 0;
-  }
-
-  private filterBooksByLibrary(books: Book[], selectedLibraryId: string | null): Book[] {
-    return selectedLibraryId && selectedLibraryId !== 'null'
-      ? books.filter(book => String(book.libraryId) === selectedLibraryId)
-      : books;
   }
 
   private processReadingStatusStats(books: Book[]): ReadingStatusStats[] {
@@ -248,3 +246,4 @@ export class ReadStatusChartService implements OnDestroy {
     return `${label}: ${value} books (${percentage}%)`;
   }
 }
+

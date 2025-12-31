@@ -1,8 +1,13 @@
 <div align="center">
 
-# 📚 BookLore
+<h1 style="display: inline-block; vertical-align: middle;">
+  <img src="assets/favicons/favicon-96x96.png" alt="BookLore Logo" width="72" style="vertical-align: middle; margin: -1rem; padding: -1rem;"/>
+  <b style="vertical-align: middle; margin: 0; padding: 0;">BookLore</b>
+</h1>
 
 ### *Your Personal Library, Beautifully Organized*
+
+**🌐 Official Website: [https://booklore.org](https://booklore.org/)**
 
 <p align="center">
   <img src="assets/demo.gif" alt="BookLore Demo" width="800px" style="border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" />

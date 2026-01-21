@@ -437,6 +437,10 @@ Join community!
 <a href="https://www.pikapods.com/pods?run=booklore">
   <img src="https://www.pikapods.com/static/run-button.svg" alt="Run on PikaPods" height="40">
 </a>
+&nbsp;&nbsp;&nbsp;&nbsp;
+<a href="https://docs.elfhosted.com/app/booklore">
+  <img src="https://docs.elfhosted.com/images/logo.svg" alt="ElfHosted" height="40">
+</a>
 
 *Become a sponsor and get your logo here! [Support us on Open Collective](https://opencollective.com/booklore)*
 

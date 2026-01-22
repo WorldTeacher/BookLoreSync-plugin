@@ -6,17 +6,14 @@ on:
       - develop
   pull_request:
     branches:
-      - develop
-      - 'release/**'
-      - master
+      - '**'
 
 jobs:
   migration-check:
     name: Flyway Migration Check
     uses: ./.github/workflows/migrations-check.yml
     with:
-      # For PRs, compare against target branch; for pushes, compare against develop
-      base_ref: ${{ github.event_name == 'pull_request' && github.base_ref || 'develop' }}
+      base_ref: 'develop'
       head_ref: 'HEAD'
 
   backend-tests:
@@ -209,4 +206,3 @@ jobs:
           cache-to: |
             type=gha,mode=max
             type=registry,ref=ghcr.io/booklore-app/booklore:buildcache,mode=max
-

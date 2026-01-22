@@ -8,6 +8,7 @@ export class BookSorter {
     {label: 'Title + Series', field: 'titleSeries', direction: SortDirection.ASCENDING},
     {label: 'File Name', field: 'fileName', direction: SortDirection.ASCENDING},
     {label: 'Author', field: 'author', direction: SortDirection.ASCENDING},
+    {label: 'Author (Surname)', field: 'authorSurnameVorname', direction: SortDirection.ASCENDING},
     {label: 'Author + Series', field: 'authorSeries', direction: SortDirection.ASCENDING},
     {label: 'Last Read', field: 'lastReadTime', direction: SortDirection.ASCENDING},
     {label: 'Personal Rating', field: 'personalRating', direction: SortDirection.ASCENDING},
@@ -22,6 +23,7 @@ export class BookSorter {
     {label: 'Goodreads #', field: 'goodreadsReviewCount', direction: SortDirection.ASCENDING},
     {label: 'Hardcover Rating', field: 'hardcoverRating', direction: SortDirection.ASCENDING},
     {label: 'Hardcover #', field: 'hardcoverReviewCount', direction: SortDirection.ASCENDING},
+    {label: 'Ranobedb Rating', field: 'ranobedbRating', direction: SortDirection.ASCENDING},
     {label: 'Pages', field: 'pageCount', direction: SortDirection.ASCENDING},
     {label: 'Random', field: 'random', direction: SortDirection.ASCENDING},
   ];

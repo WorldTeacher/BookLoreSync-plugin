@@ -13,7 +13,7 @@ import {HttpResponse} from "@angular/common/http";
 import {BookService} from "../../../../book/service/book.service";
 import {ProgressSpinner} from "primeng/progressspinner";
 import {Tooltip} from "primeng/tooltip";
-import {filter, finalize, take} from "rxjs/operators";
+import {filter, finalize, take, tap} from "rxjs/operators";
 import {takeUntilDestroyed} from "@angular/core/rxjs-interop";
 import {MetadataRefreshType} from "../../../model/request/metadata-refresh-type.enum";
 import {AutoComplete, AutoCompleteSelectEvent} from "primeng/autocomplete";
@@ -27,6 +27,8 @@ import {BookNavigationService} from '../../../../book/service/book-navigation.se
 import {BookMetadataHostService} from '../../../../../shared/service/book-metadata-host.service';
 import {Router} from '@angular/router';
 import {UserService} from '../../../../settings/user-management/user.service';
+import {AppSettingsService} from '../../../../../shared/service/app-settings.service';
+import {MetadataProviderSpecificFields} from '../../../../../shared/model/app-settings.model';
 
 @Component({
   selector: "app-metadata-editor",
@@ -70,6 +72,7 @@ export class MetadataEditorComponent implements OnInit {
   private router = inject(Router);
   private userService = inject(UserService);
   private destroyRef = inject(DestroyRef);
+  private appSettingsService = inject(AppSettingsService);
 
   metadataForm: FormGroup;
   currentBookId!: number;
@@ -80,6 +83,7 @@ export class MetadataEditorComponent implements OnInit {
 
   refreshingBookIds = new Set<number>();
   isAutoFetching = false;
+  autoSaveEnabled = false;
 
   originalMetadata!: BookMetadata;
 
@@ -96,6 +100,25 @@ export class MetadataEditorComponent implements OnInit {
   filteredPublishers: string[] = [];
   filteredSeries: string[] = [];
   private metadataCenterViewMode: 'route' | 'dialog' = 'route';
+
+  providerSpecificFields: MetadataProviderSpecificFields = {
+    asin: true,
+    amazonRating: true,
+    amazonReviewCount: true,
+    googleId: true,
+    goodreadsId: true,
+    goodreadsRating: true,
+    goodreadsReviewCount: true,
+    hardcoverId: true,
+    hardcoverBookId: true,
+    hardcoverRating: true,
+    hardcoverReviewCount: true,
+    comicvineId: true,
+    lubimyczytacId: true,
+    lubimyczytacRating: true,
+    ranobedbId: true,
+    ranobedbRating: true,
+  };
 
   navigationState$ = this.bookNavigationService.getNavigationState();
 
@@ -169,6 +192,8 @@ export class MetadataEditorComponent implements OnInit {
       hardcoverReviewCount: new FormControl(""),
       lubimyczytacId: new FormControl(""),
       lubimyczytacRating: new FormControl(""),
+      ranobedbId: new FormControl(""),
+      ranobedbRating: new FormControl(""),
       googleId: new FormControl(""),
       seriesName: new FormControl(""),
       seriesNumber: new FormControl(""),
@@ -201,6 +226,8 @@ export class MetadataEditorComponent implements OnInit {
       hardcoverReviewCountLocked: new FormControl(false),
       lubimyczytacIdLocked: new FormControl(false),
       lubimyczytacRatingLocked: new FormControl(false),
+      ranobedbIdLocked: new FormControl(""),
+      ranobedbRatingLocked: new FormControl(false),
       googleIdLocked: new FormControl(false),
       seriesNameLocked: new FormControl(false),
       seriesNumberLocked: new FormControl(false),
@@ -232,6 +259,18 @@ export class MetadataEditorComponent implements OnInit {
       )
       .subscribe(userState => {
         this.metadataCenterViewMode = userState.user?.userSettings.metadataCenterViewMode ?? 'route';
+        this.autoSaveEnabled = userState.user?.userSettings.autoSaveMetadata ?? false;
+      });
+
+    this.appSettingsService.appSettings$
+      .pipe(
+        filter(settings => !!settings),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe(settings => {
+        if (settings?.metadataProviderSpecificFields) {
+          this.providerSpecificFields = settings.metadataProviderSpecificFields;
+        }
       });
   }
 
@@ -303,6 +342,8 @@ export class MetadataEditorComponent implements OnInit {
       hardcoverReviewCount: metadata.hardcoverReviewCount ?? null,
       lubimyczytacId: metadata.lubimyczytacId ?? null,
       lubimyczytacRating: metadata.lubimyczytacRating ?? null,
+      ranobedbId: metadata.ranobedbId ?? null,
+      ranobedbRating: metadata.ranobedbRating ?? null,
       googleId: metadata.googleId ?? null,
       seriesName: metadata.seriesName ?? null,
       seriesNumber: metadata.seriesNumber ?? null,
@@ -333,6 +374,8 @@ export class MetadataEditorComponent implements OnInit {
       hardcoverReviewCountLocked: metadata.hardcoverReviewCountLocked ?? false,
       lubimyczytacIdLocked: metadata.lubimyczytacIdLocked ?? false,
       lubimyczytacRatingLocked: metadata.lubimyczytacRatingLocked ?? false,
+      ranobedbIdLocked: metadata.ranobedbIdLocked ?? false,
+      ranobedbRatingLocked: metadata.ranobedbRatingLocked ?? false,
       googleIdLocked: metadata.googleIdLocked ?? false,
       seriesNameLocked: metadata.seriesNameLocked ?? false,
       seriesNumberLocked: metadata.seriesNumberLocked ?? false,
@@ -366,6 +409,9 @@ export class MetadataEditorComponent implements OnInit {
       {key: "hardcoverRatingLocked", control: "hardcoverRating"},
       {key: "lubimyczytacIdLocked", control: "lubimyczytacId"},
       {key: "lubimyczytacRatingLocked", control: "lubimyczytacRating"},
+      {key: "ranobedbReviewCountLocked", control: "ranobedbReviewCount"},
+      {key: "ranobedbIdLocked", control: "ranobedbId"},
+      {key: "ranobedbRatingLocked", control: "ranobedbRating"},
       {key: "googleIdLocked", control: "googleId"},
       {key: "pageCountLocked", control: "pageCount"},
       {key: "descriptionLocked", control: "description"},
@@ -408,32 +454,39 @@ export class MetadataEditorComponent implements OnInit {
   }
 
   onSave(): void {
+    this.saveMetadata().subscribe();
+  }
+
+  saveMetadata(): Observable<void> {
     this.isSaving = true;
-    this.bookService
+    return this.bookService
       .updateBookMetadata(
         this.currentBookId,
         this.buildMetadataWrapper(undefined),
         false
       )
-      .subscribe({
-        next: (response) => {
-          this.isSaving = false;
-          this.messageService.add({
-            severity: "info",
-            summary: "Success",
-            detail: "Book metadata updated",
-          });
-          this.prepareAutoComplete();
-        },
-        error: (err) => {
-          this.isSaving = false;
-          this.messageService.add({
-            severity: "error",
-            summary: "Error",
-            detail: err?.error?.message || "Failed to update book metadata",
-          });
-        },
-      });
+      .pipe(
+        tap({
+          next: (response: any) => {
+            this.isSaving = false;
+            this.messageService.add({
+              severity: "info",
+              summary: "Success",
+              detail: "Book metadata updated",
+            });
+            this.prepareAutoComplete();
+            this.metadataForm.markAsPristine();
+          },
+          error: (err: any) => {
+            this.isSaving = false;
+            this.messageService.add({
+              severity: "error",
+              summary: "Error",
+              detail: err?.error?.message || "Failed to update book metadata",
+            });
+          },
+        })
+      );
   }
 
   toggleLock(field: string): void {
@@ -473,9 +526,7 @@ export class MetadataEditorComponent implements OnInit {
     this.updateMetadata(false);
   }
 
-  private buildMetadataWrapper(
-    shouldLockAllFields?: boolean
-  ): MetadataUpdateWrapper {
+  private buildMetadataWrapper(shouldLockAllFields?: boolean): MetadataUpdateWrapper {
     const form = this.metadataForm;
 
     const metadata: BookMetadata = {
@@ -507,6 +558,8 @@ export class MetadataEditorComponent implements OnInit {
       hardcoverReviewCount: form.get("hardcoverReviewCount")?.value,
       lubimyczytacId: form.get("lubimyczytacId")?.value,
       lubimyczytacRating: form.get("lubimyczytacRating")?.value,
+      ranobedbId: form.get("ranobedbId")?.value,
+      ranobedbRating: form.get("ranobedbRating")?.value,
       googleId: form.get("googleId")?.value,
       language: form.get("language")?.value,
       seriesName: form.get("seriesName")?.value,
@@ -541,6 +594,8 @@ export class MetadataEditorComponent implements OnInit {
       hardcoverReviewCountLocked: form.get("hardcoverReviewCountLocked")?.value,
       lubimyczytacIdLocked: form.get("lubimyczytacIdLocked")?.value,
       lubimyczytacRatingLocked: form.get("lubimyczytacRatingLocked")?.value,
+      ranobedbIdLocked: form.get("ranobedbIdLocked")?.value,
+      ranobedbRatingLocked: form.get("ranobedbRatingLocked")?.value,
       googleIdLocked: form.get("googleIdLocked")?.value,
       seriesNameLocked: form.get("seriesNameLocked")?.value,
       seriesNumberLocked: form.get("seriesNumberLocked")?.value,
@@ -589,6 +644,8 @@ export class MetadataEditorComponent implements OnInit {
       hardcoverId: wasCleared("hardcoverId"),
       hardcoverRating: wasCleared("hardcoverRating"),
       hardcoverReviewCount: wasCleared("hardcoverReviewCount"),
+      ranobedbId: wasCleared("ranobedbId"),
+      ranobedbRating: wasCleared("ranobedbRating"),
       googleId: wasCleared("googleId"),
       seriesName: wasCleared("seriesName"),
       seriesNumber: wasCleared("seriesNumber"),
@@ -778,14 +835,22 @@ export class MetadataEditorComponent implements OnInit {
   navigatePrevious(): void {
     const prevBookId = this.bookNavigationService.getPreviousBookId();
     if (prevBookId) {
-      this.navigateToBook(prevBookId);
+      if (this.autoSaveEnabled && this.metadataForm.dirty) {
+        this.saveMetadata().subscribe(() => this.navigateToBook(prevBookId));
+      } else {
+        this.navigateToBook(prevBookId);
+      }
     }
   }
 
   navigateNext(): void {
     const nextBookId = this.bookNavigationService.getNextBookId();
     if (nextBookId) {
-      this.navigateToBook(nextBookId);
+      if (this.autoSaveEnabled && this.metadataForm.dirty) {
+        this.saveMetadata().subscribe(() => this.navigateToBook(nextBookId));
+      } else {
+        this.navigateToBook(nextBookId);
+      }
     }
   }
 
@@ -803,6 +868,10 @@ export class MetadataEditorComponent implements OnInit {
   getNavigationPosition(): string {
     const position = this.bookNavigationService.getCurrentPosition();
     return position ? `${position.current} of ${position.total}` : '';
+  }
+
+  isFieldVisible(field: keyof MetadataProviderSpecificFields): boolean {
+    return this.providerSpecificFields[field] ?? false;
   }
 
   protected readonly sample = sample;

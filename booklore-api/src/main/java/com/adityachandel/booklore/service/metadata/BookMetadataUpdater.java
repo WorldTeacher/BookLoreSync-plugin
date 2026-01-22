@@ -86,7 +86,8 @@ public class BookMetadataUpdater {
 
         MetadataPersistenceSettings settings = appSettingService.getAppSettings().getMetadataPersistenceSettings();
         MetadataPersistenceSettings.SaveToOriginalFile writeToFile = settings.getSaveToOriginalFile();
-        BookFileType bookType = bookEntity.getBookType();
+        var primaryFile = bookEntity.getPrimaryBookFile();
+        BookFileType bookType = primaryFile.getBookType();
 
         boolean hasValueChangesForFileWrite = MetadataChangeDetector.hasValueChangesForFileWrite(newMetadata, metadata, clearFlags);
 
@@ -120,7 +121,7 @@ public class BookMetadataUpdater {
                     writer.saveMetadataToFile(file, metadata, thumbnailUrl, clearFlags);
                     String newHash = FileFingerprint.generateHash(bookEntity.getFullFilePath());
                     bookEntity.setMetadataForWriteUpdatedAt(Instant.now());
-                    bookEntity.setCurrentHash(newHash);
+                    primaryFile.setCurrentHash(newHash);
                     bookRepository.save(bookEntity);
                 } catch (Exception e) {
                     log.warn("Failed to write metadata for book ID {}: {}", bookId, e.getMessage());
@@ -134,8 +135,9 @@ public class BookMetadataUpdater {
                 BookEntity book = metadata.getBook();
                 FileMoveResult result = fileMoveService.moveSingleFile(book);
                 if (result.isMoved()) {
-                    book.setFileName(result.getNewFileName());
-                    book.setFileSubPath(result.getNewFileSubPath());
+                    var bookPrimaryFile = book.getPrimaryBookFile();
+                    bookPrimaryFile.setFileName(result.getNewFileName());
+                    bookPrimaryFile.setFileSubPath(result.getNewFileSubPath());
                 }
             } catch (Exception e) {
                 log.warn("Failed to move files for book ID {} after metadata update: {}", bookId, e.getMessage());
@@ -170,6 +172,8 @@ public class BookMetadataUpdater {
         handleFieldUpdate(e.getHardcoverReviewCountLocked(), clear.isHardcoverReviewCount(), m.getHardcoverReviewCount(), e::setHardcoverReviewCount, e::getHardcoverReviewCount, replaceMode);
         handleFieldUpdate(e.getLubimyczytacIdLocked(), clear.isLubimyczytacId(), m.getLubimyczytacId(), v -> e.setLubimyczytacId(nullIfBlank(v)), e::getLubimyczytacId, replaceMode);
         handleFieldUpdate(e.getLubimyczytacRatingLocked(), clear.isLubimyczytacRating(), m.getLubimyczytacRating(), e::setLubimyczytacRating, e::getLubimyczytacRating, replaceMode);
+        handleFieldUpdate(e.getRanobedbIdLocked(), clear.isRanobedbId(), m.getRanobedbId(), v -> e.setRanobedbId(nullIfBlank(v)), e::getRanobedbId, replaceMode);
+        handleFieldUpdate(e.getRanobedbRatingLocked(), clear.isRanobedbRating(), m.getRanobedbRating(), e::setRanobedbRating, e::getRanobedbRating, replaceMode);
     }
 
     private <T> void handleFieldUpdate(Boolean locked, boolean shouldClear, T newValue, Consumer<T> setter, Supplier<T> getter, MetadataReplaceMode mode) {
@@ -182,10 +186,14 @@ public class BookMetadataUpdater {
             if (newValue != null) setter.accept(newValue);
             return;
         }
-        if (mode == MetadataReplaceMode.REPLACE_ALL) {
-            setter.accept(newValue);
-        } else if (mode == MetadataReplaceMode.REPLACE_MISSING && isValueMissing(getter.get())) {
-            setter.accept(newValue);
+        switch (mode) {
+            case REPLACE_ALL -> setter.accept(newValue);
+            case REPLACE_MISSING -> {
+                if (isValueMissing(getter.get())) setter.accept(newValue);
+            }
+            case REPLACE_WHEN_PROVIDED -> {
+                if (!isValueMissing(newValue)) setter.accept(newValue);
+            }
         }
     }
 
@@ -219,14 +227,11 @@ public class BookMetadataUpdater {
 
         if (newAuthors.isEmpty()) return;
 
-        boolean replaceAll = replaceMode == MetadataReplaceMode.REPLACE_ALL;
-        boolean replaceMissing = replaceMode == MetadataReplaceMode.REPLACE_MISSING;
-
-        if (replaceAll) {
+        if (replaceMode == MetadataReplaceMode.REPLACE_ALL || replaceMode == MetadataReplaceMode.REPLACE_WHEN_PROVIDED) {
             if (!merge) e.getAuthors().clear();
             e.getAuthors().addAll(newAuthors);
             e.updateSearchText();
-        } else if (replaceMissing && e.getAuthors().isEmpty()) {
+        } else if (replaceMode == MetadataReplaceMode.REPLACE_MISSING && e.getAuthors().isEmpty()) {
             e.getAuthors().addAll(newAuthors);
             e.updateSearchText();
         } else if (replaceMode == null) {
@@ -260,13 +265,10 @@ public class BookMetadataUpdater {
 
         if (newCategories.isEmpty()) return;
 
-        boolean replaceAll = replaceMode == MetadataReplaceMode.REPLACE_ALL;
-        boolean replaceMissing = replaceMode == MetadataReplaceMode.REPLACE_MISSING;
-
-        if (replaceAll) {
+        if (replaceMode == MetadataReplaceMode.REPLACE_ALL || replaceMode == MetadataReplaceMode.REPLACE_WHEN_PROVIDED) {
             if (!merge) e.getCategories().clear();
             e.getCategories().addAll(newCategories);
-        } else if (replaceMissing && e.getCategories().isEmpty()) {
+        } else if (replaceMode == MetadataReplaceMode.REPLACE_MISSING && e.getCategories().isEmpty()) {
             e.getCategories().addAll(newCategories);
         } else if (replaceMode == null) {
             if (!merge) e.getCategories().clear();
@@ -298,13 +300,10 @@ public class BookMetadataUpdater {
 
         if (newMoods.isEmpty()) return;
 
-        boolean replaceAll = replaceMode == MetadataReplaceMode.REPLACE_ALL;
-        boolean replaceMissing = replaceMode == MetadataReplaceMode.REPLACE_MISSING;
-
-        if (replaceAll) {
+        if (replaceMode == MetadataReplaceMode.REPLACE_ALL || replaceMode == MetadataReplaceMode.REPLACE_WHEN_PROVIDED) {
             if (!merge) e.getMoods().clear();
             e.getMoods().addAll(newMoods);
-        } else if (replaceMissing && e.getMoods().isEmpty()) {
+        } else if (replaceMode == MetadataReplaceMode.REPLACE_MISSING && e.getMoods().isEmpty()) {
             e.getMoods().addAll(newMoods);
         } else if (replaceMode == null) {
             if (!merge) e.getMoods().clear();
@@ -336,13 +335,10 @@ public class BookMetadataUpdater {
 
         if (newTags.isEmpty()) return;
 
-        boolean replaceAll = replaceMode == MetadataReplaceMode.REPLACE_ALL;
-        boolean replaceMissing = replaceMode == MetadataReplaceMode.REPLACE_MISSING;
-
-        if (replaceAll) {
+        if (replaceMode == MetadataReplaceMode.REPLACE_ALL || replaceMode == MetadataReplaceMode.REPLACE_WHEN_PROVIDED) {
             if (!merge) e.getTags().clear();
             e.getTags().addAll(newTags);
-        } else if (replaceMissing && e.getTags().isEmpty()) {
+        } else if (replaceMode == MetadataReplaceMode.REPLACE_MISSING && e.getTags().isEmpty()) {
             e.getTags().addAll(newTags);
         } else if (replaceMode == null) {
             if (!merge) e.getTags().clear();
@@ -393,6 +389,8 @@ public class BookMetadataUpdater {
                 Pair.of(m.getGoodreadsReviewCountLocked(), e::setGoodreadsReviewCountLocked),
                 Pair.of(m.getHardcoverRatingLocked(), e::setHardcoverRatingLocked),
                 Pair.of(m.getHardcoverReviewCountLocked(), e::setHardcoverReviewCountLocked),
+                Pair.of(m.getRanobedbIdLocked(), e::setRanobedbIdLocked),
+                Pair.of(m.getRanobedbRatingLocked(), e::setRanobedbRatingLocked),
                 Pair.of(m.getCoverLocked(), e::setCoverLocked),
                 Pair.of(m.getAuthorsLocked(), e::setAuthorsLocked),
                 Pair.of(m.getCategoriesLocked(), e::setCategoriesLocked),

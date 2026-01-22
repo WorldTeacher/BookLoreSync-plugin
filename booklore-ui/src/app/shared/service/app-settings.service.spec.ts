@@ -21,6 +21,8 @@ describe('AppSettingsService', () => {
     libraryMetadataRefreshOptions: [],
     uploadPattern: '',
     opdsServerEnabled: false,
+    komgaApiEnabled: false,
+    komgaGroupUnknown: false,
     remoteAuthEnabled: false,
     oidcEnabled: true,
     oidcProviderDetails: {
@@ -38,7 +40,6 @@ describe('AppSettingsService', () => {
       defaultPermissions: [],
       defaultLibraryIds: []
     },
-    cbxCacheSizeInMb: 0,
     maxFileUploadSizeInMb: 0,
     metadataProviderSettings: {
       amazon: {enabled: false, cookie: '', domain: ''},
@@ -47,7 +48,8 @@ describe('AppSettingsService', () => {
       hardcover: {enabled: false, apiKey: ''},
       comicvine: {enabled: false, apiKey: ''},
       douban: {enabled: false},
-      lubimyczytac: {enabled: false}
+      lubimyczytac: {enabled: false},
+      ranobedb: {enabled: false}
     },
     metadataMatchWeights: {
       title: 0,
@@ -73,6 +75,7 @@ describe('AppSettingsService', () => {
       doubanRating: 0,
       doubanReviewCount: 0,
       lubimyczytacRating: 0,
+      ranobedbRating: 0,
       coverImage: 0
     },
     metadataPersistenceSettings: {
@@ -104,7 +107,25 @@ describe('AppSettingsService', () => {
       smartCroppingEnabled: false
     },
     metadataDownloadOnBookdrop: false,
-    telemetryEnabled: false
+    telemetryEnabled: false,
+    metadataProviderSpecificFields: {
+      asin: false,
+      amazonRating: false,
+      amazonReviewCount: false,
+      googleId: false,
+      goodreadsId: false,
+      goodreadsRating: false,
+      goodreadsReviewCount: false,
+      hardcoverId: false,
+      hardcoverBookId: false,
+      hardcoverRating: false,
+      hardcoverReviewCount: false,
+      comicvineId: false,
+      lubimyczytacId: false,
+      lubimyczytacRating: false,
+      ranobedbId: false,
+      ranobedbRating: false
+    }
   };
 
   const mockPublicSettings: PublicAppSettings = {
@@ -372,6 +393,8 @@ describe('AppSettingsService - API Contract Tests', () => {
         libraryMetadataRefreshOptions: [],
         uploadPattern: '',
         opdsServerEnabled: false,
+        komgaApiEnabled: false,
+        komgaGroupUnknown: false,
         remoteAuthEnabled: false,
         oidcEnabled: true,
         oidcProviderDetails: {
@@ -389,7 +412,6 @@ describe('AppSettingsService - API Contract Tests', () => {
           defaultPermissions: [],
           defaultLibraryIds: []
         },
-        cbxCacheSizeInMb: 0,
         maxFileUploadSizeInMb: 0,
         metadataProviderSettings: {
           amazon: {enabled: false, cookie: '', domain: ''},
@@ -398,7 +420,8 @@ describe('AppSettingsService - API Contract Tests', () => {
           hardcover: {enabled: false, apiKey: ''},
           comicvine: {enabled: false, apiKey: ''},
           douban: {enabled: false},
-          lubimyczytac: {enabled: false}
+          lubimyczytac: {enabled: false},
+          ranobedb: {enabled: false}
         },
         metadataMatchWeights: {
           title: 0,
@@ -424,6 +447,7 @@ describe('AppSettingsService - API Contract Tests', () => {
           doubanRating: 0,
           doubanReviewCount: 0,
           lubimyczytacRating: 0,
+          ranobedbRating: 0,
           coverImage: 0
         },
         metadataPersistenceSettings: {
@@ -455,7 +479,25 @@ describe('AppSettingsService - API Contract Tests', () => {
           smartCroppingEnabled: false
         },
         metadataDownloadOnBookdrop: false,
-        telemetryEnabled: false
+        telemetryEnabled: false,
+        metadataProviderSpecificFields: {
+          asin: false,
+          amazonRating: false,
+          amazonReviewCount: false,
+          googleId: false,
+          goodreadsId: false,
+          goodreadsRating: false,
+          goodreadsReviewCount: false,
+          hardcoverId: false,
+          hardcoverBookId: false,
+          hardcoverRating: false,
+          hardcoverReviewCount: false,
+          comicvineId: false,
+          lubimyczytacId: false,
+          lubimyczytacRating: false,
+          ranobedbId: false,
+          ranobedbRating: false
+        }
       };
       httpClientMock.get.mockReturnValue(of(mockSettings));
       service['fetchAppSettings']().subscribe(settings => {

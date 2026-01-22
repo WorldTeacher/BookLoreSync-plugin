@@ -75,6 +75,23 @@ export class MetadataSearcherComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.subscription.add(
+      this.appSettings$
+        .pipe(filter(settings => !!settings))
+        .subscribe(settings => {
+          const providerSettings = settings!.metadataProviderSettings ?? {};
+          this.providers = Object.entries(providerSettings)
+            .filter(([_, value]) => !!value && typeof value === 'object' && 'enabled' in value && (value as any).enabled)
+            .map(([key]) => key.charAt(0).toUpperCase() + key.slice(1));
+
+          const currentProviders = this.form.get('provider')?.value || [];
+          const validProviders = currentProviders.filter((p: string) => this.providers.includes(p));
+          if (validProviders.length !== currentProviders.length) {
+            this.form.patchValue({provider: validProviders.length > 0 ? validProviders : null});
+          }
+        })
+    );
+
+    this.subscription.add(
       this.route.paramMap
         .pipe(
           switchMap(params => {
@@ -94,11 +111,6 @@ export class MetadataSearcherComponent implements OnInit, OnDestroy {
           distinctUntilChanged(([prevBook], [currBook]) => prevBook?.id === currBook?.id)
         )
         .subscribe(([book, settings]) => {
-          const providerSettings = settings?.metadataProviderSettings ?? {};
-          this.providers = Object.entries(providerSettings)
-            .filter(([_, value]) => !!value && typeof value === 'object' && 'enabled' in value && (value as any).enabled)
-            .map(([key]) => key.charAt(0).toUpperCase() + key.slice(1));
-
           this.resetFormFromBook(book!);
 
           if (settings!.autoBookSearch) {
@@ -127,6 +139,7 @@ export class MetadataSearcherComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.cancelRequest$.next();
+    this.cancelRequest$.complete();
     this.subscription.unsubscribe();
     this.selectedFetchedMetadata$.complete();
   }
@@ -252,6 +265,7 @@ export class MetadataSearcherComponent implements OnInit, OnDestroy {
     if (metadata['doubanId']) return 'douban';
     if (metadata['lubimyczytacId']) return 'lubimyczytac';
     if (metadata.comicvineId) return 'comicvine';
+    if (metadata.ranobedbId) return 'ranobedb';
     return null;
   }
 
@@ -362,6 +376,8 @@ export class MetadataSearcherComponent implements OnInit, OnDestroy {
       }
       const name = metadata.seriesName;
       return `<a href="https://comicvine.gamespot.com/volume/${metadata.comicvineId}" target="_blank">Comicvine</a>`;
+    } else if (metadata.ranobedbId) {
+      return `<a href="https://ranobedb.org/book/${metadata.ranobedbId}" target="_blank">RanobeDB</a>`;
     }
     throw new Error("No provider ID found in metadata.");
   }

@@ -1,48 +1,33 @@
 package com.adityachandel.booklore.service.metadata.extractor;
 
-import java.awt.Color;
-import java.awt.Font;
-import java.awt.FontMetrics;
-import java.awt.Graphics2D;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Enumeration;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
-
-import javax.imageio.ImageIO;
-import javax.xml.XMLConstants;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
-
-import org.xml.sax.SAXException;
-
+import com.adityachandel.booklore.model.dto.BookMetadata;
+import com.adityachandel.booklore.util.ArchiveUtils;
+import com.github.junrar.Archive;
+import com.github.junrar.rarfile.FileHeader;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.compress.archivers.sevenz.SevenZArchiveEntry;
 import org.apache.commons.compress.archivers.sevenz.SevenZFile;
 import org.apache.commons.io.FilenameUtils;
 import org.springframework.stereotype.Component;
 import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
-import com.adityachandel.booklore.model.dto.BookMetadata;
-import com.github.junrar.Archive;
-import com.github.junrar.rarfile.FileHeader;
-
-import lombok.extern.slf4j.Slf4j;
+import javax.imageio.ImageIO;
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.*;
+import java.time.LocalDate;
+import java.util.*;
+import java.util.List;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 @Slf4j
 @Component
@@ -54,15 +39,10 @@ public class CbxMetadataExtractor implements FileMetadataExtractor {
     @Override
     public BookMetadata extractMetadata(File file) {
         String baseName = FilenameUtils.getBaseName(file.getName());
-        String lowerName = file.getName().toLowerCase();
-
-        // Non-archive (fallback)
-        if (!lowerName.endsWith(".cbz") && !lowerName.endsWith(".cbr") && !lowerName.endsWith(".cb7")) {
-            return BookMetadata.builder().title(baseName).build();
-        }
+        ArchiveUtils.ArchiveType type = ArchiveUtils.detectArchiveType(file);
 
         // CBZ path (ZIP)
-        if (lowerName.endsWith(".cbz")) {
+        if (type == ArchiveUtils.ArchiveType.ZIP) {
             try (ZipFile zipFile = new ZipFile(file)) {
                 ZipEntry entry = findComicInfoEntry(zipFile);
                 if (entry == null) {
@@ -79,7 +59,7 @@ public class CbxMetadataExtractor implements FileMetadataExtractor {
         }
 
         // CB7 path (7z)
-        if (lowerName.endsWith(".cb7")) {
+        if (type == ArchiveUtils.ArchiveType.SEVEN_ZIP) {
             try (SevenZFile sevenZ = SevenZFile.builder().setFile(file).get()) {
                 SevenZArchiveEntry entry = findSevenZComicInfoEntry(sevenZ);
                 if (entry == null) {
@@ -100,6 +80,7 @@ public class CbxMetadataExtractor implements FileMetadataExtractor {
         }
 
         // CBR path (RAR)
+    if (type == ArchiveUtils.ArchiveType.RAR) {
         try (Archive archive = new Archive(file)) {
             try {
                 FileHeader header = findComicInfoHeader(archive);
@@ -120,7 +101,8 @@ public class CbxMetadataExtractor implements FileMetadataExtractor {
             }
         } catch (Exception ignore) {
         }
-        return BookMetadata.builder().title(baseName).build();
+    }
+    return BookMetadata.builder().title(baseName).build();
     }
 
     private ZipEntry findComicInfoEntry(ZipFile zipFile) {
@@ -190,9 +172,7 @@ public class CbxMetadataExtractor implements FileMetadataExtractor {
         );
         builder.publisher(getTextContent(document, "Publisher"));
 
-        String series = getTextContent(document, "Series");
-        String volume = getTextContent(document, "Volume");
-        builder.seriesName(volume == null || volume.isBlank() ? series : String.format("%s (%s)", series, volume));
+        builder.seriesName(getTextContent(document, "Series"));
         builder.seriesNumber(parseFloat(getTextContent(document, "Number")));
         builder.seriesTotal(parseInteger(getTextContent(document, "Count")));
         builder.publishedDate(
@@ -371,15 +351,10 @@ public class CbxMetadataExtractor implements FileMetadataExtractor {
 
     @Override
     public byte[] extractCover(File file) {
-        String lowerName = file.getName().toLowerCase();
-
-        // Non-archive fallback
-        if (!lowerName.endsWith(".cbz") && !lowerName.endsWith(".cbr") && !lowerName.endsWith(".cb7")) {
-            return generatePlaceholderCover(250, 350);
-        }
+        ArchiveUtils.ArchiveType type = ArchiveUtils.detectArchiveType(file);
 
         // CBZ path
-        if (lowerName.endsWith(".cbz")) {
+        if (type == ArchiveUtils.ArchiveType.ZIP) {
             try (ZipFile zipFile = new ZipFile(file)) {
                 // Try front cover via ComicInfo
                 ZipEntry coverEntry = findFrontCoverEntry(zipFile);
@@ -408,7 +383,7 @@ public class CbxMetadataExtractor implements FileMetadataExtractor {
         }
 
         // CB7 path
-        if (lowerName.endsWith(".cb7")) {
+        if (type == ArchiveUtils.ArchiveType.SEVEN_ZIP) {
             try (SevenZFile sevenZ = SevenZFile.builder().setFile(file).get()) {
                 // Try via ComicInfo.xml first
                 SevenZArchiveEntry ci = findSevenZComicInfoEntry(sevenZ);
@@ -462,8 +437,9 @@ public class CbxMetadataExtractor implements FileMetadataExtractor {
         }
 
         // CBR path
-        try (Archive archive = new Archive(file)) {
-            try {
+      if (type == ArchiveUtils.ArchiveType.RAR) {
+      try (Archive archive = new Archive(file)) {
+          try {
 
                 // Try via ComicInfo.xml first
                 FileHeader comicInfo = findComicInfoHeader(archive);
@@ -516,6 +492,7 @@ public class CbxMetadataExtractor implements FileMetadataExtractor {
             }
         } catch (Exception ignore) {
         }
+    }
 
         return generatePlaceholderCover(250, 350);
     }

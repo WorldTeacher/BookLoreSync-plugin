@@ -26,6 +26,7 @@ import {Tooltip} from "primeng/tooltip";
 import {Divider} from "primeng/divider";
 import {animate, style, transition, trigger} from "@angular/animations";
 import {Component, inject, OnDestroy} from '@angular/core';
+import {BookCardOverlayPreferenceService} from '../book-browser/book-card-overlay-preference.service';
 
 @Component({
   selector: "app-series-page",
@@ -79,6 +80,7 @@ export class SeriesPageComponent implements OnDestroy {
   private dialogHelperService = inject(BookDialogHelperService);
   protected taskHelperService = inject(TaskHelperService);
   private messageService = inject(MessageService);
+  protected bookCardOverlayPreferenceService = inject(BookCardOverlayPreferenceService);
   protected appSettingsService = inject(AppSettingsService);
 
   tab: string = "view";

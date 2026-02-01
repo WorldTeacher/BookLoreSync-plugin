@@ -37,6 +37,7 @@ public enum ApiError {
     FAILED_TO_REGENERATE_COVER(HttpStatus.BAD_REQUEST, "Failed to regenerate cover"),
     FAILED_TO_DOWNLOAD_FILE(HttpStatus.INTERNAL_SERVER_ERROR, "Error while downloading file, bookId: %s"),
     INVALID_REFRESH_TYPE(HttpStatus.BAD_REQUEST, "The refresh type is invalid"),
+    INVALID_VERIFICATION_TYPE(HttpStatus.BAD_REQUEST, "The verification type is invalid"),
     METADATA_LOCKED(HttpStatus.FORBIDDEN, "Attempt to update locked metadata"),
     USERNAME_ALREADY_TAKEN(HttpStatus.BAD_REQUEST, "Username already taken: %s"),
     USER_NOT_FOUND(HttpStatus.BAD_REQUEST, "User not found: %s"),

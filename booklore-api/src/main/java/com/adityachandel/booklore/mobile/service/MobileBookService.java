@@ -2,14 +2,20 @@ package com.adityachandel.booklore.mobile.service;
 
 import com.adityachandel.booklore.config.security.service.AuthenticationService;
 import com.adityachandel.booklore.exception.ApiError;
-import com.adityachandel.booklore.mobile.dto.*;
+import com.adityachandel.booklore.mobile.dto.MobileBookDetail;
+import com.adityachandel.booklore.mobile.dto.MobileBookSummary;
+import com.adityachandel.booklore.mobile.dto.MobilePageResponse;
 import com.adityachandel.booklore.mobile.mapper.MobileBookMapper;
 import com.adityachandel.booklore.mobile.specification.MobileBookSpecification;
+import com.adityachandel.booklore.model.dto.Book;
 import com.adityachandel.booklore.model.dto.BookLoreUser;
 import com.adityachandel.booklore.model.dto.Library;
 import com.adityachandel.booklore.model.entity.*;
 import com.adityachandel.booklore.model.enums.ReadStatus;
-import com.adityachandel.booklore.repository.*;
+import com.adityachandel.booklore.repository.BookRepository;
+import com.adityachandel.booklore.repository.ShelfRepository;
+import com.adityachandel.booklore.repository.UserBookFileProgressRepository;
+import com.adityachandel.booklore.repository.UserBookProgressRepository;
 import com.adityachandel.booklore.service.opds.MagicShelfBookService;
 import lombok.AllArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -116,8 +122,8 @@ public class MobileBookService {
         Long userId = user.getId();
         Set<Long> accessibleLibraryIds = getAccessibleLibraryIds(user);
 
-        int pageNum = page != null && page >= 0 ? page : 0;
-        int pageSize = size != null && size > 0 ? Math.min(size, MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
+        int pageNum = validatePageNumber(page);
+        int pageSize = validatePageSize(size);
 
         Pageable pageable = PageRequest.of(pageNum, pageSize, Sort.by(Sort.Direction.DESC, "addedOn"));
 
@@ -129,17 +135,7 @@ public class MobileBookService {
         );
 
         Page<BookEntity> bookPage = bookRepository.findAll(spec, pageable);
-
-        Set<Long> bookIds = bookPage.getContent().stream()
-                .map(BookEntity::getId)
-                .collect(Collectors.toSet());
-        Map<Long, UserBookProgressEntity> progressMap = getProgressMap(userId, bookIds);
-
-        List<MobileBookSummary> summaries = bookPage.getContent().stream()
-                .map(book -> mobileBookMapper.toSummary(book, progressMap.get(book.getId())))
-                .collect(Collectors.toList());
-
-        return MobilePageResponse.of(summaries, pageNum, pageSize, bookPage.getTotalElements());
+        return buildPageResponse(bookPage, userId, pageNum, pageSize);
     }
 
     @Transactional(readOnly = true)
@@ -148,7 +144,7 @@ public class MobileBookService {
         Long userId = user.getId();
         Set<Long> accessibleLibraryIds = getAccessibleLibraryIds(user);
 
-        int maxItems = limit != null && limit > 0 ? Math.min(limit, MAX_PAGE_SIZE) : 10;
+        int maxItems = validateLimit(limit, 10);
 
         Specification<BookEntity> spec = MobileBookSpecification.combine(
                 MobileBookSpecification.notDeleted(),
@@ -158,11 +154,7 @@ public class MobileBookService {
         );
 
         List<BookEntity> books = bookRepository.findAll(spec);
-
-        Set<Long> bookIds = books.stream()
-                .map(BookEntity::getId)
-                .collect(Collectors.toSet());
-        Map<Long, UserBookProgressEntity> progressMap = getProgressMap(userId, bookIds);
+        Map<Long, UserBookProgressEntity> progressMap = getProgressMapForBooks(userId, books);
 
         return books.stream()
                 .filter(book -> progressMap.containsKey(book.getId()))
@@ -185,7 +177,7 @@ public class MobileBookService {
         Long userId = user.getId();
         Set<Long> accessibleLibraryIds = getAccessibleLibraryIds(user);
 
-        int maxItems = limit != null && limit > 0 ? Math.min(limit, MAX_PAGE_SIZE) : 10;
+        int maxItems = validateLimit(limit, 10);
 
         Specification<BookEntity> spec = MobileBookSpecification.combine(
                 MobileBookSpecification.notDeleted(),
@@ -196,15 +188,41 @@ public class MobileBookService {
 
         Pageable pageable = PageRequest.of(0, maxItems, Sort.by(Sort.Direction.DESC, "addedOn"));
         Page<BookEntity> bookPage = bookRepository.findAll(spec, pageable);
-
-        Set<Long> bookIds = bookPage.getContent().stream()
-                .map(BookEntity::getId)
-                .collect(Collectors.toSet());
-        Map<Long, UserBookProgressEntity> progressMap = getProgressMap(userId, bookIds);
+        Map<Long, UserBookProgressEntity> progressMap = getProgressMapForBooks(userId, bookPage.getContent());
 
         return bookPage.getContent().stream()
                 .map(book -> mobileBookMapper.toSummary(book, progressMap.get(book.getId())))
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public MobilePageResponse<MobileBookSummary> getRandomBooks(
+            Integer page,
+            Integer size,
+            Long libraryId) {
+
+        BookLoreUser user = authenticationService.getAuthenticatedUser();
+        Long userId = user.getId();
+        Set<Long> accessibleLibraryIds = getAccessibleLibraryIds(user);
+
+        int pageNum = validatePageNumber(page);
+        int pageSize = validatePageSize(size);
+
+        Specification<BookEntity> spec = buildBaseSpecification(accessibleLibraryIds, libraryId);
+
+        long totalElements = bookRepository.count(spec);
+
+        if (totalElements == 0) {
+            return MobilePageResponse.of(Collections.emptyList(), pageNum, pageSize, 0L);
+        }
+
+        long maxOffset = Math.max(0, totalElements - pageSize);
+        int randomOffset = (int) (Math.random() * (maxOffset + 1));
+
+        Pageable pageable = PageRequest.of(randomOffset / pageSize, pageSize);
+        Page<BookEntity> bookPage = bookRepository.findAll(spec, pageable);
+
+        return buildPageResponse(bookPage, userId, pageNum, pageSize);
     }
 
     @Transactional(readOnly = true)
@@ -216,28 +234,25 @@ public class MobileBookService {
         BookLoreUser user = authenticationService.getAuthenticatedUser();
         Long userId = user.getId();
 
-        int pageNum = page != null && page >= 0 ? page : 0;
-        int pageSize = size != null && size > 0 ? Math.min(size, MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
+        int pageNum = validatePageNumber(page);
+        int pageSize = validatePageSize(size);
 
         var booksPage = magicShelfBookService.getBooksByMagicShelfId(userId, magicShelfId, pageNum, pageSize);
 
         Set<Long> bookIds = booksPage.getContent().stream()
-                .map(book -> book.getId())
+                .map(Book::getId)
                 .collect(Collectors.toSet());
-        Map<Long, UserBookProgressEntity> progressMap = getProgressMap(userId, bookIds);
 
-        List<MobileBookSummary> summaries = booksPage.getContent().stream()
-                .map(book -> {
-                    BookEntity bookEntity = bookRepository.findById(book.getId()).orElse(null);
-                    if (bookEntity == null) {
-                        return null;
-                    }
-                    if (bookEntity.getIsPhysical() != null && bookEntity.getIsPhysical()) {
-                        return null;
-                    }
-                    return mobileBookMapper.toSummary(bookEntity, progressMap.get(book.getId()));
-                })
-                .filter(summary -> summary != null)
+        if (bookIds.isEmpty()) {
+            return MobilePageResponse.of(Collections.emptyList(), pageNum, pageSize, 0L);
+        }
+
+        List<BookEntity> bookEntities = bookRepository.findAllById(bookIds);
+        Map<Long, UserBookProgressEntity> progressMap = getProgressMapForBooks(userId, bookEntities);
+
+        List<MobileBookSummary> summaries = bookEntities.stream()
+                .filter(bookEntity -> bookEntity.getIsPhysical() == null || !bookEntity.getIsPhysical())
+                .map(bookEntity -> mobileBookMapper.toSummary(bookEntity, progressMap.get(bookEntity.getId())))
                 .collect(Collectors.toList());
 
         return MobilePageResponse.of(summaries, pageNum, pageSize, booksPage.getTotalElements());
@@ -245,20 +260,7 @@ public class MobileBookService {
 
     @Transactional
     public void updateReadStatus(Long bookId, ReadStatus status) {
-        BookLoreUser user = authenticationService.getAuthenticatedUser();
-        Long userId = user.getId();
-        Set<Long> accessibleLibraryIds = getAccessibleLibraryIds(user);
-
-        BookEntity book = bookRepository.findById(bookId)
-                .orElseThrow(() -> ApiError.BOOK_NOT_FOUND.createException(bookId));
-
-        if (!accessibleLibraryIds.contains(book.getLibrary().getId())) {
-            throw ApiError.FORBIDDEN.createException("Access denied to this book");
-        }
-
-        UserBookProgressEntity progress = userBookProgressRepository
-                .findByUserIdAndBookId(userId, bookId)
-                .orElseGet(() -> createNewProgress(userId, book));
+        UserBookProgressEntity progress = validateAccessAndGetProgress(bookId);
 
         progress.setReadStatus(status);
         progress.setReadStatusModifiedTime(Instant.now());
@@ -272,6 +274,13 @@ public class MobileBookService {
 
     @Transactional
     public void updatePersonalRating(Long bookId, Integer rating) {
+        UserBookProgressEntity progress = validateAccessAndGetProgress(bookId);
+
+        progress.setPersonalRating(rating);
+        userBookProgressRepository.save(progress);
+    }
+
+    private UserBookProgressEntity validateAccessAndGetProgress(Long bookId) {
         BookLoreUser user = authenticationService.getAuthenticatedUser();
         Long userId = user.getId();
         Set<Long> accessibleLibraryIds = getAccessibleLibraryIds(user);
@@ -279,16 +288,17 @@ public class MobileBookService {
         BookEntity book = bookRepository.findById(bookId)
                 .orElseThrow(() -> ApiError.BOOK_NOT_FOUND.createException(bookId));
 
-        if (!accessibleLibraryIds.contains(book.getLibrary().getId())) {
-            throw ApiError.FORBIDDEN.createException("Access denied to this book");
-        }
+        validateLibraryAccess(accessibleLibraryIds, book.getLibrary().getId());
 
-        UserBookProgressEntity progress = userBookProgressRepository
+        return userBookProgressRepository
                 .findByUserIdAndBookId(userId, bookId)
                 .orElseGet(() -> createNewProgress(userId, book));
+    }
 
-        progress.setPersonalRating(rating);
-        userBookProgressRepository.save(progress);
+    private void validateLibraryAccess(Set<Long> accessibleLibraryIds, Long libraryId) {
+        if (accessibleLibraryIds != null && !accessibleLibraryIds.contains(libraryId)) {
+            throw ApiError.FORBIDDEN.createException("Access denied to this book");
+        }
     }
 
     private UserBookProgressEntity createNewProgress(Long userId, BookEntity book) {
@@ -378,5 +388,61 @@ public class MobileBookService {
         };
 
         return Sort.by(direction, field);
+    }
+
+    private int validatePageNumber(Integer page) {
+        return page != null && page >= 0 ? page : 0;
+    }
+
+    private int validatePageSize(Integer size) {
+        return size != null && size > 0 ? Math.min(size, MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
+    }
+
+    private int validateLimit(Integer limit, int defaultValue) {
+        return limit != null && limit > 0 ? Math.min(limit, MAX_PAGE_SIZE) : defaultValue;
+    }
+
+    private Specification<BookEntity> buildBaseSpecification(Set<Long> accessibleLibraryIds, Long libraryId) {
+        List<Specification<BookEntity>> specs = new ArrayList<>();
+        specs.add(MobileBookSpecification.notDeleted());
+        specs.add(MobileBookSpecification.hasDigitalFile());
+
+        if (accessibleLibraryIds != null) {
+            if (libraryId != null && !accessibleLibraryIds.contains(libraryId)) {
+                throw ApiError.FORBIDDEN.createException("Access denied to library " + libraryId);
+            }
+            specs.add(libraryId != null
+                    ? MobileBookSpecification.inLibrary(libraryId)
+                    : MobileBookSpecification.inLibraries(accessibleLibraryIds));
+        } else if (libraryId != null) {
+            specs.add(MobileBookSpecification.inLibrary(libraryId));
+        }
+
+        return MobileBookSpecification.combine(specs.toArray(new Specification[0]));
+    }
+
+    private MobilePageResponse<MobileBookSummary> buildPageResponse(
+            Page<BookEntity> bookPage,
+            Long userId,
+            int pageNum,
+            int pageSize) {
+
+        Map<Long, UserBookProgressEntity> progressMap = getProgressMapForBooks(userId, bookPage.getContent());
+
+        List<MobileBookSummary> summaries = bookPage.getContent().stream()
+                .map(book -> mobileBookMapper.toSummary(book, progressMap.get(book.getId())))
+                .collect(Collectors.toList());
+
+        return MobilePageResponse.of(summaries, pageNum, pageSize, bookPage.getTotalElements());
+    }
+
+    private Map<Long, UserBookProgressEntity> getProgressMapForBooks(Long userId, List<BookEntity> books) {
+        if (books.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Set<Long> bookIds = books.stream()
+                .map(BookEntity::getId)
+                .collect(Collectors.toSet());
+        return getProgressMap(userId, bookIds);
     }
 }

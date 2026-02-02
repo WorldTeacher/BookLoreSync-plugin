@@ -32,7 +32,7 @@ public class MobileBookController {
     @GetMapping
     public ResponseEntity<MobilePageResponse<MobileBookSummary>> getBooks(
             @Parameter(description = "Page number (0-indexed)") @RequestParam(required = false, defaultValue = "0") Integer page,
-            @Parameter(description = "Page size (max 50)") @RequestParam(required = false, defaultValue = "20") Integer size,
+            @Parameter(description = "Page size (max 50)") @RequestParam(required = false, defaultValue = "50") Integer size,
             @Parameter(description = "Sort field (title, addedOn, lastReadTime, seriesName)") @RequestParam(required = false, defaultValue = "addedOn") String sort,
             @Parameter(description = "Sort direction (asc, desc)") @RequestParam(required = false, defaultValue = "desc") String dir,
             @Parameter(description = "Filter by library ID") @RequestParam(required = false) Long libraryId,
@@ -139,5 +139,20 @@ public class MobileBookController {
             @Parameter(description = "Page size (max 50)") @RequestParam(required = false, defaultValue = "20") Integer size) {
 
         return ResponseEntity.ok(mobileBookService.getBooksByMagicShelf(magicShelfId, page, size));
+    }
+
+    @Operation(summary = "Get random books",
+            description = "Retrieve a paginated list of random books from accessible libraries.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Random books retrieved successfully"),
+            @ApiResponse(responseCode = "403", description = "Access denied")
+    })
+    @GetMapping("/random")
+    public ResponseEntity<MobilePageResponse<MobileBookSummary>> getRandomBooks(
+            @Parameter(description = "Page number (0-indexed)") @RequestParam(required = false, defaultValue = "0") Integer page,
+            @Parameter(description = "Page size (max 50)") @RequestParam(required = false, defaultValue = "20") Integer size,
+            @Parameter(description = "Filter by library ID") @RequestParam(required = false) Long libraryId) {
+
+        return ResponseEntity.ok(mobileBookService.getRandomBooks(page, size, libraryId));
     }
 }

@@ -234,13 +234,32 @@ public interface MobileBookMapper {
 
         return book.getBookFiles().stream()
                 .filter(bf -> bf.getBookType() != null && bf.isBook())
-                .map(bf -> MobileBookFile.builder()
-                        .id(bf.getId())
-                        .bookType(bf.getBookType().name())
-                        .fileSizeKb(bf.getFileSizeKb())
-                        .fileName(bf.getFileName())
-                        .isPrimary(bf.getId().equals(primaryId))
-                        .build())
+                .map(bf -> {
+                    String extension = null;
+                    try {
+                        String fileName = bf.getFileName();
+                        int lastDot = fileName.lastIndexOf('.');
+                        if (lastDot > 0) {
+                            extension = fileName.substring(lastDot + 1);
+                        }
+                    } catch (Exception e) {
+                        // Handle case where extension cannot be extracted
+                    }
+
+                    return MobileBookFile.builder()
+                            .id(bf.getId())
+                            .bookId(bf.getBook() != null ? bf.getBook().getId() : null)
+                            .fileName(bf.getFileName())
+                            .isBook(bf.isBook())
+                            .folderBased(bf.isFolderBased())
+                            .bookType(bf.getBookType().name())
+                            .archiveType(bf.getArchiveType() != null ? bf.getArchiveType().name() : null)
+                            .fileSizeKb(bf.getFileSizeKb())
+                            .extension(extension)
+                            .addedOn(bf.getAddedOn())
+                            .isPrimary(bf.getId().equals(primaryId))
+                            .build();
+                })
                 .collect(Collectors.toList());
     }
 

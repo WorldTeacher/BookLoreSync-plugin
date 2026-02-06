@@ -310,7 +310,7 @@ export class BookService {
         break;
 
       case 'AUDIOBOOK':
-        baseUrl = 'audiobook-reader';
+        baseUrl = 'audiobook-player';
         break;
     }
 
@@ -355,10 +355,10 @@ export class BookService {
 
   downloadAllFiles(book: Book): void {
     const downloadUrl = `${this.url}/${book.id}/download-all`;
-    const fileName = book.metadata?.title
+    const filename = book.metadata?.title
       ? `${book.metadata.title.replace(/[^a-zA-Z0-9\-_]/g, '_')}.zip`
       : `book-${book.id}.zip`;
-    this.fileDownloadService.downloadFile(downloadUrl, fileName);
+    this.fileDownloadService.downloadFile(downloadUrl, filename);
   }
 
   deleteAdditionalFile(bookId: number, fileId: number): Observable<void> {
@@ -527,8 +527,8 @@ export class BookService {
       ...(book.alternativeFormats || []),
       ...(book.supplementaryFiles || [])
     ].find((f: AdditionalFile) => f.id === fileId);
-    const downloadUrl = `${this.url}/${book!.id}/files/${fileId}/download`;
-    this.fileDownloadService.downloadFile(downloadUrl, additionalFile!.fileName!);
+    const downloadUrl = `${this.url}/${book.id}/files/${fileId}/download`;
+    this.fileDownloadService.downloadFile(downloadUrl, additionalFile?.fileName ?? 'file');
   }
 
   /*------------------ Progress & Status Tracking ------------------*/
@@ -698,6 +698,35 @@ export class BookService {
 
   regenerateCoversForBooks(bookIds: number[]): Observable<void> {
     return this.http.post<void>(`${this.url}/bulk-regenerate-covers`, {bookIds});
+  }
+
+  uploadAudiobookCoverFromUrl(bookId: number, url: string): Observable<BookMetadata> {
+    return this.http.post<BookMetadata>(`${this.url}/${bookId}/metadata/audiobook-cover/from-url`, {url});
+  }
+
+  uploadAudiobookCoverFromFile(bookId: number, file: File): Observable<void> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http.post<void>(`${this.url}/${bookId}/metadata/audiobook-cover/upload`, formData);
+  }
+
+  getUploadAudiobookCoverUrl(bookId: number): string {
+    return this.url + '/' + bookId + "/metadata/audiobook-cover/upload";
+  }
+
+  regenerateAudiobookCover(bookId: number): Observable<void> {
+    return this.http.post<void>(`${this.url}/${bookId}/regenerate-audiobook-cover`, {});
+  }
+
+  generateCustomAudiobookCover(bookId: number): Observable<void> {
+    return this.http.post<void>(`${this.url}/${bookId}/generate-custom-audiobook-cover`, {});
+  }
+
+  supportsDualCovers(book: Book): boolean {
+    const allFiles = [book.primaryFile, ...(book.alternativeFormats || [])].filter(f => f?.bookType);
+    const hasAudiobook = allFiles.some(f => f!.bookType === 'AUDIOBOOK');
+    const hasEbook = allFiles.some(f => f!.bookType !== 'AUDIOBOOK');
+    return hasAudiobook && hasEbook;
   }
 
   bulkUploadCover(bookIds: number[], file: File): Observable<void> {

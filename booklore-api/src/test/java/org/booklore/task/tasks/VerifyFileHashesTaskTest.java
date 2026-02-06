@@ -1,14 +1,14 @@
-package com.adityachandel.booklore.task.tasks;
+package org.booklore.task.tasks;
 
-import com.adityachandel.booklore.exception.APIException;
-import com.adityachandel.booklore.model.dto.BookLoreUser;
-import com.adityachandel.booklore.model.dto.request.FileHashVerificationRequest;
-import com.adityachandel.booklore.model.dto.request.TaskCreateRequest;
-import com.adityachandel.booklore.model.dto.response.TaskCreateResponse;
-import com.adityachandel.booklore.model.enums.TaskType;
-import com.adityachandel.booklore.service.NotificationService;
-import com.adityachandel.booklore.service.file.FileHashVerificationService;
-import com.adityachandel.booklore.task.TaskStatus;
+import org.booklore.exception.APIException;
+import org.booklore.model.dto.BookLoreUser;
+import org.booklore.model.dto.request.FileHashVerificationRequest;
+import org.booklore.model.dto.request.TaskCreateRequest;
+import org.booklore.model.dto.response.TaskCreateResponse;
+import org.booklore.model.enums.TaskType;
+import org.booklore.service.NotificationService;
+import org.booklore.service.file.FileHashVerificationService;
+import org.booklore.task.TaskStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

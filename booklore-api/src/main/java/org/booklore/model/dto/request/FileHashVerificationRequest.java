@@ -1,4 +1,4 @@
-package com.adityachandel.booklore.model.dto.request;
+package org.booklore.model.dto.request;
 
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;

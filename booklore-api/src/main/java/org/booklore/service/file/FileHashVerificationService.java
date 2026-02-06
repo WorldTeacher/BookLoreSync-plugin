@@ -1,13 +1,13 @@
-package com.adityachandel.booklore.service.file;
+package org.booklore.service.file;
 
-import com.adityachandel.booklore.exception.ApiError;
-import com.adityachandel.booklore.model.dto.request.FileHashVerificationOptions;
-import com.adityachandel.booklore.model.dto.request.FileHashVerificationRequest;
-import com.adityachandel.booklore.model.entity.BookEntity;
-import com.adityachandel.booklore.model.entity.BookFileEntity;
-import com.adityachandel.booklore.model.entity.LibraryEntity;
-import com.adityachandel.booklore.repository.BookRepository;
-import com.adityachandel.booklore.repository.LibraryRepository;
+import org.booklore.exception.ApiError;
+import org.booklore.model.dto.request.FileHashVerificationOptions;
+import org.booklore.model.dto.request.FileHashVerificationRequest;
+import org.booklore.model.entity.BookEntity;
+import org.booklore.model.entity.BookFileEntity;
+import org.booklore.model.entity.LibraryEntity;
+import org.booklore.repository.BookRepository;
+import org.booklore.repository.LibraryRepository;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;

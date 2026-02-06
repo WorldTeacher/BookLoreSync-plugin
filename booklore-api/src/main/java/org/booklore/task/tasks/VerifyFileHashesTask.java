@@ -1,21 +1,21 @@
-package com.adityachandel.booklore.task.tasks;
+package org.booklore.task.tasks;
 
-import com.adityachandel.booklore.model.dto.BookLoreUser;
-import com.adityachandel.booklore.model.dto.request.FileHashVerificationRequest;
-import com.adityachandel.booklore.model.dto.request.TaskCreateRequest;
-import com.adityachandel.booklore.model.dto.response.TaskCreateResponse;
-import com.adityachandel.booklore.model.enums.TaskType;
-import com.adityachandel.booklore.model.websocket.TaskProgressPayload;
-import com.adityachandel.booklore.model.websocket.Topic;
-import com.adityachandel.booklore.service.NotificationService;
-import com.adityachandel.booklore.service.file.FileHashVerificationService;
-import com.adityachandel.booklore.task.TaskStatus;
+import org.booklore.model.dto.BookLoreUser;
+import org.booklore.model.dto.request.FileHashVerificationRequest;
+import org.booklore.model.dto.request.TaskCreateRequest;
+import org.booklore.model.dto.response.TaskCreateResponse;
+import org.booklore.model.enums.TaskType;
+import org.booklore.model.websocket.TaskProgressPayload;
+import org.booklore.model.websocket.Topic;
+import org.booklore.service.NotificationService;
+import org.booklore.service.file.FileHashVerificationService;
+import org.booklore.task.TaskStatus;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import static com.adityachandel.booklore.model.enums.UserPermission.IS_ADMIN;
-import static com.adityachandel.booklore.exception.ApiError.PERMISSION_DENIED;
+import static org.booklore.model.enums.UserPermission.IS_ADMIN;
+import static org.booklore.exception.ApiError.PERMISSION_DENIED;
 
 @AllArgsConstructor
 @Component

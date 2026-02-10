@@ -1,0 +1,50 @@
+# included templates
+include:
+  # semantic-release template
+  - component: "$CI_SERVER_FQDN/to-be-continuous/semantic-release/gitlab-ci-semrel@4.0"
+    inputs:
+      changelog-enabled: true
+      auto-release-enabled: true
+
+# secret variables
+# (define the variables below in your GitLab group/project variables)
+# GITLAB_TOKEN: A GitLab 'project access token' or 'personal access token' with `api`, `read_repository` and `write repository` scopes.
+# SEMREL_GPG_SIGNKEY: Path to the GPG signkey exported with `gpg --armor --export-secret-key`.
+
+# your pipeline stages
+stages:
+  - build
+  - test
+  - package-build
+  - package-test
+  - infra
+  - deploy
+  - acceptance
+  - publish
+  - infra-prod
+  - production
+zip-koplugin-release:
+  stage: publish
+  image: alpine:latest
+  rules:
+    # run only for tags (semantic-release creates these)
+    - if: "$CI_COMMIT_TAG"
+  before_script:
+    - apk add --no-cache zip curl bash git
+  script:
+    - echo "Generating version information from tag $CI_COMMIT_TAG"
+    - bash generate-version.sh
+    - echo "Creating koplugin release archive"
+    - cd bookloresync.koplugin && zip -r ../bookloresync.koplugin.zip *.lua
+    - cd ..
+  artifacts:
+    paths:
+      - bookloresync.koplugin.zip
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "Release $CI_COMMIT_TAG"
+    description: "KOReader plugin release $CI_COMMIT_TAG"
+    assets:
+      links:
+        - name: "bookloresync.koplugin.zip"
+          url: "$CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/raw/bookloresync.koplugin.zip"

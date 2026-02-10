@@ -1,12 +1,13 @@
 package org.booklore.model.dto;
 
-import org.booklore.model.dto.settings.SidebarSortOption;
-import org.booklore.model.enums.*;
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.booklore.model.dto.settings.SidebarSortOption;
+import org.booklore.model.enums.*;
 
 import java.util.List;
 
@@ -76,12 +77,14 @@ public class BookLoreUser {
         public boolean koReaderEnabled;
         public boolean enableSeriesView;
         public boolean autoSaveMetadata;
+        public List<String> visibleFilters;
         public DashboardConfig dashboardConfig;
 
         @Data
         @Builder
         @AllArgsConstructor
         @NoArgsConstructor
+        @JsonIgnoreProperties(ignoreUnknown = true)
         public static class TableColumnPreference {
             private String field;
             private Boolean visible;

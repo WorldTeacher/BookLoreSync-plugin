@@ -5,6 +5,8 @@ import {Observable} from 'rxjs';
 import {map} from 'rxjs/operators';
 import {AccordionModule} from 'primeng/accordion';
 import {MessageService} from 'primeng/api';
+import {Button} from 'primeng/button';
+import {Tooltip} from 'primeng/tooltip';
 
 import {Library} from '../../book/model/library.model';
 import {LibraryService} from '../../book/service/library.service';
@@ -13,11 +15,12 @@ import {AppSettingKey, AppSettings} from '../../../shared/model/app-settings.mod
 import {AppSettingsService} from '../../../shared/service/app-settings.service';
 import {ExternalDocLinkComponent} from '../../../shared/components/external-doc-link/external-doc-link.component';
 import {MetadataAdvancedFetchOptionsComponent} from '../../metadata/component/metadata-options-dialog/metadata-advanced-fetch-options/metadata-advanced-fetch-options.component';
+import {SidecarService} from '../../metadata/service/sidecar.service';
 
 @Component({
   selector: 'app-library-metadata-settings-component',
   standalone: true,
-  imports: [CommonModule, FormsModule, MetadataAdvancedFetchOptionsComponent, AccordionModule, ExternalDocLinkComponent],
+  imports: [CommonModule, FormsModule, MetadataAdvancedFetchOptionsComponent, AccordionModule, ExternalDocLinkComponent, Button, Tooltip],
   templateUrl: './library-metadata-settings.component.html',
   styleUrls: ['./library-metadata-settings.component.scss']
 })
@@ -25,6 +28,7 @@ export class LibraryMetadataSettingsComponent implements OnInit {
   private libraryService = inject(LibraryService);
   private appSettingsService = inject(AppSettingsService);
   private messageService = inject(MessageService);
+  private sidecarService = inject(SidecarService);
 
   libraries$: Observable<Library[]> = this.libraryService.libraryState$.pipe(
     map(state => state.libraries || [])
@@ -33,11 +37,15 @@ export class LibraryMetadataSettingsComponent implements OnInit {
   defaultMetadataOptions: MetadataRefreshOptions = this.getDefaultMetadataOptions();
   libraryMetadataOptions: Record<number, MetadataRefreshOptions> = {};
   activePanel: number | null = null;
+  sidecarExporting: Record<number, boolean> = {};
+  sidecarImporting: Record<number, boolean> = {};
+  private cachedDefaultOptions: Record<number, MetadataRefreshOptions> = {};
 
   ngOnInit() {
     this.appSettingsService.appSettings$.subscribe(appSettings => {
       if (appSettings) {
         this.defaultMetadataOptions = appSettings.defaultMetadataRefreshOptions;
+        this.cachedDefaultOptions = {};
         this.initializeLibraryOptions(appSettings);
         this.updateLibraryOptionsFromSettings(appSettings);
       }
@@ -74,7 +82,13 @@ export class LibraryMetadataSettingsComponent implements OnInit {
   }
 
   getLibraryOptions(libraryId: number): MetadataRefreshOptions {
-    return this.libraryMetadataOptions[libraryId] || {...this.defaultMetadataOptions, libraryId};
+    if (this.libraryMetadataOptions[libraryId]) {
+      return this.libraryMetadataOptions[libraryId];
+    }
+    if (!this.cachedDefaultOptions[libraryId]) {
+      this.cachedDefaultOptions[libraryId] = {...this.defaultMetadataOptions, libraryId};
+    }
+    return this.cachedDefaultOptions[libraryId];
   }
 
   trackByLibrary(index: number, library: Library): number | undefined {
@@ -231,5 +245,47 @@ export class LibraryMetadataSettingsComponent implements OnInit {
         tags: {p1: null, p2: null, p3: null, p4: null}
       }
     };
+  }
+
+  exportSidecarForLibrary(libraryId: number, event: Event): void {
+    event.stopPropagation();
+    this.sidecarExporting[libraryId] = true;
+
+    this.sidecarService.bulkExport(libraryId).subscribe({
+      next: (response) => {
+        this.sidecarExporting[libraryId] = false;
+        this.showMessage('success', 'Export Complete', `Exported sidecar files for ${response.exported} books.`);
+      },
+      error: (error) => {
+        this.sidecarExporting[libraryId] = false;
+        console.error('Bulk sidecar export failed:', error);
+        this.showMessage('error', 'Export Failed', 'Failed to export sidecar files. Please try again.');
+      }
+    });
+  }
+
+  importSidecarForLibrary(libraryId: number, event: Event): void {
+    event.stopPropagation();
+    this.sidecarImporting[libraryId] = true;
+
+    this.sidecarService.bulkImport(libraryId).subscribe({
+      next: (response) => {
+        this.sidecarImporting[libraryId] = false;
+        this.showMessage('success', 'Import Complete', `Imported metadata from ${response.imported} sidecar files.`);
+      },
+      error: (error) => {
+        this.sidecarImporting[libraryId] = false;
+        console.error('Bulk sidecar import failed:', error);
+        this.showMessage('error', 'Import Failed', 'Failed to import from sidecar files. Please try again.');
+      }
+    });
+  }
+
+  isSidecarExporting(libraryId: number): boolean {
+    return this.sidecarExporting[libraryId] ?? false;
+  }
+
+  isSidecarImporting(libraryId: number): boolean {
+    return this.sidecarImporting[libraryId] ?? false;
   }
 }

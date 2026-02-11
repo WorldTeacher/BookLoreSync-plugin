@@ -70,6 +70,7 @@ export class ViewPreferencesComponent implements OnInit, OnDestroy {
     {label: 'Hardcover Rating', field: 'hardcoverRating', translationKey: 'sortHardcoverRating'},
     {label: 'Hardcover #', field: 'hardcoverReviewCount', translationKey: 'sortHardcoverCount'},
     {label: 'Ranobedb Rating', field: 'ranobedbRating', translationKey: 'sortRanobedbRating'},
+    {label: 'Narrator', field: 'narrator', translationKey: 'sortNarrator'},
     {label: 'Pages', field: 'pageCount', translationKey: 'sortPages'},
     {label: 'Random', field: 'random', translationKey: 'sortRandom'},
   ];

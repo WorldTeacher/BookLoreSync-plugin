@@ -194,6 +194,7 @@ export type VisibleFilterType =
   | 'shelfStatus' | 'tag' | 'publishedDate' | 'fileSize' | 'amazonRating'
   | 'goodreadsRating' | 'hardcoverRating' | 'language' | 'pageCount' | 'mood'
   | 'ageRating' | 'contentRating'
+  | 'narrator'
   | 'comicCharacter' | 'comicTeam' | 'comicLocation' | 'comicCreator';
 
 export const DEFAULT_VISIBLE_FILTERS: VisibleFilterType[] = [
@@ -225,6 +226,7 @@ export const ALL_FILTER_OPTIONS: { label: string; value: VisibleFilterType }[] =
   {label: 'Amazon Rating', value: 'amazonRating'},
   {label: 'Goodreads Rating', value: 'goodreadsRating'},
   {label: 'Hardcover Rating', value: 'hardcoverRating'},
+  {label: 'Narrator', value: 'narrator'},
   {label: 'Comic Character', value: 'comicCharacter'},
   {label: 'Comic Team', value: 'comicTeam'},
   {label: 'Comic Location', value: 'comicLocation'},

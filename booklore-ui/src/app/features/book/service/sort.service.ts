@@ -111,6 +111,7 @@ export class SortService {
       ?? book.koboProgress?.percentage
       ?? null,
     bookType: (book) => book.primaryFile?.bookType || null,
+    narrator: (book) => book.metadata?.narrator?.toLowerCase() || null,
   };
 
   applySort(books: Book[], selectedSort: SortOption | null): Book[] {

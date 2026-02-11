@@ -20,6 +20,7 @@ export class ReaderHeaderComponent implements OnInit, OnDestroy {
   isVisible = false;
   isCurrentCfiBookmarked = false;
   isFullscreen = false;
+  overflowOpen = false;
 
   get bookTitle(): string {
     return this.headerService.title;

@@ -4,7 +4,7 @@ set -e
 # Generate version information for the Booklore KOReader plugin
 # This script extracts version from git tags (semantic-release) or uses a dev version
 
-VERSION_FILE="bookloresync.koplugin/version.lua"
+VERSION_FILE="bookloresync.koplugin/plugin_version.lua"
 
 echo "Generating version information..."
 

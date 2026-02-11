@@ -1,0 +1,27 @@
+# Generated version file
+bookloresync.koplugin/version.lua
+
+# Build artifacts
+*.zip
+*.tar.gz
+
+# SQLite databases
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# KOReader settings (if testing locally)
+booklore.lua
+booklore_db.lua
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+old/

@@ -17,13 +17,11 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
 local Settings = require("settings")
 local Database = require("database")
+local APIClient = require("api_client")
 local logger = require("logger")
 
 local _ = require("gettext")
 local T = require("ffi/util").template
-
--- Load version information
-local version_info = require("version")
 
 local BookloreSync = WidgetContainer:extend{
     name = "booklore",
@@ -45,6 +43,8 @@ function BookloreSync:init()
     
     -- Session settings
     self.min_duration = self.settings:readSetting("min_duration") or 30
+    self.min_pages = self.settings:readSetting("min_pages") or 1
+    self.session_detection_mode = self.settings:readSetting("session_detection_mode") or "duration" -- "duration" or "pages"
     self.progress_decimal_places = self.settings:readSetting("progress_decimal_places") or 2
     
     -- Sync options
@@ -106,6 +106,10 @@ function BookloreSync:init()
             end
         end
     end
+    
+    -- Initialize API client
+    self.api = APIClient:new()
+    self.api:init(self.server_url, self.username, self.password)
     
     -- Register menu
     self.ui.menu:registerToMainMenu(self)
@@ -227,11 +231,57 @@ function BookloreSync:addToMainMenu(menu_items)
         text = _("Session Management"),
         sub_item_table = {
             {
+                text = _("Session Detection Mode"),
+                help_text = _("Choose how sessions are validated: Duration-based (minimum seconds) or Pages-based (minimum pages read). Default is duration-based."),
+                sub_item_table = {
+                    {
+                        text = _("Duration-based"),
+                        help_text = _("Sessions must last a minimum number of seconds. Good for general reading tracking."),
+                        checked_func = function()
+                            return self.session_detection_mode == "duration"
+                        end,
+                        callback = function()
+                            self.session_detection_mode = "duration"
+                            self.settings:saveSetting("session_detection_mode", self.session_detection_mode)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = _("Session detection set to duration-based"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                    {
+                        text = _("Pages-based"),
+                        help_text = _("Sessions must include a minimum number of pages read. Better for avoiding accidental sessions."),
+                        checked_func = function()
+                            return self.session_detection_mode == "pages"
+                        end,
+                        callback = function()
+                            self.session_detection_mode = "pages"
+                            self.settings:saveSetting("session_detection_mode", self.session_detection_mode)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = _("Session detection set to pages-based"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                },
+            },
+            {
                 text = _("Minimum Session Duration"),
-                help_text = _("Set the minimum number of seconds a reading session must last to be synced. Sessions shorter than this will be discarded. Default is 30 seconds."),
+                help_text = _("Set the minimum number of seconds a reading session must last to be synced. Sessions shorter than this will be discarded. Default is 30 seconds. Only applies when using duration-based detection."),
                 keep_menu_open = true,
                 callback = function()
                     Settings:configureMinDuration(self)
+                end,
+            },
+            {
+                text = _("Minimum Pages Read"),
+                help_text = _("Set the minimum number of pages that must be read in a session for it to be synced. Default is 1 page. Only applies when using pages-based detection."),
+                keep_menu_open = true,
+                callback = function()
+                    Settings:configureMinPages(self)
                 end,
             },
             {
@@ -421,24 +471,6 @@ function BookloreSync:addToMainMenu(menu_items)
         },
     })
     
-    -- About/Version menu item
-    table.insert(base_menu, {
-        text = _("About"),
-        keep_menu_open = true,
-        callback = function()
-            local version_text = T(_("Booklore Sync\n\nVersion: %1\nType: %2\nBuild: %3\nCommit: %4\n\nSyncs reading sessions to Booklore server."),
-                version_info.version,
-                version_info.version_type,
-                version_info.build_date,
-                version_info.git_commit)
-            
-            UIManager:show(InfoMessage:new{
-                text = version_text,
-                timeout = 5,
-            })
-        end,
-    })
-    
     menu_items.booklore_sync = {
         text = _("Booklore Sync"),
         sorting_hint = "tools",
@@ -446,12 +478,84 @@ function BookloreSync:addToMainMenu(menu_items)
     }
 end
 
--- Placeholder stub functions (to be implemented in future steps)
+-- Connection testing
 function BookloreSync:testConnection()
     UIManager:show(InfoMessage:new{
-        text = _("Test connection - not yet implemented"),
-        timeout = 2,
+        text = _("Testing connection..."),
+        timeout = 1,
     })
+    
+    -- Validate configuration
+    if not self.server_url or self.server_url == "" then
+        UIManager:show(InfoMessage:new{
+            text = _("Error: Server URL not configured"),
+            timeout = 3,
+        })
+        return
+    end
+    
+    if not self.username or self.username == "" then
+        UIManager:show(InfoMessage:new{
+            text = _("Error: Username not configured"),
+            timeout = 3,
+        })
+        return
+    end
+    
+    if not self.password or self.password == "" then
+        UIManager:show(InfoMessage:new{
+            text = _("Error: Password not configured"),
+            timeout = 3,
+        })
+        return
+    end
+    
+    -- Update API client with current credentials
+    self.api:init(self.server_url, self.username, self.password)
+    
+    -- Test authentication
+    local success, message = self.api:testAuth()
+    
+    if success then
+        UIManager:show(InfoMessage:new{
+            text = _("✓ Connection successful!\n\nAuthentication verified."),
+            timeout = 3,
+        })
+    else
+        UIManager:show(InfoMessage:new{
+            text = T(_("✗ Connection failed\n\n%1"), message),
+            timeout = 5,
+        })
+    end
+end
+
+--[[--
+Validate if a session should be recorded based on detection mode
+
+@param duration_seconds Number of seconds the session lasted
+@param pages_read Number of pages read during the session
+@return boolean should_record
+@return string reason (if should_record is false)
+--]]
+function BookloreSync:validateSession(duration_seconds, pages_read)
+    if self.session_detection_mode == "pages" then
+        -- Pages-based detection
+        if pages_read < self.min_pages then
+            return false, string.format("Insufficient pages read (%d < %d)", pages_read, self.min_pages)
+        end
+    else
+        -- Duration-based detection (default)
+        if duration_seconds < self.min_duration then
+            return false, string.format("Session too short (%ds < %ds)", duration_seconds, self.min_duration)
+        end
+        
+        -- Also check pages for duration mode (must have progressed)
+        if pages_read <= 0 then
+            return false, "No progress made"
+        end
+    end
+    
+    return true, "Session valid"
 end
 
 function BookloreSync:syncPendingSessions()

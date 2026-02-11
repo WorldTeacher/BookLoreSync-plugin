@@ -35,6 +35,12 @@ function Settings:configureServerUrl(parent)
                         parent.server_url = input_dialog:getInputText()
                         parent.settings:saveSetting("server_url", parent.server_url)
                         parent.settings:flush()
+                        
+                        -- Reinitialize API client with new URL
+                        if parent.api then
+                            parent.api:init(parent.server_url, parent.username, parent.password)
+                        end
+                        
                         UIManager:close(input_dialog)
                         UIManager:show(InfoMessage:new{
                             text = _("Server URL saved"),
@@ -69,6 +75,12 @@ function Settings:configureUsername(parent)
                         parent.username = input_dialog:getInputText()
                         parent.settings:saveSetting("username", parent.username)
                         parent.settings:flush()
+                        
+                        -- Reinitialize API client with new username
+                        if parent.api then
+                            parent.api:init(parent.server_url, parent.username, parent.password)
+                        end
+                        
                         UIManager:close(input_dialog)
                         UIManager:show(InfoMessage:new{
                             text = _("Username saved"),
@@ -104,6 +116,12 @@ function Settings:configurePassword(parent)
                         parent.password = input_dialog:getInputText()
                         parent.settings:saveSetting("password", parent.password)
                         parent.settings:flush()
+                        
+                        -- Reinitialize API client with new password
+                        if parent.api then
+                            parent.api:init(parent.server_url, parent.username, parent.password)
+                        end
+                        
                         UIManager:close(input_dialog)
                         UIManager:show(InfoMessage:new{
                             text = _("Password saved"),
@@ -162,6 +180,50 @@ function Settings:configureMinDuration(parent)
     input_dialog:onShowKeyboard()
 end
 
+function Settings:configureMinPages(parent)
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title = _("Minimum Pages Read"),
+        input = tostring(parent.min_pages),
+        input_hint = "1",
+        input_type = "number",
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    callback = function()
+                        UIManager:close(input_dialog)
+                    end,
+                },
+                {
+                    text = _("Save"),
+                    is_enter_default = true,
+                    callback = function()
+                        local input_value = tonumber(input_dialog:getInputText())
+                        if input_value and input_value > 0 and input_value == math.floor(input_value) then
+                            parent.min_pages = input_value
+                            parent.settings:saveSetting("min_pages", parent.min_pages)
+                            parent.settings:flush()
+                            UIManager:close(input_dialog)
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Minimum pages set to %1"), tostring(parent.min_pages)),
+                                timeout = 2,
+                            })
+                        else
+                            UIManager:show(InfoMessage:new{
+                                text = _("Please enter a valid integer greater than 0"),
+                                timeout = 2,
+                            })
+                        end
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
+end
+
 function Settings:configureProgressDecimalPlaces(parent)
     local input_dialog
     input_dialog = InputDialog:new{
@@ -204,6 +266,25 @@ function Settings:configureProgressDecimalPlaces(parent)
     }
     UIManager:show(input_dialog)
     input_dialog:onShowKeyboard()
+end
+
+function Settings:showVersion(parent)
+    -- Load version information from _meta.lua and plugin_version.lua
+    local version_info = require("plugin_version")
+    local meta_info = require("_meta")
+    
+    local version_text = string.format(
+        "Booklore Sync\n\nVersion: %s\nType: %s\nBuild Date: %s\nCommit: %s",
+        meta_info.version or version_info.version or "unknown",
+        version_info.version_type or "unknown",
+        version_info.build_date or "unknown",
+        version_info.git_commit or "unknown"
+    )
+    
+    UIManager:show(InfoMessage:new{
+        text = version_text,
+        timeout = 5,
+    })
 end
 
 function Settings:buildMenu(parent)
@@ -294,6 +375,14 @@ function Settings:buildMenu(parent)
                     end,
                 },
             },
+        },
+        {
+            text = _("Version"),
+            help_text = _("Display plugin version information including version number, build date, and git commit."),
+            keep_menu_open = true,
+            callback = function()
+                self:showVersion(parent)
+            end,
         },
     }
 end

@@ -38,9 +38,13 @@ export class CompletionRaceChartComponent implements OnInit, OnDestroy {
   public chartOptions: ChartConfiguration<'line'>['options'];
 
   public totalBooks = 0;
-  public fastestCompletion = '';
-  public slowestCompletion = '';
   public avgDaysToFinish = 0;
+  public medianDaysToFinish = 0;
+  public totalSessions = 0;
+  public fastestDays = '';
+  public fastestTitle = '';
+  public slowestDays = '';
+  public slowestTitle = '';
 
   private readonly userStatsService = inject(UserStatsService);
   private readonly destroy$ = new Subject<void>();
@@ -189,16 +193,26 @@ export class CompletionRaceChartComponent implements OnInit, OnDestroy {
     this.totalBooks = races.length;
 
     if (races.length > 0) {
-      const days = races.map(r => r.totalDays);
+      const days = races.map(r => r.totalDays).sort((a, b) => a - b);
       const fastest = races.reduce((a, b) => a.totalDays <= b.totalDays ? a : b);
       const slowest = races.reduce((a, b) => a.totalDays >= b.totalDays ? a : b);
-      this.fastestCompletion = `${fastest.bookTitle.substring(0, 25)}${fastest.bookTitle.length > 25 ? '...' : ''} (${fastest.totalDays}d)`;
-      this.slowestCompletion = `${slowest.bookTitle.substring(0, 25)}${slowest.bookTitle.length > 25 ? '...' : ''} (${slowest.totalDays}d)`;
       this.avgDaysToFinish = Math.round(days.reduce((a, b) => a + b, 0) / days.length);
+      this.medianDaysToFinish = days.length % 2 === 0
+        ? Math.round((days[days.length / 2 - 1] + days[days.length / 2]) / 2)
+        : days[Math.floor(days.length / 2)];
+      this.totalSessions = races.reduce((sum, r) => sum + r.sessions.length, 0);
+      this.fastestDays = `${fastest.totalDays}d`;
+      this.fastestTitle = fastest.bookTitle.length > 25 ? fastest.bookTitle.substring(0, 25) + '...' : fastest.bookTitle;
+      this.slowestDays = `${slowest.totalDays}d`;
+      this.slowestTitle = slowest.bookTitle.length > 25 ? slowest.bookTitle.substring(0, 25) + '...' : slowest.bookTitle;
     } else {
-      this.fastestCompletion = '-';
-      this.slowestCompletion = '-';
       this.avgDaysToFinish = 0;
+      this.medianDaysToFinish = 0;
+      this.totalSessions = 0;
+      this.fastestDays = '-';
+      this.fastestTitle = '';
+      this.slowestDays = '-';
+      this.slowestTitle = '';
     }
 
     const datasets = races.map((race, i) => {

@@ -28,7 +28,8 @@ export class ReadingSurvivalChartComponent implements OnInit, OnDestroy {
   public totalStarted = 0;
   public completionRate = 0;
   public medianDropout = '';
-  public dangerZone = '';
+  public dangerZoneRange = '';
+  public dangerZoneDrop = '';
 
   public readonly chartOptions: ChartConfiguration<'line'>['options'] = {
     responsive: true,
@@ -156,7 +157,8 @@ export class ReadingSurvivalChartComponent implements OnInit, OnDestroy {
         dangerIdx = i;
       }
     }
-    this.dangerZone = `${THRESHOLDS[dangerIdx - 1]}-${THRESHOLDS[dangerIdx]}% (-${maxDrop.toFixed(0)}%)`;
+    this.dangerZoneRange = `${THRESHOLDS[dangerIdx - 1]}-${THRESHOLDS[dangerIdx]}%`;
+    this.dangerZoneDrop = `-${maxDrop.toFixed(0)}%`;
 
     const labels = THRESHOLDS.map(t => `${t}%`);
     this.chartDataSubject.next({

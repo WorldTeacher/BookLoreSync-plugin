@@ -185,7 +185,7 @@ function Settings:configureMinPages(parent)
     input_dialog = InputDialog:new{
         title = _("Minimum Pages Read"),
         input = tostring(parent.min_pages),
-        input_hint = "1",
+        input_hint = "5",
         input_type = "number",
         buttons = {
             {

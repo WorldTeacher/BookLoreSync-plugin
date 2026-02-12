@@ -173,7 +173,7 @@ function Database:getCurrentVersion()
     
     local version = 0
     for row in stmt:rows() do
-        version = row[1] or 0
+        version = tonumber(row[1]) or 0
         break
     end
     stmt:close()
@@ -238,7 +238,7 @@ function Database:runMigrations()
             logger.dbg("BookloreSync Database: Binding version:", version, "type:", type(version))
             
             local bind_ok, bind_err = pcall(function()
-                stmt:bind1(version)
+                stmt:bind(version)
             end)
             
             if not bind_ok then
@@ -277,6 +277,12 @@ end
 -- Book Cache operations
 
 function Database:getBookByFilePath(file_path)
+    logger.dbg("BookloreSync Database: getBookByFilePath called")
+    logger.dbg("  file_path:", file_path, "type:", type(file_path))
+    
+    -- Ensure file_path is a string
+    file_path = tostring(file_path)
+    
     local stmt = self.conn:prepare([[
         SELECT id, file_path, file_hash, book_id, title, author, last_accessed
         FROM book_cache
@@ -288,18 +294,31 @@ function Database:getBookByFilePath(file_path)
         return nil
     end
     
-    stmt:bind1(file_path)
+    logger.dbg("BookloreSync Database: About to bind file_path:", file_path, "type:", type(file_path))
+    
+    -- bind() takes values in order, not (index, value)
+    local bind_ok, bind_err = pcall(function()
+        stmt:bind(file_path)
+    end)
+    
+    if not bind_ok then
+        logger.err("BookloreSync Database: Failed to bind file_path:", bind_err)
+        stmt:close()
+        return nil
+    end
+    
+    logger.dbg("BookloreSync Database: Bind successful, executing query")
     
     local book = nil
     for row in stmt:rows() do
         book = {
-            id = row[1],
-            file_path = row[2],
-            file_hash = row[3],
-            book_id = row[4],
-            title = row[5],
-            author = row[6],
-            last_accessed = row[7],
+            id = tonumber(row[1]),
+            file_path = tostring(row[2]),
+            file_hash = tostring(row[3]),
+            book_id = row[4] and tonumber(row[4]) or nil,
+            title = row[5] and tostring(row[5]) or nil,
+            author = row[6] and tostring(row[6]) or nil,
+            last_accessed = row[7] and tonumber(row[7]) or nil,
         }
         break
     end
@@ -321,18 +340,18 @@ function Database:getBookByHash(file_hash)
         return nil
     end
     
-    stmt:bind1(file_hash)
+    stmt:bind(file_hash)
     
     local book = nil
     for row in stmt:rows() do
         book = {
-            id = row[1],
-            file_path = row[2],
-            file_hash = row[3],
-            book_id = row[4],
-            title = row[5],
-            author = row[6],
-            last_accessed = row[7],
+            id = tonumber(row[1]),
+            file_path = tostring(row[2]),
+            file_hash = tostring(row[3]),
+            book_id = row[4] and tonumber(row[4]) or nil,
+            title = row[5] and tostring(row[5]) or nil,
+            author = row[6] and tostring(row[6]) or nil,
+            last_accessed = row[7] and tonumber(row[7]) or nil,
         }
         break
     end
@@ -346,75 +365,66 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author)
     file_path = tostring(file_path or "")
     file_hash = tostring(file_hash or "")
     
+    -- Debug logging
+    logger.dbg("BookloreSync Database: saveBookCache called with:")
+    logger.dbg("  file_path:", file_path, "type:", type(file_path))
+    logger.dbg("  file_hash:", file_hash, "type:", type(file_hash))
+    logger.dbg("  book_id:", book_id, "type:", type(book_id))
+    logger.dbg("  title:", title, "type:", type(title))
+    logger.dbg("  author:", author, "type:", type(author))
+    
     -- book_id can be nil (NULL) or must be a number
     if book_id ~= nil then
+        local original_book_id = book_id
         book_id = tonumber(book_id)
         if not book_id then
-            logger.warn("BookloreSync Database: Invalid book_id, setting to NULL")
+            logger.warn("BookloreSync Database: Invalid book_id, setting to NULL. Original value:", original_book_id, "type:", type(original_book_id))
             book_id = nil
         end
     end
     
-    -- Try to update existing entry first
+    logger.dbg("BookloreSync Database: After conversion, book_id:", book_id, "type:", type(book_id))
+    
+    -- Use INSERT OR REPLACE to upsert in one operation
     local stmt = self.conn:prepare([[
-        UPDATE book_cache 
-        SET file_hash = ?, book_id = ?, title = ?, author = ?, 
-            last_accessed = CAST(strftime('%s', 'now') AS INTEGER),
-            updated_at = CAST(strftime('%s', 'now') AS INTEGER)
-        WHERE file_path = ?
+        INSERT OR REPLACE INTO book_cache (file_path, file_hash, book_id, title, author, last_accessed)
+        VALUES (?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare update statement:", self.conn:errmsg())
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
-    stmt:bind1(file_hash)
-    stmt:bind2(book_id)  -- Can be nil
-    stmt:bind3(title)    -- Can be nil
-    stmt:bind4(author)   -- Can be nil
-    stmt:bind5(file_path)
+    stmt:bind(file_path, file_hash, book_id, title, author)
     
     local result = stmt:step()
-    local changes = self.conn:changes()
     stmt:close()
     
     if result ~= SQ3.DONE and result ~= SQ3.OK then
-        logger.err("BookloreSync Database: Failed to update book cache:", self.conn:errmsg())
+        logger.err("BookloreSync Database: Failed to save book cache:", self.conn:errmsg())
         return false
     end
     
-    -- If no rows were updated, insert new entry
-    if changes == 0 then
-        stmt = self.conn:prepare([[
-            INSERT INTO book_cache (file_path, file_hash, book_id, title, author, last_accessed)
-            VALUES (?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
-        ]])
-        
-        if not stmt then
-            logger.err("BookloreSync Database: Failed to prepare insert statement:", self.conn:errmsg())
-            return false
-        end
-        
-        stmt:bind1(file_path)
-        stmt:bind2(file_hash)
-        stmt:bind3(book_id)  -- Can be nil
-        stmt:bind4(title)    -- Can be nil
-        stmt:bind5(author)   -- Can be nil
-        
-        result = stmt:step()
-        stmt:close()
-        
-        if result ~= SQ3.DONE and result ~= SQ3.OK then
-            logger.err("BookloreSync Database: Failed to insert book cache:", self.conn:errmsg())
+    logger.dbg("BookloreSync Database: Book cache saved successfully")
+    return true
+end
+
+-- Convenience method for caching a book
+function Database:cacheBook(file_path, file_hash, book_id)
+    return self:saveBookCache(file_path, file_hash, book_id, nil, nil)
+end
+
+function Database:updateBookId(file_hash, book_id)
+    -- Ensure book_id is a number
+    if book_id ~= nil then
+        book_id = tonumber(book_id)
+        if not book_id then
+            logger.warn("BookloreSync Database: Invalid book_id in updateBookId, aborting")
             return false
         end
     end
     
-    return true
-end
-
-function Database:updateBookId(file_hash, book_id)
     local stmt = self.conn:prepare([[
         UPDATE book_cache 
         SET book_id = ?, updated_at = CAST(strftime('%s', 'now') AS INTEGER)
@@ -426,8 +436,7 @@ function Database:updateBookId(file_hash, book_id)
         return false
     end
     
-    stmt:bind1(book_id)
-    stmt:bind2(file_hash)
+    stmt:bind(book_id, file_hash)
     stmt:step()
     stmt:close()
     
@@ -450,11 +459,11 @@ function Database:getAllUnmatchedBooks()
     local books = {}
     for row in stmt:rows() do
         table.insert(books, {
-            id = row[1],
-            file_path = row[2],
-            file_hash = row[3],
-            title = row[4],
-            author = row[5],
+            id = tonumber(row[1]),
+            file_path = tostring(row[2]),
+            file_hash = tostring(row[3]),
+            title = row[4] and tostring(row[4]) or nil,
+            author = row[5] and tostring(row[5]) or nil,
         })
     end
     
@@ -478,9 +487,9 @@ function Database:getBookCacheStats()
     
     local stats = {total = 0, matched = 0, unmatched = 0}
     for row in stmt:rows() do
-        stats.total = row[1] or 0
-        stats.matched = row[2] or 0
-        stats.unmatched = row[3] or 0
+        stats.total = tonumber(row[1]) or 0
+        stats.matched = tonumber(row[2]) or 0
+        stats.unmatched = tonumber(row[3]) or 0
         break
     end
     
@@ -497,6 +506,19 @@ end
 -- Pending Sessions operations
 
 function Database:addPendingSession(session_data)
+    -- Ensure book_id is a number if present
+    local book_id = session_data.bookId
+    if book_id ~= nil then
+        book_id = tonumber(book_id)
+        if not book_id then
+            logger.warn("BookloreSync Database: Invalid bookId in session_data, setting to NULL")
+            book_id = nil
+        end
+    end
+    
+    -- Ensure duration_seconds is a number
+    local duration_seconds = tonumber(session_data.durationSeconds) or 0
+    
     local stmt = self.conn:prepare([[
         INSERT INTO pending_sessions (
             book_id, book_hash, book_type, start_time, end_time,
@@ -510,23 +532,19 @@ function Database:addPendingSession(session_data)
         return false
     end
     
-    -- Use bind_blob for null handling
-    if session_data.bookId then
-        stmt:bind1(session_data.bookId)
-    else
-        stmt:bind1(nil)
-    end
-    
-    stmt:bind2(session_data.bookHash or "")
-    stmt:bind3(session_data.bookType or "EPUB")
-    stmt:bind4(session_data.startTime or "")
-    stmt:bind5(session_data.endTime or "")
-    stmt:bind6(session_data.durationSeconds or 0)
-    stmt:bind7(session_data.startProgress or 0.0)
-    stmt:bind8(session_data.endProgress or 0.0)
-    stmt:bind9(session_data.progressDelta or 0.0)
-    stmt:bind10(session_data.startLocation or "0")
-    stmt:bind11(session_data.endLocation or "0")
+    stmt:bind(
+        book_id,
+        session_data.bookHash or "",
+        session_data.bookType or "EPUB",
+        session_data.startTime or "",
+        session_data.endTime or "",
+        duration_seconds,
+        session_data.startProgress or 0.0,
+        session_data.endProgress or 0.0,
+        session_data.progressDelta or 0.0,
+        session_data.startLocation or "0",
+        session_data.endLocation or "0"
+    )
     
     local result = stmt:step()
     stmt:close()
@@ -556,24 +574,24 @@ function Database:getPendingSessions(limit)
         return {}
     end
     
-    stmt:bind1(limit)
+    stmt:bind(limit)
     
     local sessions = {}
     for row in stmt:rows() do
         table.insert(sessions, {
-            id = row[1],
-            bookId = row[2],
-            bookHash = row[3],
-            bookType = row[4],
-            startTime = row[5],
-            endTime = row[6],
-            durationSeconds = row[7],
-            startProgress = row[8],
-            endProgress = row[9],
-            progressDelta = row[10],
-            startLocation = row[11],
-            endLocation = row[12],
-            retryCount = row[13],
+            id = tonumber(row[1]),
+            bookId = row[2] and tonumber(row[2]) or nil,
+            bookHash = tostring(row[3]),
+            bookType = tostring(row[4]),
+            startTime = tostring(row[5]),
+            endTime = tostring(row[6]),
+            durationSeconds = tonumber(row[7]),
+            startProgress = tonumber(row[8]),
+            endProgress = tonumber(row[9]),
+            progressDelta = tonumber(row[10]),
+            startLocation = tostring(row[11]),
+            endLocation = tostring(row[12]),
+            retryCount = tonumber(row[13]),
         })
     end
     
@@ -589,7 +607,7 @@ function Database:deletePendingSession(session_id)
         return false
     end
     
-    stmt:bind1(session_id)
+    stmt:bind(session_id)
     stmt:step()
     stmt:close()
     
@@ -611,7 +629,7 @@ function Database:getPendingSessionCount()
     
     local count = 0
     for row in stmt:rows() do
-        count = row[1] or 0
+        count = tonumber(row[1]) or 0
         break
     end
     
@@ -632,7 +650,7 @@ function Database:incrementSessionRetryCount(session_id)
         return false
     end
     
-    stmt:bind1(session_id)
+    stmt:bind(session_id)
     stmt:step()
     stmt:close()
     
@@ -652,12 +670,7 @@ function Database:saveMatchHistory(file_hash, book_id, match_method, confidence,
         return false
     end
     
-    stmt:bind1(file_hash)
-    stmt:bind2(book_id)
-    stmt:bind3(match_method or "manual")
-    stmt:bind4(confidence or 1.0)
-    stmt:bind5(title)
-    stmt:bind6(author)
+    stmt:bind(file_hash, book_id, match_method or "manual", confidence or 1.0, title, author)
     
     stmt:step()
     stmt:close()
@@ -679,18 +692,18 @@ function Database:getMatchHistory(file_hash)
         return nil
     end
     
-    stmt:bind1(file_hash)
+    stmt:bind(file_hash)
     
     local history = nil
     for row in stmt:rows() do
         history = {
-            id = row[1],
-            book_id = row[2],
-            match_method = row[3],
-            confidence = row[4],
-            matched_at = row[5],
-            matched_title = row[6],
-            matched_author = row[7],
+            id = tonumber(row[1]),
+            book_id = tonumber(row[2]),
+            match_method = tostring(row[3]),
+            confidence = tonumber(row[4]),
+            matched_at = tonumber(row[5]),
+            matched_title = row[6] and tostring(row[6]) or nil,
+            matched_author = row[7] and tostring(row[7]) or nil,
         }
         break
     end

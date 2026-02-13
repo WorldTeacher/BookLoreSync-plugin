@@ -140,8 +140,8 @@ function APIClient:request(method, path, body, headers)
     -- Prepare headers
     local req_headers = headers or {}
     
-    -- Add authentication if username/password provided
-    if self.username and self.password then
+    -- Add authentication if username/password provided and no custom Authorization header
+    if self.username and self.password and not req_headers["Authorization"] then
         local password_hash = md5(self.password)
         req_headers["x-auth-user"] = self.username
         req_headers["x-auth-key"] = password_hash
@@ -328,6 +328,121 @@ function APIClient:checkHealth()
         logger.warn("BookloreSync API: Health check failed:", error_msg)
         return false, error_msg
     end
+end
+
+--[[--
+Search books by title (fuzzy match)
+
+@param title Book title to search for
+@return boolean success
+@return table|string matches or error message
+--]]
+function APIClient:searchBooks(title)
+    logger.info("BookloreSync API: Searching books with title:", title)
+    
+    -- URL encode the title
+    local encoded_title = self:_urlEncode(title)
+    local endpoint = "/api/v1/books/search?title=" .. encoded_title
+    
+    local success, code, response = self:request("GET", endpoint)
+    
+    if success and type(response) == "table" then
+        logger.info("BookloreSync API: Found", #response, "matches")
+        return true, response
+    else
+        local error_msg = response or "No matches found"
+        logger.warn("BookloreSync API: Book search failed:", error_msg)
+        return false, {}
+    end
+end
+
+--[[--
+Login to Booklore API and get Bearer token
+
+@param username Booklore username
+@param password Booklore password (plain text)
+@return boolean success
+@return string|nil token or error message
+--]]
+function APIClient:loginBooklore(username, password)
+    logger.info("BookloreSync API: Logging in to Booklore with username:", username)
+    
+    local endpoint = "/api/v1/auth/login"
+    local body = {
+        username = username,
+        password = password
+    }
+    
+    -- Make request without auth headers (login doesn't need auth)
+    local success, code, response = self:request("POST", endpoint, body)
+    
+    if success and type(response) == "table" and response.accessToken then
+        logger.info("BookloreSync API: Successfully obtained Bearer token")
+        return true, response.accessToken
+    else
+        local error_msg = response or "Login failed"
+        logger.warn("BookloreSync API: Booklore login failed:", error_msg)
+        return false, error_msg
+    end
+end
+
+--[[--
+Search books by title with custom authentication credentials
+
+@param title Book title to search for
+@param username Booklore username
+@param password Booklore password
+@return boolean success
+@return table|string matches or error message
+--]]
+function APIClient:searchBooksWithAuth(title, username, password)
+    logger.info("BookloreSync API: Searching books with Booklore auth, title:", title)
+    
+    -- First, login to get Bearer token
+    local login_success, token = self:loginBooklore(username, password)
+    
+    if not login_success then
+        logger.err("BookloreSync API: Failed to get Bearer token:", token)
+        return false, {}
+    end
+    
+    -- URL encode the title
+    local encoded_title = self:_urlEncode(title)
+    local endpoint = "/api/v1/books/search?title=" .. encoded_title
+    
+    -- Make request with Bearer token
+    local headers = {
+        ["Authorization"] = "Bearer " .. token
+    }
+    
+    local success, code, response = self:request("GET", endpoint, nil, headers)
+    
+    if success and type(response) == "table" then
+        logger.info("BookloreSync API: Found", #response, "matches")
+        return true, response
+    else
+        local error_msg = response or "No matches found"
+        logger.warn("BookloreSync API: Book search failed:", error_msg)
+        return false, {}
+    end
+end
+
+--[[--
+URL encode a string
+
+@param str String to encode
+@return string URL encoded string
+--]]
+function APIClient:_urlEncode(str)
+    if not str then return "" end
+    
+    str = string.gsub(str, "\n", "\r\n")
+    str = string.gsub(str, "([^%w %-%_%.])",
+        function(c)
+            return string.format("%%%02X", string.byte(c))
+        end)
+    str = string.gsub(str, " ", "+")
+    return str
 end
 
 return APIClient

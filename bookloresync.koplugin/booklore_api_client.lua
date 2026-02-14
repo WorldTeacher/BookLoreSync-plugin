@@ -20,6 +20,7 @@ local APIClient = {
     username = nil,
     password = nil,
     timeout = 10,
+    db = nil,  -- Database reference for token caching
 }
 
 function APIClient:new(o)
@@ -29,10 +30,11 @@ function APIClient:new(o)
     return o
 end
 
-function APIClient:init(server_url, username, password)
+function APIClient:init(server_url, username, password, db)
     self.server_url = server_url
     self.username = username
     self.password = password
+    self.db = db  -- Store database reference for token caching
     
     -- Remove trailing slash from server URL
     if self.server_url and self.server_url:sub(-1) == "/" then
@@ -316,14 +318,14 @@ function APIClient:submitSession(session_data)
     
     if success then
         logger.info("BookloreSync API: Session submitted successfully")
-        return true, "Session synced successfully"
+        return true, "Session synced successfully", code
     else
         local error_msg = response or "Failed to submit session"
         if code then
             error_msg = "HTTP " .. tostring(code) .. ": " .. error_msg
         end
         logger.warn("BookloreSync API: Session submission failed:", error_msg)
-        return false, error_msg
+        return false, error_msg, code
     end
 end
 
@@ -400,9 +402,90 @@ function APIClient:loginBooklore(username, password)
         return true, response.accessToken
     else
         local error_msg = response or "Login failed"
+        
+        -- Check for duplicate token error (server-side bug)
+        if type(error_msg) == "string" and error_msg:find("Duplicate entry") and error_msg:find("uq_refresh_token") then
+            logger.warn("BookloreSync API: Duplicate refresh token error (server-side bug)")
+            error_msg = "Server error: Duplicate refresh token. This is a server-side bug. Workaround: Try logging out and back in on the Booklore web interface, or restart the Booklore server to clear stale tokens."
+        end
+        
         logger.warn("BookloreSync API: Booklore login failed:", error_msg)
         return false, error_msg
     end
+end
+
+--[[--
+Get or refresh cached Bearer token
+
+Attempts to use cached token first. If cached token doesn't exist or is expired,
+or if force_refresh is true, logs in to get a new token.
+
+Proactively refreshes tokens that will expire within 1 day to avoid mid-operation
+token expiration.
+
+@param username Booklore username
+@param password Booklore password (plain text)
+@param force_refresh If true, bypass cache and get new token
+@return boolean success
+@return string|nil token or error message
+--]]
+function APIClient:getOrRefreshBearerToken(username, password, force_refresh)
+    force_refresh = force_refresh or false
+    
+    -- Try to use cached token first (unless force refresh)
+    if not force_refresh and self.db then
+        local cached_token, expires_at = self.db:getBearerToken(username)
+        if cached_token then
+            -- Check if token will expire within 1 day (86400 seconds)
+            -- Proactively refresh to avoid mid-operation expiration
+            if expires_at and (expires_at - os.time()) < 86400 then
+                logger.info("BookloreSync API: Token expires soon, refreshing for:", username)
+                force_refresh = true
+            else
+                logger.info("BookloreSync API: Using cached Bearer token for:", username)
+                return true, cached_token
+            end
+        end
+    end
+    
+    -- No cached token or force refresh - login to get new token
+    logger.info("BookloreSync API: Getting new Bearer token for:", username)
+    local success, token = self:loginBooklore(username, password)
+    
+    if success and token then
+        -- Save token to cache
+        if self.db then
+            self.db:saveBearerToken(username, token)
+        end
+        return true, token
+    else
+        return false, token  -- token contains error message
+    end
+end
+
+--[[--
+Validate Bearer token by making a test request
+
+@param token Bearer token to validate
+@return boolean valid (true if token works)
+--]]
+function APIClient:validateBearerToken(token)
+    -- Try to make a simple request with the token
+    local headers = {
+        ["Authorization"] = "Bearer " .. token
+    }
+    
+    -- Use a lightweight endpoint to test the token
+    local success, code, response = self:request("GET", "/api/v1/books/search?title=test&limit=1", nil, headers)
+    
+    -- Token is valid if request succeeds (200) or returns 404 (endpoint exists but no results)
+    -- Token is invalid if we get 401/403 (unauthorized)
+    if code == 401 or code == 403 then
+        logger.warn("BookloreSync API: Bearer token is invalid (401/403)")
+        return false
+    end
+    
+    return true
 end
 
 --[[--
@@ -417,12 +500,12 @@ Search books by title with custom authentication credentials
 function APIClient:searchBooksWithAuth(title, username, password)
     logger.info("BookloreSync API: Searching books with Booklore auth, title:", title)
     
-    -- First, login to get Bearer token
-    local login_success, token = self:loginBooklore(username, password)
+    -- Get or refresh cached Bearer token
+    local login_success, token = self:getOrRefreshBearerToken(username, password)
     
     if not login_success then
         logger.err("BookloreSync API: Failed to get Bearer token:", token)
-        return false, {}
+        return false, token or "Authentication failed"
     end
     
     -- URL encode the title
@@ -436,6 +519,24 @@ function APIClient:searchBooksWithAuth(title, username, password)
     
     local success, code, response = self:request("GET", endpoint, nil, headers)
     
+    -- If we get 401/403, token might be invalid - retry with fresh token
+    if not success and (code == 401 or code == 403) then
+        logger.warn("BookloreSync API: Token rejected (401/403), refreshing and retrying")
+        
+        -- Delete cached token and get fresh one
+        if self.db then
+            self.db:deleteBearerToken(username)
+        end
+        
+        local refresh_success, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if refresh_success then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("GET", endpoint, nil, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+    
     if success and type(response) == "table" then
         logger.info("BookloreSync API: Found", #response, "matches")
         
@@ -448,7 +549,7 @@ function APIClient:searchBooksWithAuth(title, username, password)
     else
         local error_msg = response or "No matches found"
         logger.warn("BookloreSync API: Book search failed:", error_msg)
-        return false, {}
+        return false, error_msg
     end
 end
 
@@ -464,12 +565,12 @@ Search books by ISBN with custom authentication credentials
 function APIClient:searchBooksByIsbn(isbn, username, password)
     logger.info("BookloreSync API: Searching books by ISBN:", isbn)
     
-    -- First, login to get Bearer token
-    local login_success, token = self:loginBooklore(username, password)
+    -- Get or refresh cached Bearer token
+    local login_success, token = self:getOrRefreshBearerToken(username, password)
     
     if not login_success then
         logger.err("BookloreSync API: Failed to get Bearer token:", token)
-        return false, {}
+        return false, token or "Authentication failed"
     end
     
     -- URL encode the ISBN
@@ -483,6 +584,23 @@ function APIClient:searchBooksByIsbn(isbn, username, password)
     
     local success, code, response = self:request("GET", endpoint, nil, headers)
     
+    -- If we get 401/403, token might be invalid - retry with fresh token
+    if not success and (code == 401 or code == 403) then
+        logger.warn("BookloreSync API: Token rejected (401/403), refreshing and retrying")
+        
+        if self.db then
+            self.db:deleteBearerToken(username)
+        end
+        
+        local refresh_success, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if refresh_success then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("GET", endpoint, nil, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+    
     if success and type(response) == "table" then
         logger.info("BookloreSync API: Found", #response, "ISBN matches")
         
@@ -495,7 +613,7 @@ function APIClient:searchBooksByIsbn(isbn, username, password)
     else
         local error_msg = response or "No ISBN matches found"
         logger.warn("BookloreSync API: ISBN search failed:", error_msg)
-        return false, {}
+        return false, error_msg
     end
 end
 
@@ -511,8 +629,8 @@ Get book by hash with Bearer token authentication
 function APIClient:getBookByHashWithAuth(book_hash, username, password)
     logger.info("BookloreSync API: Looking up book by hash with Booklore auth:", book_hash)
     
-    -- First, login to get Bearer token
-    local login_success, token = self:loginBooklore(username, password)
+    -- Get or refresh cached Bearer token
+    local login_success, token = self:getOrRefreshBearerToken(username, password)
     
     if not login_success then
         logger.err("BookloreSync API: Failed to get Bearer token:", token)
@@ -525,6 +643,23 @@ function APIClient:getBookByHashWithAuth(book_hash, username, password)
     }
     
     local success, code, response = self:request("GET", "/api/v1/books/by-hash/" .. book_hash, nil, headers)
+    
+    -- If we get 401/403, token might be invalid - retry with fresh token
+    if not success and (code == 401 or code == 403) then
+        logger.warn("BookloreSync API: Token rejected (401/403), refreshing and retrying")
+        
+        if self.db then
+            self.db:deleteBearerToken(username)
+        end
+        
+        local refresh_success, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if refresh_success then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("GET", "/api/v1/books/by-hash/" .. book_hash, nil, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
     
     if success and type(response) == "table" then
         logger.info("BookloreSync API: Found book by hash, ID:", response.id)

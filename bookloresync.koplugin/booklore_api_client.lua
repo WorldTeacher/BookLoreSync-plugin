@@ -428,6 +428,84 @@ function APIClient:searchBooksWithAuth(title, username, password)
 end
 
 --[[--
+Search books by ISBN with custom authentication credentials
+
+@param isbn ISBN-10 or ISBN-13 to search for
+@param username Booklore username
+@param password Booklore password
+@return boolean success
+@return table|string matches or error message
+--]]
+function APIClient:searchBooksByIsbn(isbn, username, password)
+    logger.info("BookloreSync API: Searching books by ISBN:", isbn)
+    
+    -- First, login to get Bearer token
+    local login_success, token = self:loginBooklore(username, password)
+    
+    if not login_success then
+        logger.err("BookloreSync API: Failed to get Bearer token:", token)
+        return false, {}
+    end
+    
+    -- URL encode the ISBN
+    local encoded_isbn = self:_urlEncode(isbn)
+    local endpoint = "/api/v1/books/search?isbn=" .. encoded_isbn
+    
+    -- Make request with Bearer token
+    local headers = {
+        ["Authorization"] = "Bearer " .. token
+    }
+    
+    local success, code, response = self:request("GET", endpoint, nil, headers)
+    
+    if success and type(response) == "table" then
+        logger.info("BookloreSync API: Found", #response, "ISBN matches")
+        return true, response
+    else
+        local error_msg = response or "No ISBN matches found"
+        logger.warn("BookloreSync API: ISBN search failed:", error_msg)
+        return false, {}
+    end
+end
+
+--[[--
+Get book by hash with Bearer token authentication
+
+@param book_hash MD5 hash of the book
+@param username Booklore username
+@param password Booklore password
+@return boolean success
+@return table|string book data or error message
+--]]
+function APIClient:getBookByHashWithAuth(book_hash, username, password)
+    logger.info("BookloreSync API: Looking up book by hash with Booklore auth:", book_hash)
+    
+    -- First, login to get Bearer token
+    local login_success, token = self:loginBooklore(username, password)
+    
+    if not login_success then
+        logger.err("BookloreSync API: Failed to get Bearer token:", token)
+        return false, "Authentication failed"
+    end
+    
+    -- Make request with Bearer token
+    local headers = {
+        ["Authorization"] = "Bearer " .. token
+    }
+    
+    local success, code, response = self:request("GET", "/api/v1/books/by-hash/" .. book_hash, nil, headers)
+    
+    if success and type(response) == "table" then
+        logger.info("BookloreSync API: Found book by hash, ID:", response.id)
+        return true, response
+    else
+        local error_msg = response or "Book not found"
+        logger.warn("BookloreSync API: Book by hash lookup failed:", error_msg)
+        return false, error_msg
+    end
+end
+
+--[[--
 URL encode a string
 
 @param str String to encode

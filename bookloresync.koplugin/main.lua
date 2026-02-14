@@ -852,13 +852,27 @@ function BookloreSync:getBookIdByHash(book_hash)
         return nil
     end
     
-    logger.info("BookloreSync: Found book ID on server:", book_id)
+    -- Extract ISBN fields from server response
+    local isbn10 = book_data.isbn10 or nil
+    local isbn13 = book_data.isbn13 or nil
     
-    -- Update cache with the book ID we found
+    logger.info("BookloreSync: Found book ID on server:", book_id)
+    logger.info("BookloreSync: Book data from server includes ISBN-10:", isbn10, "ISBN-13:", isbn13)
+    
+    -- Update cache with the book ID and ISBN fields we found
     if cached_book then
         -- We have the hash cached but didn't have the book_id
-        self.db:updateBookId(book_hash, book_id)
-        logger.info("BookloreSync: Updated database cache with book ID")
+        -- Use saveBookCache to update all fields including ISBN
+        self.db:saveBookCache(
+            cached_book.file_path, 
+            book_hash, 
+            book_id, 
+            book_data.title or cached_book.title, 
+            book_data.author or cached_book.author,
+            isbn10,
+            isbn13
+        )
+        logger.info("BookloreSync: Updated database cache with book ID and ISBN")
     end
     
     return book_id
@@ -1462,8 +1476,8 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
                         start_progress = current_session.start_progress,
                         end_progress = current_session.end_progress,
                         progress_delta = progress_delta,
-                        start_location = "Page " .. current_session.start_page,
-                        end_location = "Page " .. current_session.end_page,
+                        start_location = tostring(current_session.start_page),
+                        end_location = tostring(current_session.end_page),
                     })
                 end
                 
@@ -1503,8 +1517,8 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
                 start_progress = current_session.start_progress,
                 end_progress = current_session.end_progress,
                 progress_delta = progress_delta,
-                start_location = "Page " .. current_session.start_page,
-                end_location = "Page " .. current_session.end_page,
+                start_location = tostring(current_session.start_page),
+                end_location = tostring(current_session.end_page),
             })
         end
     end
@@ -1716,16 +1730,195 @@ function BookloreSync:_showNextBookMatch()
     local book = self.unmatched_books[self.matching_index]
     local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
     
-    -- Check if book has MD5 hash for auto-matching
+    -- PRIORITY 1: Check for ISBN in cache and search by ISBN
     if book.book_hash and book.book_hash ~= "" then
-        local cached_book = self.db:findBookIdByHash(book.book_hash)
-        if cached_book and cached_book.book_id then
-            self:_confirmAutoMatch(book, cached_book.book_id)
-            return
+        local cached_book = self.db:getBookByHash(book.book_hash)
+        
+        if cached_book then
+            -- Check if we have ISBN data for this book
+            if (cached_book.isbn13 and cached_book.isbn13 ~= "") or 
+               (cached_book.isbn10 and cached_book.isbn10 ~= "") then
+                
+                if self.booklore_username and self.booklore_password then
+                    UIManager:show(InfoMessage:new{
+                        text = T(_("Looking up by ISBN: %1\n\n%2"), 
+                            book.koreader_book_title, progress_text),
+                        timeout = 1,
+                    })
+                    
+                    -- Prefer ISBN-13, fall back to ISBN-10
+                    local search_isbn = cached_book.isbn13 or cached_book.isbn10
+                    local isbn_type = cached_book.isbn13 and "isbn13" or "isbn10"
+                    
+                    local success, results = self.api:searchBooksByIsbn(
+                        search_isbn,
+                        self.booklore_username,
+                        self.booklore_password
+                    )
+                    
+                    if success and results and #results > 0 then
+                        -- Take first result (should be exact match)
+                        self:_confirmIsbnMatch(book, results[1], isbn_type)
+                        return
+                    end
+                    
+                    logger.info("BookloreSync: ISBN search failed or no results, continuing to hash lookup")
+                end
+            end
+            
+            -- PRIORITY 2: Check if book_id already cached (local hash match)
+            if cached_book.book_id then
+                self:_confirmAutoMatch(book, cached_book.book_id)
+                return
+            end
         end
     end
     
-    -- No auto-match, search by title
+    -- PRIORITY 3: Check server by hash
+    if book.book_hash and book.book_hash ~= "" then
+        if self.booklore_username and self.booklore_password then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Looking up by hash: %1\n\n%2"), 
+                    book.koreader_book_title, progress_text),
+                timeout = 1,
+            })
+            
+            local success, server_book = self.api:getBookByHashWithAuth(
+                book.book_hash, 
+                self.booklore_username, 
+                self.booklore_password
+            )
+            
+            if success and server_book then
+                self:_confirmHashMatch(book, server_book)
+                return
+            end
+        end
+    end
+    
+    -- PRIORITY 4: Fall back to title search
+    self:_performManualSearch(book)
+end
+
+function BookloreSync:_confirmAutoMatch(book, book_id)
+    local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
+    
+    -- Get book title from cache
+    local book_title = "Unknown Book"
+    local cached_book = self.db:getBookByBookId(book_id)
+    if cached_book then
+        book_title = cached_book.title
+    end
+    
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Auto-matched by MD5 hash:\n\nKOReader: %1\n\nBooklore: %2\n\n%3\n\nAccept this match?"),
+            book.koreader_book_title, book_title, progress_text),
+        ok_text = _("Accept"),
+        cancel_text = _("Skip"),
+        ok_callback = function()
+            self:_saveMatchAndSync(book, book_id)
+        end,
+        cancel_callback = function()
+            self.matching_index = self.matching_index + 1
+            self:_showNextBookMatch()
+        end,
+    })
+end
+
+function BookloreSync:_confirmHashMatch(book, server_book)
+    local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
+    
+    local ButtonDialog = require("ui/widget/buttondialog")
+    
+    self.hash_match_dialog = ButtonDialog:new{
+        title = T(_("Found by hash:\n\n%1\n\n%2"), server_book.title or "Unknown", progress_text),
+        buttons = {
+            {
+                {
+                    text = _("Proceed"),
+                    callback = function()
+                        UIManager:close(self.hash_match_dialog)
+                        self:_saveMatchAndSync(book, server_book)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("Manual Match"),
+                    callback = function()
+                        UIManager:close(self.hash_match_dialog)
+                        self:_performManualSearch(book)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("Skip"),
+                    callback = function()
+                        UIManager:close(self.hash_match_dialog)
+                        self.matching_index = self.matching_index + 1
+                        self:_showNextBookMatch()
+                    end,
+                },
+            },
+        },
+    }
+    
+    UIManager:show(self.hash_match_dialog)
+end
+
+function BookloreSync:_confirmIsbnMatch(book, server_book, matched_isbn_type)
+    local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
+    
+    local ButtonDialog = require("ui/widget/buttondialog")
+    
+    -- Show which ISBN type matched (ISBN-10 or ISBN-13)
+    local isbn_indicator = matched_isbn_type == "isbn13" and "📚 ISBN-13" or "📖 ISBN-10"
+    
+    self.isbn_match_dialog = ButtonDialog:new{
+        title = T(_("%1\n\nFound: %2\n\n%3"), 
+            isbn_indicator,
+            server_book.title or "Unknown", 
+            progress_text),
+        buttons = {
+            {
+                {
+                    text = _("Proceed"),
+                    callback = function()
+                        UIManager:close(self.isbn_match_dialog)
+                        self:_saveMatchAndSync(book, server_book)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("Manual Match"),
+                    callback = function()
+                        UIManager:close(self.isbn_match_dialog)
+                        self:_performManualSearch(book)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("Skip"),
+                    callback = function()
+                        UIManager:close(self.isbn_match_dialog)
+                        self.matching_index = self.matching_index + 1
+                        self:_showNextBookMatch()
+                    end,
+                },
+            },
+        },
+    }
+    
+    UIManager:show(self.isbn_match_dialog)
+end
+
+function BookloreSync:_performManualSearch(book)
+    local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
+    
+    -- Search by title
     UIManager:show(InfoMessage:new{
         text = T(_("Searching for: %1\n\n%2"), book.koreader_book_title, progress_text),
         timeout = 1,
@@ -1758,31 +1951,6 @@ function BookloreSync:_showNextBookMatch()
     end
     
     self:_showMatchSelectionDialog(book, results)
-end
-
-function BookloreSync:_confirmAutoMatch(book, book_id)
-    local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
-    
-    -- Get book title from cache
-    local book_title = "Unknown Book"
-    local cached_book = self.db:getBookByBookId(book_id)
-    if cached_book then
-        book_title = cached_book.title
-    end
-    
-    UIManager:show(ConfirmBox:new{
-        text = T(_("Auto-matched by MD5 hash:\n\nKOReader: %1\n\nBooklore: %2\n\n%3\n\nAccept this match?"),
-            book.koreader_book_title, book_title, progress_text),
-        ok_text = _("Accept"),
-        cancel_text = _("Skip"),
-        ok_callback = function()
-            self:_saveMatchAndSync(book, book_id)
-        end,
-        cancel_callback = function()
-            self.matching_index = self.matching_index + 1
-            self:_showNextBookMatch()
-        end,
-    })
 end
 
 function BookloreSync:_showMatchSelectionDialog(book, results)
@@ -1840,6 +2008,10 @@ function BookloreSync:_saveMatchAndSync(book, selected_result)
     local book_id = type(selected_result) == "table" and selected_result.id or selected_result
     local book_title = type(selected_result) == "table" and selected_result.title or nil
     local book_hash = type(selected_result) == "table" and selected_result.hash or nil
+    local isbn10 = type(selected_result) == "table" and selected_result.isbn10 or nil
+    local isbn13 = type(selected_result) == "table" and selected_result.isbn13 or nil
+    
+    logger.info("BookloreSync: Saving match with ISBN-10:", isbn10, "ISBN-13:", isbn13)
     
     -- Mark sessions as matched
     local success = self.db:markHistoricalSessionsMatched(book.koreader_book_id, book_id)
@@ -1856,7 +2028,7 @@ function BookloreSync:_saveMatchAndSync(book, selected_result)
     if book_hash and book_hash ~= "" then
         -- Use the hash as a pseudo file path for historical books
         local cache_path = "historical://" .. book_hash
-        self.db:saveBookCache(cache_path, book_hash, book_id, book_title, nil)
+        self.db:saveBookCache(cache_path, book_hash, book_id, book_title, nil, isbn10, isbn13)
         logger.info("BookloreSync: Cached matched book:", book_title, "with ID:", book_id)
     end
     

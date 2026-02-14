@@ -11,7 +11,7 @@ local DataStorage = require("datastorage")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 2,  -- Current database schema version
+    VERSION = 3,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -134,6 +134,28 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_historical_book_hash 
             ON historical_sessions(book_hash)
+        ]],
+    },
+    
+    -- Migration 3: Add ISBN support to book_cache
+    [3] = {
+        -- Add ISBN-10 column
+        [[
+            ALTER TABLE book_cache ADD COLUMN isbn10 TEXT
+        ]],
+        -- Add ISBN-13 column
+        [[
+            ALTER TABLE book_cache ADD COLUMN isbn13 TEXT
+        ]],
+        -- Create index for ISBN-10 lookups
+        [[
+            CREATE INDEX IF NOT EXISTS idx_book_cache_isbn10 
+            ON book_cache(isbn10)
+        ]],
+        -- Create index for ISBN-13 lookups
+        [[
+            CREATE INDEX IF NOT EXISTS idx_book_cache_isbn13 
+            ON book_cache(isbn13)
         ]],
     },
 }
@@ -326,7 +348,7 @@ function Database:getBookByFilePath(file_path)
     file_path = tostring(file_path)
     
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, last_accessed
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13
         FROM book_cache
         WHERE file_path = ?
     ]])
@@ -361,6 +383,8 @@ function Database:getBookByFilePath(file_path)
             title = row[5] and tostring(row[5]) or nil,
             author = row[6] and tostring(row[6]) or nil,
             last_accessed = row[7] and tonumber(row[7]) or nil,
+            isbn10 = row[8] and tostring(row[8]) or nil,
+            isbn13 = row[9] and tostring(row[9]) or nil,
         }
         break
     end
@@ -371,7 +395,7 @@ end
 
 function Database:getBookByHash(file_hash)
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, last_accessed
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13
         FROM book_cache
         WHERE file_hash = ?
         LIMIT 1
@@ -394,6 +418,8 @@ function Database:getBookByHash(file_hash)
             title = row[5] and tostring(row[5]) or nil,
             author = row[6] and tostring(row[6]) or nil,
             last_accessed = row[7] and tonumber(row[7]) or nil,
+            isbn10 = row[8] and tostring(row[8]) or nil,
+            isbn13 = row[9] and tostring(row[9]) or nil,
         }
         break
     end
@@ -442,7 +468,7 @@ function Database:getBookByBookId(book_id)
     return book
 end
 
-function Database:saveBookCache(file_path, file_hash, book_id, title, author)
+function Database:saveBookCache(file_path, file_hash, book_id, title, author, isbn10, isbn13)
     -- Ensure types are correct
     file_path = tostring(file_path or "")
     file_hash = tostring(file_hash or "")
@@ -454,6 +480,8 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author)
     logger.dbg("  book_id:", book_id, "type:", type(book_id))
     logger.dbg("  title:", title, "type:", type(title))
     logger.dbg("  author:", author, "type:", type(author))
+    logger.dbg("  isbn10:", isbn10, "type:", type(isbn10))
+    logger.dbg("  isbn13:", isbn13, "type:", type(isbn13))
     
     -- book_id can be nil (NULL) or must be a number
     if book_id ~= nil then
@@ -469,8 +497,8 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author)
     
     -- Use INSERT OR REPLACE to upsert in one operation
     local stmt = self.conn:prepare([[
-        INSERT OR REPLACE INTO book_cache (file_path, file_hash, book_id, title, author, last_accessed)
-        VALUES (?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+        INSERT OR REPLACE INTO book_cache (file_path, file_hash, book_id, title, author, isbn10, isbn13, last_accessed)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
     ]])
     
     if not stmt then
@@ -478,7 +506,7 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author)
         return false
     end
     
-    stmt:bind(file_path, file_hash, book_id, title, author)
+    stmt:bind(file_path, file_hash, book_id, title, author, isbn10, isbn13)
     
     local result = stmt:step()
     stmt:close()
@@ -494,7 +522,7 @@ end
 
 -- Convenience method for caching a book
 function Database:cacheBook(file_path, file_hash, book_id)
-    return self:saveBookCache(file_path, file_hash, book_id, nil, nil)
+    return self:saveBookCache(file_path, file_hash, book_id, nil, nil, nil, nil)
 end
 
 function Database:updateBookId(file_hash, book_id)
@@ -1031,6 +1059,79 @@ function Database:findBookIdByHash(md5_hash)
     
     stmt:close()
     return result
+end
+
+--[[--
+Find book_id by ISBN (prefers ISBN-13 over ISBN-10)
+
+@param isbn10 ISBN-10 string (optional)
+@param isbn13 ISBN-13 string (optional)
+@return table|nil Returns {book_id, title, author, file_hash, isbn10, isbn13} or nil
+--]]
+function Database:findBookIdByIsbn(isbn10, isbn13)
+    -- Prefer ISBN-13 if both provided
+    if isbn13 and isbn13 ~= "" then
+        local stmt = self.conn:prepare([[
+            SELECT book_id, title, author, file_hash, isbn10, isbn13
+            FROM book_cache
+            WHERE isbn13 = ? AND book_id IS NOT NULL
+            LIMIT 1
+        ]])
+        
+        if not stmt then
+            logger.err("BookloreSync Database: Failed to prepare isbn13 lookup:", self.conn:errmsg())
+            return nil
+        end
+        
+        stmt:bind(isbn13)
+        
+        for row in stmt:rows() do
+            local result = {
+                book_id = row[1] and tonumber(row[1]) or nil,
+                title = row[2] and tostring(row[2]) or nil,
+                author = row[3] and tostring(row[3]) or nil,
+                file_hash = row[4] and tostring(row[4]) or nil,
+                isbn10 = row[5] and tostring(row[5]) or nil,
+                isbn13 = row[6] and tostring(row[6]) or nil,
+            }
+            stmt:close()
+            return result
+        end
+        stmt:close()
+    end
+    
+    -- Fallback to ISBN-10 if ISBN-13 not found or not provided
+    if isbn10 and isbn10 ~= "" then
+        local stmt = self.conn:prepare([[
+            SELECT book_id, title, author, file_hash, isbn10, isbn13
+            FROM book_cache
+            WHERE isbn10 = ? AND book_id IS NOT NULL
+            LIMIT 1
+        ]])
+        
+        if not stmt then
+            logger.err("BookloreSync Database: Failed to prepare isbn10 lookup:", self.conn:errmsg())
+            return nil
+        end
+        
+        stmt:bind(isbn10)
+        
+        for row in stmt:rows() do
+            local result = {
+                book_id = row[1] and tonumber(row[1]) or nil,
+                title = row[2] and tostring(row[2]) or nil,
+                author = row[3] and tostring(row[3]) or nil,
+                file_hash = row[4] and tostring(row[4]) or nil,
+                isbn10 = row[5] and tostring(row[5]) or nil,
+                isbn13 = row[6] and tostring(row[6]) or nil,
+            }
+            stmt:close()
+            return result
+        end
+        stmt:close()
+    end
+    
+    return nil
 end
 
 -- Migration data from LuaSettings (for backward compatibility)

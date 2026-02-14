@@ -11,7 +11,7 @@ local DataStorage = require("datastorage")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 2,  -- Current database schema version
+    VERSION = 4,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -134,6 +134,50 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_historical_book_hash 
             ON historical_sessions(book_hash)
+        ]],
+    },
+    
+    -- Migration 3: Add ISBN support to book_cache
+    [3] = {
+        -- Add ISBN-10 column
+        [[
+            ALTER TABLE book_cache ADD COLUMN isbn10 TEXT
+        ]],
+        -- Add ISBN-13 column
+        [[
+            ALTER TABLE book_cache ADD COLUMN isbn13 TEXT
+        ]],
+        -- Create index for ISBN-10 lookups
+        [[
+            CREATE INDEX IF NOT EXISTS idx_book_cache_isbn10 
+            ON book_cache(isbn10)
+        ]],
+        -- Create index for ISBN-13 lookups
+        [[
+            CREATE INDEX IF NOT EXISTS idx_book_cache_isbn13 
+            ON book_cache(isbn13)
+        ]],
+    },
+    
+    -- Migration 4: Bearer token cache table
+    [4] = {
+        -- Store Bearer tokens to avoid duplicate token errors
+        [[
+            CREATE TABLE IF NOT EXISTS bearer_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                token TEXT NOT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                expires_at INTEGER NOT NULL
+            )
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_bearer_tokens_username 
+            ON bearer_tokens(username)
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_bearer_tokens_expires 
+            ON bearer_tokens(expires_at)
         ]],
     },
 }
@@ -326,7 +370,7 @@ function Database:getBookByFilePath(file_path)
     file_path = tostring(file_path)
     
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, last_accessed
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13
         FROM book_cache
         WHERE file_path = ?
     ]])
@@ -361,6 +405,8 @@ function Database:getBookByFilePath(file_path)
             title = row[5] and tostring(row[5]) or nil,
             author = row[6] and tostring(row[6]) or nil,
             last_accessed = row[7] and tonumber(row[7]) or nil,
+            isbn10 = row[8] and tostring(row[8]) or nil,
+            isbn13 = row[9] and tostring(row[9]) or nil,
         }
         break
     end
@@ -371,7 +417,7 @@ end
 
 function Database:getBookByHash(file_hash)
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, last_accessed
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13
         FROM book_cache
         WHERE file_hash = ?
         LIMIT 1
@@ -394,6 +440,8 @@ function Database:getBookByHash(file_hash)
             title = row[5] and tostring(row[5]) or nil,
             author = row[6] and tostring(row[6]) or nil,
             last_accessed = row[7] and tonumber(row[7]) or nil,
+            isbn10 = row[8] and tostring(row[8]) or nil,
+            isbn13 = row[9] and tostring(row[9]) or nil,
         }
         break
     end
@@ -442,10 +490,16 @@ function Database:getBookByBookId(book_id)
     return book
 end
 
-function Database:saveBookCache(file_path, file_hash, book_id, title, author)
+function Database:saveBookCache(file_path, file_hash, book_id, title, author, isbn10, isbn13)
     -- Ensure types are correct
     file_path = tostring(file_path or "")
     file_hash = tostring(file_hash or "")
+    
+    -- Validate inputs - don't save if both file_path and file_hash are empty
+    if file_path == "" and file_hash == "" then
+        logger.warn("BookloreSync Database: Cannot save book cache with empty file_path and file_hash")
+        return false
+    end
     
     -- Debug logging
     logger.dbg("BookloreSync Database: saveBookCache called with:")
@@ -454,6 +508,8 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author)
     logger.dbg("  book_id:", book_id, "type:", type(book_id))
     logger.dbg("  title:", title, "type:", type(title))
     logger.dbg("  author:", author, "type:", type(author))
+    logger.dbg("  isbn10:", isbn10, "type:", type(isbn10))
+    logger.dbg("  isbn13:", isbn13, "type:", type(isbn13))
     
     -- book_id can be nil (NULL) or must be a number
     if book_id ~= nil then
@@ -468,9 +524,10 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author)
     logger.dbg("BookloreSync Database: After conversion, book_id:", book_id, "type:", type(book_id))
     
     -- Use INSERT OR REPLACE to upsert in one operation
+    -- The UNIQUE constraint on file_path ensures we don't get duplicates
     local stmt = self.conn:prepare([[
-        INSERT OR REPLACE INTO book_cache (file_path, file_hash, book_id, title, author, last_accessed)
-        VALUES (?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+        INSERT OR REPLACE INTO book_cache (file_path, file_hash, book_id, title, author, isbn10, isbn13, last_accessed)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
     ]])
     
     if not stmt then
@@ -478,7 +535,7 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author)
         return false
     end
     
-    stmt:bind(file_path, file_hash, book_id, title, author)
+    stmt:bind(file_path, file_hash, book_id, title, author, isbn10, isbn13)
     
     local result = stmt:step()
     stmt:close()
@@ -494,7 +551,7 @@ end
 
 -- Convenience method for caching a book
 function Database:cacheBook(file_path, file_hash, book_id)
-    return self:saveBookCache(file_path, file_hash, book_id, nil, nil)
+    return self:saveBookCache(file_path, file_hash, book_id, nil, nil, nil, nil)
 end
 
 function Database:updateBookId(file_hash, book_id)
@@ -696,6 +753,105 @@ function Database:deletePendingSession(session_id)
     return true
 end
 
+function Database:archivePendingSession(session_id)
+    -- Archive a pending session to historical_sessions before deletion
+    -- This provides a backup in case of data loss
+    
+    -- First, get the pending session data
+    local get_stmt = self.conn:prepare([[
+        SELECT 
+            book_id, book_hash, book_type, start_time, end_time,
+            duration_seconds, start_progress, end_progress, progress_delta,
+            start_location, end_location
+        FROM pending_sessions
+        WHERE id = ?
+    ]])
+    
+    if not get_stmt then
+        logger.err("BookloreSync Database: Failed to prepare select statement:", self.conn:errmsg())
+        return false
+    end
+    
+    get_stmt:bind(session_id)
+    
+    local session_data = nil
+    for row in get_stmt:rows() do
+        session_data = {
+            book_id = tonumber(row[1]),
+            book_hash = tostring(row[2] or ""),
+            book_type = tostring(row[3] or "EPUB"),
+            start_time = tostring(row[4]),
+            end_time = tostring(row[5]),
+            duration_seconds = tonumber(row[6]),
+            start_progress = tonumber(row[7]),
+            end_progress = tonumber(row[8]),
+            progress_delta = tonumber(row[9]),
+            start_location = tostring(row[10] or ""),
+            end_location = tostring(row[11] or ""),
+        }
+        break
+    end
+    
+    get_stmt:close()
+    
+    if not session_data then
+        logger.warn("BookloreSync Database: No pending session found with id:", session_id)
+        return false
+    end
+    
+    -- Get book title from cache if available
+    local book_title = "Live Session"
+    if session_data.book_hash and session_data.book_hash ~= "" then
+        local cached_book = self:getBookByHash(session_data.book_hash)
+        if cached_book and cached_book.title then
+            book_title = cached_book.title
+        end
+    end
+    
+    -- Insert into historical_sessions
+    -- Use koreader_book_id = 0 to indicate this is from pending_sessions, not KOReader stats
+    local insert_stmt = self.conn:prepare([[
+        INSERT INTO historical_sessions (
+            koreader_book_id, koreader_book_title, book_id, book_hash,
+            book_type, start_time, end_time, duration_seconds,
+            start_progress, end_progress, progress_delta,
+            start_location, end_location, matched, synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)
+    ]])
+    
+    if not insert_stmt then
+        logger.err("BookloreSync Database: Failed to prepare insert statement:", self.conn:errmsg())
+        return false
+    end
+    
+    insert_stmt:bind(
+        0,  -- koreader_book_id = 0 (indicates live session, not from stats)
+        book_title,
+        session_data.book_id,
+        session_data.book_hash,
+        session_data.book_type,
+        session_data.start_time,
+        session_data.end_time,
+        session_data.duration_seconds,
+        session_data.start_progress,
+        session_data.end_progress,
+        session_data.progress_delta,
+        session_data.start_location,
+        session_data.end_location
+    )
+    
+    local result = insert_stmt:step()
+    insert_stmt:close()
+    
+    if result == SQ3.DONE or result == SQ3.OK then
+        logger.info("BookloreSync Database: Archived pending session to historical_sessions")
+        return true
+    else
+        logger.err("BookloreSync Database: Failed to archive pending session:", self.conn:errmsg())
+        return false
+    end
+end
+
 function Database:clearPendingSessions()
     self.conn:exec("DELETE FROM pending_sessions")
     logger.info("BookloreSync Database: Pending sessions cleared")
@@ -797,6 +953,8 @@ end
 -- Historical Session Functions
 
 function Database:getUnmatchedHistoricalBooks()
+    -- Get books that have at least one session without a book_id
+    -- This excludes books where all sessions were successfully auto-matched
     local stmt = self.conn:prepare([[
         SELECT 
             koreader_book_id,
@@ -804,7 +962,7 @@ function Database:getUnmatchedHistoricalBooks()
             book_hash,
             COUNT(*) as session_count
         FROM historical_sessions
-        WHERE matched = 0
+        WHERE book_id IS NULL
         GROUP BY koreader_book_id
         ORDER BY koreader_book_title
     ]])
@@ -828,12 +986,46 @@ function Database:getUnmatchedHistoricalBooks()
     return books
 end
 
+function Database:getMatchedUnsyncedBooks()
+    -- Get books that have sessions with book_id but not yet synced
+    -- These are typically books auto-matched during extraction
+    local stmt = self.conn:prepare([[
+        SELECT 
+            koreader_book_id,
+            koreader_book_title,
+            book_id,
+            COUNT(*) as unsynced_session_count
+        FROM historical_sessions
+        WHERE book_id IS NOT NULL AND synced = 0
+        GROUP BY koreader_book_id
+        ORDER BY koreader_book_title
+    ]])
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return {}
+    end
+    
+    local books = {}
+    for row in stmt:rows() do
+        table.insert(books, {
+            koreader_book_id = tonumber(row[1]),
+            koreader_book_title = tostring(row[2]),
+            book_id = tonumber(row[3]),
+            unsynced_session_count = tonumber(row[4]),
+        })
+    end
+    
+    stmt:close()
+    return books
+end
+
 function Database:getHistoricalSessionsForBook(koreader_book_id)
     local stmt = self.conn:prepare([[
         SELECT 
             id, book_id, book_type, start_time, end_time,
             duration_seconds, start_progress, end_progress, progress_delta,
-            start_location, end_location
+            start_location, end_location, synced
         FROM historical_sessions
         WHERE koreader_book_id = ? AND matched = 1
         ORDER BY start_time
@@ -860,6 +1052,49 @@ function Database:getHistoricalSessionsForBook(koreader_book_id)
             progress_delta = tonumber(row[9]),
             start_location = tostring(row[10]),
             end_location = tostring(row[11]),
+            synced = tonumber(row[12]) or 0,
+        })
+    end
+    
+    stmt:close()
+    return sessions
+end
+
+function Database:getHistoricalSessionsForBookUnsynced(koreader_book_id)
+    -- Get only unsynced sessions for a specific book
+    -- Used during auto-sync phase of Match Historical Data
+    local stmt = self.conn:prepare([[
+        SELECT 
+            id, book_id, book_type, start_time, end_time,
+            duration_seconds, start_progress, end_progress, progress_delta,
+            start_location, end_location, synced
+        FROM historical_sessions
+        WHERE koreader_book_id = ? AND book_id IS NOT NULL AND synced = 0
+        ORDER BY start_time
+    ]])
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return {}
+    end
+    
+    stmt:bind(koreader_book_id)
+    
+    local sessions = {}
+    for row in stmt:rows() do
+        table.insert(sessions, {
+            id = tonumber(row[1]),
+            book_id = tonumber(row[2]),
+            book_type = tostring(row[3]),
+            start_time = tostring(row[4]),
+            end_time = tostring(row[5]),
+            duration_seconds = tonumber(row[6]),
+            start_progress = tonumber(row[7]),
+            end_progress = tonumber(row[8]),
+            progress_delta = tonumber(row[9]),
+            start_location = tostring(row[10] or ""),
+            end_location = tostring(row[11] or ""),
+            synced = tonumber(row[12]) or 0,
         })
     end
     
@@ -984,6 +1219,107 @@ function Database:markHistoricalSessionSynced(session_id)
     return result == SQ3.DONE or result == SQ3.OK
 end
 
+function Database:markHistoricalSessionUnmatched(session_id)
+    -- Mark a session as unmatched and not synced (for re-matching after 404)
+    local stmt = self.conn:prepare([[
+        UPDATE historical_sessions 
+        SET matched = 0, synced = 0, book_id = NULL
+        WHERE id = ?
+    ]])
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return false
+    end
+    
+    stmt:bind(session_id)
+    local result = stmt:step()
+    stmt:close()
+    
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
+function Database:getAllSyncedHistoricalSessions()
+    -- Get all synced historical sessions for re-sync
+    local stmt = self.conn:prepare([[
+        SELECT 
+            id, koreader_book_id, koreader_book_title, book_id, book_type,
+            start_time, end_time, duration_seconds, start_progress, end_progress,
+            progress_delta, start_location, end_location
+        FROM historical_sessions
+        WHERE synced = 1 AND book_id IS NOT NULL
+        ORDER BY start_time
+    ]])
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return {}
+    end
+    
+    local sessions = {}
+    for row in stmt:rows() do
+        table.insert(sessions, {
+            id = tonumber(row[1]),
+            koreader_book_id = tonumber(row[2]),
+            koreader_book_title = tostring(row[3]),
+            book_id = tonumber(row[4]),
+            book_type = tostring(row[5]),
+            start_time = tostring(row[6]),
+            end_time = tostring(row[7]),
+            duration_seconds = tonumber(row[8]),
+            start_progress = tonumber(row[9]),
+            end_progress = tonumber(row[10]),
+            progress_delta = tonumber(row[11]),
+            start_location = tostring(row[12] or ""),
+            end_location = tostring(row[13] or ""),
+        })
+    end
+    
+    stmt:close()
+    return sessions
+end
+
+function Database:getMatchedUnsyncedHistoricalSessions()
+    -- Get sessions that are matched (have book_id) but not yet synced
+    -- These are typically sessions that were re-matched after a 404 error
+    local stmt = self.conn:prepare([[
+        SELECT 
+            id, koreader_book_id, koreader_book_title, book_id, book_type,
+            start_time, end_time, duration_seconds, start_progress, end_progress,
+            progress_delta, start_location, end_location
+        FROM historical_sessions
+        WHERE matched = 1 AND synced = 0 AND book_id IS NOT NULL
+        ORDER BY start_time
+    ]])
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return {}
+    end
+    
+    local sessions = {}
+    for row in stmt:rows() do
+        table.insert(sessions, {
+            id = tonumber(row[1]),
+            koreader_book_id = tonumber(row[2]),
+            koreader_book_title = tostring(row[3]),
+            book_id = tonumber(row[4]),
+            book_type = tostring(row[5]),
+            start_time = tostring(row[6]),
+            end_time = tostring(row[7]),
+            duration_seconds = tonumber(row[8]),
+            start_progress = tonumber(row[9]),
+            end_progress = tonumber(row[10]),
+            progress_delta = tonumber(row[11]),
+            start_location = tostring(row[12] or ""),
+            end_location = tostring(row[13] or ""),
+        })
+    end
+    
+    stmt:close()
+    return sessions
+end
+
 function Database:hasHistoricalSessions()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM historical_sessions LIMIT 1")
     
@@ -1031,6 +1367,79 @@ function Database:findBookIdByHash(md5_hash)
     
     stmt:close()
     return result
+end
+
+--[[--
+Find book_id by ISBN (prefers ISBN-13 over ISBN-10)
+
+@param isbn10 ISBN-10 string (optional)
+@param isbn13 ISBN-13 string (optional)
+@return table|nil Returns {book_id, title, author, file_hash, isbn10, isbn13} or nil
+--]]
+function Database:findBookIdByIsbn(isbn10, isbn13)
+    -- Prefer ISBN-13 if both provided
+    if isbn13 and isbn13 ~= "" then
+        local stmt = self.conn:prepare([[
+            SELECT book_id, title, author, file_hash, isbn10, isbn13
+            FROM book_cache
+            WHERE isbn13 = ? AND book_id IS NOT NULL
+            LIMIT 1
+        ]])
+        
+        if not stmt then
+            logger.err("BookloreSync Database: Failed to prepare isbn13 lookup:", self.conn:errmsg())
+            return nil
+        end
+        
+        stmt:bind(isbn13)
+        
+        for row in stmt:rows() do
+            local result = {
+                book_id = row[1] and tonumber(row[1]) or nil,
+                title = row[2] and tostring(row[2]) or nil,
+                author = row[3] and tostring(row[3]) or nil,
+                file_hash = row[4] and tostring(row[4]) or nil,
+                isbn10 = row[5] and tostring(row[5]) or nil,
+                isbn13 = row[6] and tostring(row[6]) or nil,
+            }
+            stmt:close()
+            return result
+        end
+        stmt:close()
+    end
+    
+    -- Fallback to ISBN-10 if ISBN-13 not found or not provided
+    if isbn10 and isbn10 ~= "" then
+        local stmt = self.conn:prepare([[
+            SELECT book_id, title, author, file_hash, isbn10, isbn13
+            FROM book_cache
+            WHERE isbn10 = ? AND book_id IS NOT NULL
+            LIMIT 1
+        ]])
+        
+        if not stmt then
+            logger.err("BookloreSync Database: Failed to prepare isbn10 lookup:", self.conn:errmsg())
+            return nil
+        end
+        
+        stmt:bind(isbn10)
+        
+        for row in stmt:rows() do
+            local result = {
+                book_id = row[1] and tonumber(row[1]) or nil,
+                title = row[2] and tostring(row[2]) or nil,
+                author = row[3] and tostring(row[3]) or nil,
+                file_hash = row[4] and tostring(row[4]) or nil,
+                isbn10 = row[5] and tostring(row[5]) or nil,
+                isbn13 = row[6] and tostring(row[6]) or nil,
+            }
+            stmt:close()
+            return result
+        end
+        stmt:close()
+    end
+    
+    return nil
 end
 
 -- Migration data from LuaSettings (for backward compatibility)
@@ -1099,6 +1508,112 @@ function Database:migrateFromLuaSettings(local_db)
     end
     
     return success
+end
+
+-- Bearer Token Management Functions
+
+function Database:saveBearerToken(username, token)
+    -- Save or update Bearer token for a user
+    -- Token expires in 4 weeks (28 days)
+    local expires_at = os.time() + (28 * 24 * 60 * 60)  -- 4 weeks from now
+    
+    -- Delete old token first to avoid unique constraint issues
+    local delete_stmt = self.conn:prepare("DELETE FROM bearer_tokens WHERE username = ?")
+    if delete_stmt then
+        delete_stmt:bind(username)
+        delete_stmt:step()
+        delete_stmt:close()
+    end
+    
+    -- Insert new token
+    local stmt = self.conn:prepare([[
+        INSERT INTO bearer_tokens (username, token, expires_at)
+        VALUES (?, ?, ?)
+    ]])
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return false
+    end
+    
+    stmt:bind(username, token, expires_at)
+    local result = stmt:step()
+    stmt:close()
+    
+    if result == SQ3.DONE or result == SQ3.OK then
+        logger.info("BookloreSync Database: Saved Bearer token for user:", username)
+        return true
+    else
+        logger.err("BookloreSync Database: Failed to save Bearer token:", self.conn:errmsg())
+        return false
+    end
+end
+
+function Database:getBearerToken(username)
+    -- Get cached Bearer token if it exists and hasn't expired
+    -- Returns token and expires_at timestamp for proactive refresh checking
+    local stmt = self.conn:prepare([[
+        SELECT token, expires_at
+        FROM bearer_tokens
+        WHERE username = ? AND expires_at > ?
+        LIMIT 1
+    ]])
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return nil, nil
+    end
+    
+    local current_time = os.time()
+    stmt:bind(username, current_time)
+    
+    local token = nil
+    local expires_at = nil
+    for row in stmt:rows() do
+        token = tostring(row[1])
+        expires_at = tonumber(row[2])
+        local time_remaining = expires_at - current_time
+        logger.info("BookloreSync Database: Found cached Bearer token for", username, 
+                   "- expires in", math.floor(time_remaining / 86400), "days")
+        break
+    end
+    
+    stmt:close()
+    return token, expires_at
+end
+
+function Database:deleteBearerToken(username)
+    -- Delete cached Bearer token (used when token is invalid)
+    local stmt = self.conn:prepare("DELETE FROM bearer_tokens WHERE username = ?")
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return false
+    end
+    
+    stmt:bind(username)
+    stmt:step()
+    stmt:close()
+    
+    logger.info("BookloreSync Database: Deleted Bearer token for user:", username)
+    return true
+end
+
+function Database:cleanupExpiredTokens()
+    -- Clean up expired tokens (maintenance function)
+    local stmt = self.conn:prepare("DELETE FROM bearer_tokens WHERE expires_at <= ?")
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return false
+    end
+    
+    stmt:bind(os.time())
+    stmt:step()
+    stmt:close()
+    
+    logger.info("BookloreSync Database: Cleaned up expired Bearer tokens")
+    return true
 end
 
 return Database

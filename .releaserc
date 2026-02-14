@@ -5,14 +5,8 @@ plugins:
   # generates the CHANGELOG.md
   - "@semantic-release/changelog"
   # emulates bumpversion (replaces version in pyproject.toml)
-  - - semantic-release-replace-plugin
-    - replacements:
-        - files:
-            - pyproject.toml
-          from:
-            - ^version *= *"\d+\.\d+\.\d+"
-          to: 'version = "${nextRelease.version}"'
-          countMatches: true
+  # - - semantic-release-replace-plugin
+
   # git commit/push modified files (CHANGELOG.md & pyproject.toml)
   - - "@semantic-release/git"
     - assets:

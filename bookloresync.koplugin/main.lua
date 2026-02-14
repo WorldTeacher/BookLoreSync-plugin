@@ -1512,7 +1512,10 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
     -- Try MD5 auto-matching
     local book_id = nil
     if book.md5 and book.md5 ~= "" then
-        book_id = self.db:findBookIdByHash(book.md5)
+        local cached_book = self.db:findBookIdByHash(book.md5)
+        if cached_book then
+            book_id = cached_book.book_id
+        end
     end
     
     -- Add book metadata to each session
@@ -1646,6 +1649,28 @@ function BookloreSync:_detectBookType(book)
     end
 end
 
+function BookloreSync:_formatDuration(seconds)
+    -- Format duration like: "5m 9s", "1h 23m 45s", "45s"
+    -- Only include non-zero parts
+    local parts = {}
+    
+    local hours = math.floor(seconds / 3600)
+    local mins = math.floor((seconds % 3600) / 60)
+    local secs = seconds % 60
+    
+    if hours > 0 then
+        table.insert(parts, string.format("%dh", hours))
+    end
+    if mins > 0 then
+        table.insert(parts, string.format("%dm", mins))
+    end
+    if secs > 0 or #parts == 0 then  -- Always show seconds if duration is 0
+        table.insert(parts, string.format("%ds", secs))
+    end
+    
+    return table.concat(parts, " ")
+end
+
 function BookloreSync:matchHistoricalData()
     if not self.db then
         UIManager:show(InfoMessage:new{
@@ -1693,9 +1718,9 @@ function BookloreSync:_showNextBookMatch()
     
     -- Check if book has MD5 hash for auto-matching
     if book.book_hash and book.book_hash ~= "" then
-        local book_id = self.db:findBookIdByHash(book.book_hash)
-        if book_id then
-            self:_confirmAutoMatch(book, book_id)
+        local cached_book = self.db:findBookIdByHash(book.book_hash)
+        if cached_book and cached_book.book_id then
+            self:_confirmAutoMatch(book, cached_book.book_id)
             return
         end
     end
@@ -1854,20 +1879,26 @@ function BookloreSync:_saveMatchAndSync(book, selected_result)
     
     for _, session in ipairs(sessions) do
         if not session.synced or session.synced == 0 then
-            -- Convert progress from 0.0-1.0 to 0-100
-            local start_progress = math.floor((session.start_progress or 0) * 100)
-            local end_progress = math.floor((session.end_progress or 0) * 100)
+            -- Progress values should be 0.0-1.0 (decimals)
+            local start_progress = session.start_progress or 0
+            local end_progress = session.end_progress or 0
+            local progress_delta = session.progress_delta or (end_progress - start_progress)
             
-            local success = self.api:submitReadingSession({
-                book_id = session.book_id,
-                book_type = session.book_type,
-                start_time = session.start_time,
-                end_time = session.end_time,
-                duration_seconds = session.duration_seconds,
-                start_progress = start_progress,
-                end_progress = end_progress,
-                start_location = session.start_location,
-                end_location = session.end_location,
+            -- Format duration
+            local duration_formatted = self:_formatDuration(session.duration_seconds or 0)
+            
+            local success = self.api:submitSession({
+                bookId = session.book_id,
+                bookType = session.book_type,
+                startTime = session.start_time,
+                endTime = session.end_time,
+                durationSeconds = session.duration_seconds,
+                durationFormatted = duration_formatted,
+                startProgress = start_progress,
+                endProgress = end_progress,
+                progressDelta = progress_delta,
+                startLocation = session.start_location,
+                endLocation = session.end_location,
             })
             
             if success then

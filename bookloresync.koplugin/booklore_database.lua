@@ -403,6 +403,13 @@ function Database:getBookByHash(file_hash)
 end
 
 function Database:getBookByBookId(book_id)
+    -- Ensure book_id is a number
+    book_id = tonumber(book_id)
+    if not book_id then
+        logger.err("BookloreSync Database: Invalid book_id provided to getBookByBookId")
+        return nil
+    end
+    
     local stmt = self.conn:prepare([[
         SELECT id, file_path, file_hash, book_id, title, author, last_accessed
         FROM book_cache

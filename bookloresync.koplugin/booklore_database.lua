@@ -986,12 +986,46 @@ function Database:getUnmatchedHistoricalBooks()
     return books
 end
 
+function Database:getMatchedUnsyncedBooks()
+    -- Get books that have sessions with book_id but not yet synced
+    -- These are typically books auto-matched during extraction
+    local stmt = self.conn:prepare([[
+        SELECT 
+            koreader_book_id,
+            koreader_book_title,
+            book_id,
+            COUNT(*) as unsynced_session_count
+        FROM historical_sessions
+        WHERE book_id IS NOT NULL AND synced = 0
+        GROUP BY koreader_book_id
+        ORDER BY koreader_book_title
+    ]])
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return {}
+    end
+    
+    local books = {}
+    for row in stmt:rows() do
+        table.insert(books, {
+            koreader_book_id = tonumber(row[1]),
+            koreader_book_title = tostring(row[2]),
+            book_id = tonumber(row[3]),
+            unsynced_session_count = tonumber(row[4]),
+        })
+    end
+    
+    stmt:close()
+    return books
+end
+
 function Database:getHistoricalSessionsForBook(koreader_book_id)
     local stmt = self.conn:prepare([[
         SELECT 
             id, book_id, book_type, start_time, end_time,
             duration_seconds, start_progress, end_progress, progress_delta,
-            start_location, end_location
+            start_location, end_location, synced
         FROM historical_sessions
         WHERE koreader_book_id = ? AND matched = 1
         ORDER BY start_time
@@ -1018,6 +1052,49 @@ function Database:getHistoricalSessionsForBook(koreader_book_id)
             progress_delta = tonumber(row[9]),
             start_location = tostring(row[10]),
             end_location = tostring(row[11]),
+            synced = tonumber(row[12]) or 0,
+        })
+    end
+    
+    stmt:close()
+    return sessions
+end
+
+function Database:getHistoricalSessionsForBookUnsynced(koreader_book_id)
+    -- Get only unsynced sessions for a specific book
+    -- Used during auto-sync phase of Match Historical Data
+    local stmt = self.conn:prepare([[
+        SELECT 
+            id, book_id, book_type, start_time, end_time,
+            duration_seconds, start_progress, end_progress, progress_delta,
+            start_location, end_location, synced
+        FROM historical_sessions
+        WHERE koreader_book_id = ? AND book_id IS NOT NULL AND synced = 0
+        ORDER BY start_time
+    ]])
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return {}
+    end
+    
+    stmt:bind(koreader_book_id)
+    
+    local sessions = {}
+    for row in stmt:rows() do
+        table.insert(sessions, {
+            id = tonumber(row[1]),
+            book_id = tonumber(row[2]),
+            book_type = tostring(row[3]),
+            start_time = tostring(row[4]),
+            end_time = tostring(row[5]),
+            duration_seconds = tonumber(row[6]),
+            start_progress = tonumber(row[7]),
+            end_progress = tonumber(row[8]),
+            progress_delta = tonumber(row[9]),
+            start_location = tostring(row[10] or ""),
+            end_location = tostring(row[11] or ""),
+            synced = tonumber(row[12]) or 0,
         })
     end
     

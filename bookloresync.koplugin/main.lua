@@ -1760,15 +1760,174 @@ function BookloreSync:matchHistoricalData()
         return
     end
     
+    -- PHASE 1: Auto-sync sessions that were matched during extraction
+    local matched_unsynced_books = self.db:getMatchedUnsyncedBooks()
+    
+    if matched_unsynced_books and #matched_unsynced_books > 0 then
+        logger.info("BookloreSync: Found", #matched_unsynced_books, 
+                   "books with auto-matched but unsynced sessions")
+        self:_autoSyncMatchedSessions(matched_unsynced_books)
+        return
+    end
+    
+    -- PHASE 2: Manual matching for truly unmatched books (no book_id)
+    self:_startManualMatching()
+end
+
+function BookloreSync:_autoSyncMatchedSessions(books)
+    -- Auto-sync sessions for books that were matched during extraction
+    -- Shows progress indicator similar to re-sync feature
+    
+    if not books or #books == 0 then
+        self:_startManualMatching()
+        return
+    end
+    
+    local total_books = #books
+    local total_sessions = 0
+    for _, book in ipairs(books) do
+        total_sessions = total_sessions + book.unsynced_session_count
+    end
+    
+    logger.info("BookloreSync: Auto-syncing", total_sessions, "sessions from", total_books, "matched books")
+    
+    -- Initialize progress indicator
+    local progress_msg = InfoMessage:new{
+        text = T(_("Auto-syncing matched sessions...\n\n0 / %1 books\n0 / %2 sessions\n\nSynced: 0\nFailed: 0"),
+            total_books, total_sessions),
+    }
+    UIManager:show(progress_msg)
+    
+    -- Initialize sync state
+    self.autosync_books = books
+    self.autosync_index = 1
+    self.autosync_total_synced = 0
+    self.autosync_total_failed = 0
+    self.autosync_total_books = total_books
+    self.autosync_total_sessions = total_sessions
+    self.autosync_progress_msg = progress_msg
+    
+    -- Start syncing
+    self:_syncNextMatchedBook()
+end
+
+function BookloreSync:_syncNextMatchedBook()
+    if not self.autosync_books or self.autosync_index > #self.autosync_books then
+        -- Auto-sync phase complete
+        UIManager:close(self.autosync_progress_msg)
+        
+        local result_text = T(_("Auto-sync complete!\n\nBooks processed: %1\nSessions synced: %2\nFailed: %3"), 
+                             #self.autosync_books,
+                             self.autosync_total_synced, 
+                             self.autosync_total_failed)
+        
+        UIManager:show(InfoMessage:new{
+            text = result_text,
+            timeout = 4,
+        })
+        
+        logger.info("BookloreSync: Auto-sync complete - synced:", self.autosync_total_synced,
+                   "failed:", self.autosync_total_failed)
+        
+        -- Clean up state
+        self.autosync_books = nil
+        self.autosync_index = nil
+        self.autosync_total_synced = nil
+        self.autosync_total_failed = nil
+        self.autosync_total_books = nil
+        self.autosync_total_sessions = nil
+        self.autosync_progress_msg = nil
+        
+        -- Proceed to Phase 2: Manual matching
+        self:_startManualMatching()
+        return
+    end
+    
+    local book = self.autosync_books[self.autosync_index]
+    
+    -- Update progress indicator
+    UIManager:close(self.autosync_progress_msg)
+    self.autosync_progress_msg = InfoMessage:new{
+        text = T(_("Auto-syncing matched sessions...\n\n%1 / %2 books\n%3 / %4 sessions\n\nSynced: %5\nFailed: %6\n\nCurrent: %7"),
+            self.autosync_index, 
+            self.autosync_total_books,
+            self.autosync_total_synced + self.autosync_total_failed,
+            self.autosync_total_sessions,
+            self.autosync_total_synced,
+            self.autosync_total_failed,
+            book.koreader_book_title),
+    }
+    UIManager:show(self.autosync_progress_msg)
+    UIManager:forceRePaint()
+    
+    -- Get unsynced sessions for this book
+    local sessions = self.db:getHistoricalSessionsForBookUnsynced(book.koreader_book_id)
+    
+    if not sessions or #sessions == 0 then
+        logger.warn("BookloreSync: No unsynced sessions found for book:", book.koreader_book_title)
+        self.autosync_index = self.autosync_index + 1
+        self:_syncNextMatchedBook()
+        return
+    end
+    
+    -- Sync sessions for this book
+    local synced_count = 0
+    local failed_count = 0
+    
+    for _, session in ipairs(sessions) do
+        local start_progress = session.start_progress or 0
+        local end_progress = session.end_progress or 0
+        local progress_delta = session.progress_delta or (end_progress - start_progress)
+        local duration_formatted = self:_formatDuration(session.duration_seconds or 0)
+        
+        local success, message = self.api:submitSession({
+            bookId = session.book_id,
+            bookType = session.book_type,
+            startTime = session.start_time,
+            endTime = session.end_time,
+            durationSeconds = session.duration_seconds,
+            durationFormatted = duration_formatted,
+            startProgress = start_progress,
+            endProgress = end_progress,
+            progressDelta = progress_delta,
+            startLocation = session.start_location,
+            endLocation = session.end_location,
+        })
+        
+        if success then
+            self.db:markHistoricalSessionSynced(session.id)
+            synced_count = synced_count + 1
+        else
+            failed_count = failed_count + 1
+            logger.warn("BookloreSync: Failed to sync session for book:", book.koreader_book_title, "Error:", message)
+        end
+    end
+    
+    -- Update totals
+    self.autosync_total_synced = self.autosync_total_synced + synced_count
+    self.autosync_total_failed = self.autosync_total_failed + failed_count
+    
+    logger.info("BookloreSync: Auto-synced", synced_count, "sessions for:", book.koreader_book_title,
+               "(", failed_count, "failed)")
+    
+    -- Move to next book
+    self.autosync_index = self.autosync_index + 1
+    self:_syncNextMatchedBook()
+end
+
+function BookloreSync:_startManualMatching()
+    -- Phase 2: Manual matching for books without book_id
     local unmatched = self.db:getUnmatchedHistoricalBooks()
     
     if not unmatched or #unmatched == 0 then
         UIManager:show(InfoMessage:new{
-            text = _("All historical books are already matched!"),
-            timeout = 2,
+            text = _("All historical sessions are matched and synced!"),
+            timeout = 3,
         })
         return
     end
+    
+    logger.info("BookloreSync: Starting manual matching for", #unmatched, "books")
     
     -- Start matching process with first unmatched book
     self.matching_index = 1

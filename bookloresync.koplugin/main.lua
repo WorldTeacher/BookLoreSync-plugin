@@ -1146,6 +1146,58 @@ function BookloreSync:onCloseDocument()
 end
 
 --[[--
+Attempt to connect to network with timeout
+
+This function tries to enable WiFi and wait for network connection.
+Used when "Connect network on suspend" is enabled.
+
+@return boolean true if connected, false otherwise
+--]]
+function BookloreSync:connectNetwork()
+    local Device = require("device")
+    
+    -- Check if device has network capability
+    if not Device:hasWifiToggle() then
+        logger.warn("BookloreSync: Device does not support WiFi toggle")
+        return false
+    end
+    
+    -- Check if already connected
+    if Device.isOnline and Device:isOnline() then
+        logger.info("BookloreSync: Network already connected")
+        return true
+    end
+    
+    logger.info("BookloreSync: Attempting to connect to network")
+    
+    -- Turn on WiFi if it's off
+    if not Device:isConnected() then
+        logger.info("BookloreSync: Enabling WiFi")
+        Device:setWifiState(true)
+    end
+    
+    -- Wait up to 15 seconds for connection
+    local timeout = 15
+    local elapsed = 0
+    local check_interval = 0.5
+    
+    while elapsed < timeout do
+        if Device.isOnline and Device:isOnline() then
+            logger.info("BookloreSync: Network connected successfully after", elapsed, "seconds")
+            return true
+        end
+        
+        -- Sleep for check_interval seconds
+        local ffiutil = require("ffi/util")
+        ffiutil.sleep(check_interval)
+        elapsed = elapsed + check_interval
+    end
+    
+    logger.warn("BookloreSync: Network connection timeout after", timeout, "seconds")
+    return false
+end
+
+--[[--
 Handler for when the device is about to suspend
 --]]
 function BookloreSync:onSuspend()
@@ -1154,7 +1206,31 @@ function BookloreSync:onSuspend()
     end
     
     logger.info("BookloreSync: Device suspending")
+    
+    -- Always end current session and queue it
     self:endSession({ silent = true, force_queue = true })
+    
+    -- Check if force push on suspend is enabled
+    if self.force_push_session_on_suspend then
+        logger.info("BookloreSync: Force push on suspend enabled")
+        
+        -- Check if we should connect to network first
+        if self.connect_network_on_suspend then
+            logger.info("BookloreSync: Attempting to connect to network before sync")
+            local network_ok = self:connectNetwork()
+            
+            if not network_ok then
+                logger.warn("BookloreSync: Network connection failed, will attempt sync anyway")
+            end
+        end
+        
+        -- Force sync all pending sessions silently
+        logger.info("BookloreSync: Force syncing pending sessions on suspend")
+        self:syncPendingSessions(true) -- true = silent mode
+    else
+        logger.info("BookloreSync: Force push on suspend disabled, sessions will sync on resume")
+    end
+    
     return false
 end
 

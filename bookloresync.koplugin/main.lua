@@ -875,7 +875,8 @@ function BookloreSync:getBookIdByHash(book_hash)
         logger.info("BookloreSync: Updated database cache with book ID and ISBN")
     end
     
-    return book_id
+    -- Return both book_id and ISBN data so caller can save if needed
+    return book_id, isbn10, isbn13
 end
 
 --[[--
@@ -939,26 +940,31 @@ function BookloreSync:startSession()
             logger.info("BookloreSync: Hash calculated:", file_hash)
             
             -- Try to look up book ID from server by hash
-            book_id = self:getBookIdByHash(file_hash)
+            local isbn10, isbn13
+            book_id, isbn10, isbn13 = self:getBookIdByHash(file_hash)
             
             if book_id then
                 logger.info("BookloreSync: Book ID found on server:", book_id)
+                if isbn10 or isbn13 then
+                    logger.info("BookloreSync: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
+                end
             else
                 logger.info("BookloreSync: Book not found on server (offline or not in library)")
             end
             
-            -- Cache the book info in database
-            logger.info("BookloreSync: Calling cacheBook with:")
+            -- Cache the book info in database (including ISBN if available)
+            logger.info("BookloreSync: Calling saveBookCache with:")
             logger.info("  file_path:", file_path, "type:", type(file_path))
             logger.info("  file_hash:", file_hash, "type:", type(file_hash))
             logger.info("  book_id:", book_id, "type:", type(book_id))
+            logger.info("  isbn10:", isbn10, "isbn13:", isbn13)
             
             local ok, result = pcall(function()
-                return self.db:cacheBook(file_path, file_hash, book_id)
+                return self.db:saveBookCache(file_path, file_hash, book_id, nil, nil, isbn10, isbn13)
             end)
             
             if not ok then
-                logger.err("BookloreSync: Error in cacheBook:", result)
+                logger.err("BookloreSync: Error in saveBookCache:", result)
                 logger.err("  file_path:", file_path)
                 logger.err("  file_hash:", file_hash)
                 logger.err("  book_id:", book_id)

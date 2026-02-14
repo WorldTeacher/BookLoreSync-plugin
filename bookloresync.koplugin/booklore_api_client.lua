@@ -275,6 +275,25 @@ function APIClient:getBookByHash(book_hash)
     
     if success and type(response) == "table" then
         logger.info("BookloreSync API: Found book, ID:", response.id)
+        
+        -- Extract ISBN from metadata if present
+        local isbn10 = nil
+        local isbn13 = nil
+        if response.metadata and type(response.metadata) == "table" then
+            isbn10 = response.metadata.isbn10
+            isbn13 = response.metadata.isbn13
+        end
+        
+        -- Store ISBN in top-level response for easier access by caller
+        response.isbn10 = isbn10
+        response.isbn13 = isbn13
+        
+        if isbn10 or isbn13 then
+            logger.info("BookloreSync API: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
+        else
+            logger.info("BookloreSync API: Book has no ISBN data")
+        end
+        
         return true, response
     else
         local error_msg = response or "Book not found"
@@ -419,6 +438,12 @@ function APIClient:searchBooksWithAuth(title, username, password)
     
     if success and type(response) == "table" then
         logger.info("BookloreSync API: Found", #response, "matches")
+        
+        -- Normalize each book object to extract ISBN from metadata
+        for i, book in ipairs(response) do
+            response[i] = self:_normalizeBookObject(book)
+        end
+        
         return true, response
     else
         local error_msg = response or "No matches found"
@@ -460,6 +485,12 @@ function APIClient:searchBooksByIsbn(isbn, username, password)
     
     if success and type(response) == "table" then
         logger.info("BookloreSync API: Found", #response, "ISBN matches")
+        
+        -- Normalize each book object to extract ISBN from metadata
+        for i, book in ipairs(response) do
+            response[i] = self:_normalizeBookObject(book)
+        end
+        
         return true, response
     else
         local error_msg = response or "No ISBN matches found"
@@ -497,6 +528,23 @@ function APIClient:getBookByHashWithAuth(book_hash, username, password)
     
     if success and type(response) == "table" then
         logger.info("BookloreSync API: Found book by hash, ID:", response.id)
+        
+        -- Extract ISBN from metadata if present
+        local isbn10 = nil
+        local isbn13 = nil
+        if response.metadata and type(response.metadata) == "table" then
+            isbn10 = response.metadata.isbn10
+            isbn13 = response.metadata.isbn13
+        end
+        
+        -- Store ISBN in top-level response for easier access by caller
+        response.isbn10 = isbn10
+        response.isbn13 = isbn13
+        
+        if isbn10 or isbn13 then
+            logger.info("BookloreSync API: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
+        end
+        
         return true, response
     else
         local error_msg = response or "Book not found"
@@ -521,6 +569,30 @@ function APIClient:_urlEncode(str)
         end)
     str = string.gsub(str, " ", "+")
     return str
+end
+
+--[[--
+Normalize book object by extracting ISBN from metadata to top level
+
+@param book Book object from API
+@return table Normalized book object with isbn10/isbn13 at top level
+--]]
+function APIClient:_normalizeBookObject(book)
+    if not book or type(book) ~= "table" then
+        return book
+    end
+    
+    -- Extract ISBN from metadata if present
+    if book.metadata and type(book.metadata) == "table" then
+        if not book.isbn10 then
+            book.isbn10 = book.metadata.isbn10
+        end
+        if not book.isbn13 then
+            book.isbn13 = book.metadata.isbn13
+        end
+    end
+    
+    return book
 end
 
 return APIClient

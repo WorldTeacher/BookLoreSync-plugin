@@ -15,6 +15,7 @@ local LuaSettings = require("luasettings")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
+local ButtonDialog = require("ui/widget/buttondialog")
 local Settings = require("booklore_settings")
 local Database = require("booklore_database")
 local APIClient = require("booklore_api_client")
@@ -54,6 +55,10 @@ function BookloreSync:init()
     
     -- Historical data tracking
     self.historical_sync_ack = self.settings:readSetting("historical_sync_ack") or false
+    
+    -- Booklore login credentials for historical data matching
+    self.booklore_username = self.settings:readSetting("booklore_username") or ""
+    self.booklore_password = self.settings:readSetting("booklore_password") or ""
     
     -- Current reading session tracking
     self.current_session = nil
@@ -445,28 +450,35 @@ function BookloreSync:addToMainMenu(menu_items)
         text = _("Historical Data"),
         sub_item_table = {
             {
-                text = _("Sync Historical Data"),
-                help_text = _("One-time sync of all reading sessions from KOReader's statistics database. This reads from statistics.sqlite3 and uploads historical sessions. Warning: May create duplicate sessions if run multiple times."),
+                text = _("Booklore Login"),
+                help_text = _("Configure Booklore username and password for accessing the books/search endpoint."),
+                callback = function()
+                    self:configureBookloreLogin()
+                end,
+            },
+            {
+                text = _("Copy Sessions from KOReader"),
+                help_text = _("One-time extraction of reading sessions from KOReader's statistics database. This reads page statistics and groups them into sessions. Run this first before matching."),
                 enabled_func = function()
-                    return self.server_url ~= "" and self.username ~= "" and self.is_enabled
+                    return self.is_enabled
                 end,
                 callback = function()
-                    self:syncHistoricalData()
+                    self:copySessionsFromKOReader()
                 end,
             },
             {
                 text = _("Match Historical Data"),
-                help_text = _("Scan local books and match them with Booklore server entries. Search by title and select the correct match from server results. This helps identify books for accurate session tracking."),
+                help_text = _("Match extracted sessions with books on Booklore server. For each unmatched book, searches by title and lets you select the correct match. Matched sessions are automatically synced."),
                 enabled_func = function()
-                    return self.server_url ~= "" and self.username ~= "" and self.is_enabled
+                    return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
                 end,
                 callback = function()
                     self:matchHistoricalData()
                 end,
             },
             {
-                text = _("View Match Statistics"),
-                help_text = _("Display statistics about book matching: number of books matched to Booklore entries, unmatched books, and matching progress."),
+                text = _("View Historical Statistics"),
+                help_text = _("Display statistics about historical sessions: total sessions extracted, matched sessions, unmatched sessions, and synced sessions."),
                 callback = function()
                     self:viewMatchStatistics()
                 end,
@@ -479,6 +491,75 @@ function BookloreSync:addToMainMenu(menu_items)
         sorting_hint = "tools",
         sub_item_table = base_menu,
     }
+end
+
+-- Booklore login configuration for historical data
+function BookloreSync:configureBookloreLogin()
+    local username_input
+    username_input = InputDialog:new{
+        title = _("Booklore Username"),
+        input = self.booklore_username,
+        input_hint = _("Enter Booklore username"),
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    callback = function()
+                        UIManager:close(username_input)
+                    end,
+                },
+                {
+                    text = _("Next"),
+                    is_enter_default = true,
+                    callback = function()
+                        self.booklore_username = username_input:getInputText()
+                        UIManager:close(username_input)
+                        
+                        -- Now prompt for password
+                        local password_input
+                        password_input = InputDialog:new{
+                            title = _("Booklore Password"),
+                            input = self.booklore_password,
+                            input_hint = _("Enter Booklore password"),
+                            text_type = "password",
+                            buttons = {
+                                {
+                                    {
+                                        text = _("Cancel"),
+                                        callback = function()
+                                            UIManager:close(password_input)
+                                        end,
+                                    },
+                                    {
+                                        text = _("Save"),
+                                        is_enter_default = true,
+                                        callback = function()
+                                            self.booklore_password = password_input:getInputText()
+                                            UIManager:close(password_input)
+                                            
+                                            -- Save settings
+                                            self.settings:saveSetting("booklore_username", self.booklore_username)
+                                            self.settings:saveSetting("booklore_password", self.booklore_password)
+                                            self.settings:flush()
+                                            
+                                            UIManager:show(InfoMessage:new{
+                                                text = _("Booklore login credentials saved"),
+                                                timeout = 2,
+                                            })
+                                        end,
+                                    },
+                                },
+                            },
+                        }
+                        UIManager:show(password_input)
+                        password_input:onShowKeyboard()
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(username_input)
+    username_input:onShowKeyboard()
 end
 
 -- Connection testing
@@ -1214,48 +1295,639 @@ function BookloreSync:syncPendingSessions(silent)
     return synced_count, failed_count
 end
 
-function BookloreSync:syncHistoricalData()
-    local function startSync()
-        self.historical_sync_ack = true
-        self.settings:saveSetting("historical_sync_ack", self.historical_sync_ack)
-        self.settings:flush()
-        self:_runHistoricalDataSync()
-    end
-
-    if not self.historical_sync_ack then
+function BookloreSync:copySessionsFromKOReader()
+    -- Check if already run
+    if self.db:hasHistoricalSessions() then
         UIManager:show(ConfirmBox:new{
-            text = _("This should only be run once. Any run after this will cause sessions to show up multiple times in booklore"),
-            ok_text = _("Sync now"),
+            text = _("Historical sessions already extracted. Re-running will add duplicate sessions. Continue?"),
+            ok_text = _("Continue"),
             cancel_text = _("Cancel"),
             ok_callback = function()
-                startSync()
+                self:_extractHistoricalSessions()
             end,
         })
         return
     end
-
+    
+    -- Show initial warning
     UIManager:show(ConfirmBox:new{
-        text = _("You already synced historical data. Are you sure you want to sync again and possibly create duplicate entries?"),
-        ok_text = _("Sync again"),
+        text = _("This will extract reading sessions from KOReader's statistics database.\n\nThis should only be done once to avoid duplicates.\n\nContinue?"),
+        ok_text = _("Extract Sessions"),
         cancel_text = _("Cancel"),
         ok_callback = function()
-            startSync()
+            self:_extractHistoricalSessions()
         end,
     })
 end
 
-function BookloreSync:_runHistoricalDataSync()
+function BookloreSync:_extractHistoricalSessions()
+    -- Show processing message
     UIManager:show(InfoMessage:new{
-        text = _("Historical data sync - not yet implemented"),
-        timeout = 2,
+        text = _("Extracting sessions from KOReader database..."),
+        timeout = 1,
+    })
+    
+    -- 1. Find statistics.sqlite3
+    local stats_db_path = self:_findKOReaderStatisticsDB()
+    if not stats_db_path then
+        UIManager:show(InfoMessage:new{
+            text = _("KOReader statistics database not found"),
+            timeout = 3,
+        })
+        return
+    end
+    
+    logger.info("BookloreSync: Found statistics database at:", stats_db_path)
+    
+    -- 2. Open statistics database
+    local SQ3 = require("lua-ljsqlite3/init")
+    local stats_conn = SQ3.open(stats_db_path)
+    if not stats_conn then
+        UIManager:show(InfoMessage:new{
+            text = _("Failed to open statistics database"),
+            timeout = 3,
+        })
+        return
+    end
+    
+    -- 3. Get all books
+    local books = self:_getKOReaderBooks(stats_conn)
+    logger.info("BookloreSync: Found", #books, "books in statistics")
+    
+    -- 4. Calculate sessions for each book
+    local all_sessions = {}
+    local books_with_sessions = 0
+    
+    for i, book in ipairs(books) do
+        local page_stats = self:_getPageStats(stats_conn, book.id)
+        
+        if #page_stats > 0 then
+            local sessions = self:_calculateSessionsFromPageStats(page_stats, book)
+            
+            -- Filter out 0% progress sessions
+            local valid_sessions = {}
+            for _, session in ipairs(sessions) do
+                if session.progress_delta > 0 then
+                    table.insert(valid_sessions, session)
+                end
+            end
+            
+            if #valid_sessions > 0 then
+                for _, session in ipairs(valid_sessions) do
+                    table.insert(all_sessions, session)
+                end
+                books_with_sessions = books_with_sessions + 1
+            end
+        end
+    end
+    
+    stats_conn:close()
+    
+    -- 5. Store in database
+    if #all_sessions > 0 then
+        local success = self.db:addHistoricalSessions(all_sessions)
+        
+        if success then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Found %1 reading sessions from %2 books\n\nStored in database"), 
+                         #all_sessions, books_with_sessions),
+                timeout = 4,
+            })
+        else
+            UIManager:show(InfoMessage:new{
+                text = _("Failed to store sessions in database"),
+                timeout = 3,
+            })
+        end
+    else
+        UIManager:show(InfoMessage:new{
+            text = _("No reading sessions found in KOReader database"),
+            timeout = 3,
+        })
+    end
+end
+
+function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
+    -- Implements 5-minute gap logic to group page reads into sessions
+    -- Based on bookloresessionmigration.py lines 61-131
+    
+    if not page_stats or #page_stats == 0 then
+        return {}
+    end
+    
+    local sessions = {}
+    local current_session = nil
+    local SESSION_GAP_SECONDS = 300  -- 5 minutes
+    
+    for _, stat in ipairs(page_stats) do
+        -- KOReader stores timestamps as Unix epoch integers (may be cdata)
+        -- Strip "LL" suffix from cdata string representation if present
+        local timestamp_str = tostring(stat.start_time):gsub("LL$", "")
+        local timestamp = tonumber(timestamp_str)
+        if not timestamp then
+            logger.warn("BookloreSync: Failed to parse timestamp:", stat.start_time)
+            goto continue
+        end
+        
+        -- Convert to ISO 8601 for Booklore API
+        local iso_time = self:_unixToISO8601(timestamp)
+        
+        local progress = (stat.total_pages and stat.total_pages > 0) 
+            and (stat.page / stat.total_pages) or 0
+        
+        if not current_session then
+            -- Start first session
+            current_session = {
+                start_time = iso_time,
+                end_time = iso_time,
+                start_timestamp = timestamp,
+                end_timestamp = timestamp,
+                start_progress = progress,
+                end_progress = progress,
+                start_page = stat.page,
+                end_page = stat.page,
+                duration_seconds = stat.duration or 0,
+            }
+        else
+            local gap = timestamp - current_session.end_timestamp
+            
+            if gap > SESSION_GAP_SECONDS then
+                -- Save current session if progress increased
+                local progress_delta = current_session.end_progress - current_session.start_progress
+                if progress_delta > 0 then
+                    table.insert(sessions, {
+                        start_time = current_session.start_time,
+                        end_time = current_session.end_time,
+                        duration_seconds = current_session.duration_seconds,
+                        start_progress = current_session.start_progress,
+                        end_progress = current_session.end_progress,
+                        progress_delta = progress_delta,
+                        start_location = "Page " .. current_session.start_page,
+                        end_location = "Page " .. current_session.end_page,
+                    })
+                end
+                
+                -- Start new session
+                current_session = {
+                    start_time = iso_time,
+                    end_time = iso_time,
+                    start_timestamp = timestamp,
+                    end_timestamp = timestamp,
+                    start_progress = progress,
+                    end_progress = progress,
+                    start_page = stat.page,
+                    end_page = stat.page,
+                    duration_seconds = stat.duration or 0,
+                }
+            else
+                -- Continue current session
+                current_session.end_time = iso_time
+                current_session.end_timestamp = timestamp
+                current_session.end_progress = progress
+                current_session.end_page = stat.page
+                current_session.duration_seconds = current_session.duration_seconds + (stat.duration or 0)
+            end
+        end
+        
+        ::continue::
+    end
+    
+    -- Save final session
+    if current_session then
+        local progress_delta = current_session.end_progress - current_session.start_progress
+        if progress_delta > 0 then
+            table.insert(sessions, {
+                start_time = current_session.start_time,
+                end_time = current_session.end_time,
+                duration_seconds = current_session.duration_seconds,
+                start_progress = current_session.start_progress,
+                end_progress = current_session.end_progress,
+                progress_delta = progress_delta,
+                start_location = "Page " .. current_session.start_page,
+                end_location = "Page " .. current_session.end_page,
+            })
+        end
+    end
+    
+    -- Try MD5 auto-matching
+    local book_id = nil
+    if book.md5 and book.md5 ~= "" then
+        local cached_book = self.db:findBookIdByHash(book.md5)
+        if cached_book then
+            book_id = cached_book.book_id
+        end
+    end
+    
+    -- Add book metadata to each session
+    for _, session in ipairs(sessions) do
+        session.koreader_book_id = book.id
+        session.koreader_book_title = book.title
+        session.book_id = book_id
+        session.book_hash = book.md5
+        session.book_type = self:_detectBookType(book)
+        session.matched = book_id and 1 or 0
+    end
+    
+    return sessions
+end
+
+function BookloreSync:_findKOReaderStatisticsDB()
+    -- The statistics database is in the KOReader settings directory
+    local stats_path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
+    
+    local f = io.open(stats_path, "r")
+    if f then
+        f:close()
+        return stats_path
+    end
+    
+    return nil
+end
+
+function BookloreSync:_getKOReaderBooks(conn)
+    -- Query all books from KOReader statistics database
+    local books = {}
+    
+    local stmt = conn:prepare("SELECT id, title, authors, md5 FROM book")
+    
+    if not stmt then
+        logger.err("BookloreSync: Failed to prepare statement:", conn:errmsg())
+        return books
+    end
+    
+    for row in stmt:rows() do
+        table.insert(books, {
+            id = tonumber(row[1]),
+            title = tostring(row[2] or ""),
+            authors = tostring(row[3] or ""),
+            md5 = tostring(row[4] or ""),
+        })
+    end
+    
+    stmt:close()
+    return books
+end
+
+function BookloreSync:_getPageStats(conn, book_id)
+    -- Query page statistics for a specific book
+    local stats = {}
+    
+    local stmt = conn:prepare([[
+        SELECT start_time, duration, total_pages, page 
+        FROM page_stat_data 
+        WHERE id_book = ? 
+        ORDER BY start_time
+    ]])
+    
+    if not stmt then
+        logger.err("BookloreSync: Failed to prepare statement:", conn:errmsg())
+        return stats
+    end
+    
+    stmt:bind(book_id)
+    
+    for row in stmt:rows() do
+        table.insert(stats, {
+            start_time = tostring(row[1] or ""),
+            duration = tonumber(row[2]) or 0,
+            total_pages = tonumber(row[3]) or 0,
+            page = tonumber(row[4]) or 0,
+        })
+    end
+    
+    stmt:close()
+    return stats
+end
+
+function BookloreSync:_unixToISO8601(timestamp)
+    -- Convert Unix timestamp to ISO 8601 string
+    -- Example: 1707648600 -> "2024-02-11T10:30:00Z"
+    local date_table = os.date("!*t", timestamp)
+    return string.format("%04d-%02d-%02dT%02d:%02d:%02dZ",
+        date_table.year, date_table.month, date_table.day,
+        date_table.hour, date_table.min, date_table.sec)
+end
+
+function BookloreSync:_parseISO8601(iso_string)
+    -- Convert ISO 8601 timestamp to Unix time
+    -- Example: "2024-02-11T10:30:00Z" -> 1707648600
+    
+    if not iso_string then return nil end
+    
+    local year, month, day, hour, min, sec = iso_string:match(
+        "(%d+)-(%d+)-(%d+)%a(%d+):(%d+):(%d+)"
+    )
+    
+    if not year then return nil end
+    
+    return os.time({
+        year = tonumber(year),
+        month = tonumber(month),
+        day = tonumber(day),
+        hour = tonumber(hour),
+        min = tonumber(min),
+        sec = tonumber(sec),
+        isdst = false,
     })
 end
 
+function BookloreSync:_detectBookType(book)
+    -- Detect book format from title extension
+    local title = book.title or ""
+    local lower_title = title:lower()
+    
+    if lower_title:match("%.pdf$") then
+        return "PDF"
+    elseif lower_title:match("%.cbz$") then
+        return "CBZ"
+    elseif lower_title:match("%.cbr$") then
+        return "CBR"
+    elseif lower_title:match("%.djvu$") then
+        return "DJVU"
+    else
+        return "EPUB"
+    end
+end
+
+function BookloreSync:_formatDuration(seconds)
+    -- Format duration like: "5m 9s", "1h 23m 45s", "45s"
+    -- Only include non-zero parts
+    local parts = {}
+    
+    local hours = math.floor(seconds / 3600)
+    local mins = math.floor((seconds % 3600) / 60)
+    local secs = seconds % 60
+    
+    if hours > 0 then
+        table.insert(parts, string.format("%dh", hours))
+    end
+    if mins > 0 then
+        table.insert(parts, string.format("%dm", mins))
+    end
+    if secs > 0 or #parts == 0 then  -- Always show seconds if duration is 0
+        table.insert(parts, string.format("%ds", secs))
+    end
+    
+    return table.concat(parts, " ")
+end
+
 function BookloreSync:matchHistoricalData()
+    if not self.db then
+        UIManager:show(InfoMessage:new{
+            text = _("Database not initialized"),
+            timeout = 2,
+        })
+        return
+    end
+    
+    if not self.db:hasHistoricalSessions() then
+        UIManager:show(InfoMessage:new{
+            text = _("No historical sessions found. Please copy sessions from KOReader first."),
+            timeout = 3,
+        })
+        return
+    end
+    
+    local unmatched = self.db:getUnmatchedHistoricalBooks()
+    
+    if not unmatched or #unmatched == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("All historical books are already matched!"),
+            timeout = 2,
+        })
+        return
+    end
+    
+    -- Start matching process with first unmatched book
+    self.matching_index = 1
+    self.unmatched_books = unmatched
+    self:_showNextBookMatch()
+end
+
+function BookloreSync:_showNextBookMatch()
+    if not self.unmatched_books or self.matching_index > #self.unmatched_books then
+        UIManager:show(InfoMessage:new{
+            text = _("Matching complete!"),
+            timeout = 2,
+        })
+        return
+    end
+    
+    local book = self.unmatched_books[self.matching_index]
+    local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
+    
+    -- Check if book has MD5 hash for auto-matching
+    if book.book_hash and book.book_hash ~= "" then
+        local cached_book = self.db:findBookIdByHash(book.book_hash)
+        if cached_book and cached_book.book_id then
+            self:_confirmAutoMatch(book, cached_book.book_id)
+            return
+        end
+    end
+    
+    -- No auto-match, search by title
     UIManager:show(InfoMessage:new{
-        text = _("Match historical data - not yet implemented (Step 2)"),
+        text = T(_("Searching for: %1\n\n%2"), book.koreader_book_title, progress_text),
+        timeout = 1,
+    })
+    
+    local success, results = self.api:searchBooksWithAuth(book.koreader_book_title, self.booklore_username, self.booklore_password)
+    
+    if not success then
+        UIManager:show(ConfirmBox:new{
+            text = T(_("Search failed for:\n%1\n\n%2\n\nSkip this book?"), 
+                book.koreader_book_title, progress_text),
+            ok_callback = function()
+                self.matching_index = self.matching_index + 1
+                self:_showNextBookMatch()
+            end,
+        })
+        return
+    end
+    
+    if not results or #results == 0 then
+        UIManager:show(ConfirmBox:new{
+            text = T(_("No matches found for:\n%1\n\n%2\n\nSkip this book?"), 
+                book.koreader_book_title, progress_text),
+            ok_callback = function()
+                self.matching_index = self.matching_index + 1
+                self:_showNextBookMatch()
+            end,
+        })
+        return
+    end
+    
+    self:_showMatchSelectionDialog(book, results)
+end
+
+function BookloreSync:_confirmAutoMatch(book, book_id)
+    local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
+    
+    -- Get book title from cache
+    local book_title = "Unknown Book"
+    local cached_book = self.db:getBookByBookId(book_id)
+    if cached_book then
+        book_title = cached_book.title
+    end
+    
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Auto-matched by MD5 hash:\n\nKOReader: %1\n\nBooklore: %2\n\n%3\n\nAccept this match?"),
+            book.koreader_book_title, book_title, progress_text),
+        ok_text = _("Accept"),
+        cancel_text = _("Skip"),
+        ok_callback = function()
+            self:_saveMatchAndSync(book, book_id)
+        end,
+        cancel_callback = function()
+            self.matching_index = self.matching_index + 1
+            self:_showNextBookMatch()
+        end,
+    })
+end
+
+function BookloreSync:_showMatchSelectionDialog(book, results)
+    local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
+    
+    -- Limit to top 5 results
+    local top_results = {}
+    for i = 1, math.min(5, #results) do
+        table.insert(top_results, results[i])
+    end
+    
+    local buttons = {}
+    
+    -- Add match options
+    for i, result in ipairs(top_results) do
+        table.insert(buttons, {{
+            text = T(_("%1. %2 (Score: %3)"), i, result.title, 
+                string.format("%.0f%%", (result.matchScore or 0) * 100)),
+            callback = function()
+                UIManager:close(self.match_dialog)
+                self:_saveMatchAndSync(book, result)
+            end,
+        }})
+    end
+    
+    -- Add skip button
+    table.insert(buttons, {{
+        text = _("Skip this book"),
+        callback = function()
+            UIManager:close(self.match_dialog)
+            self.matching_index = self.matching_index + 1
+            self:_showNextBookMatch()
+        end,
+    }})
+    
+    -- Add cancel button
+    table.insert(buttons, {{
+        text = _("Cancel matching"),
+        callback = function()
+            UIManager:close(self.match_dialog)
+        end,
+    }})
+    
+    self.match_dialog = ButtonDialog:new{
+        title = T(_("Select match for:\n%1\n\n%2 sessions found\n\n%3"), 
+            book.koreader_book_title, book.session_count, progress_text),
+        buttons = buttons,
+    }
+    
+    UIManager:show(self.match_dialog)
+end
+
+function BookloreSync:_saveMatchAndSync(book, selected_result)
+    -- Extract book_id from selected_result (can be object or just ID for auto-match)
+    local book_id = type(selected_result) == "table" and selected_result.id or selected_result
+    local book_title = type(selected_result) == "table" and selected_result.title or nil
+    local book_hash = type(selected_result) == "table" and selected_result.hash or nil
+    
+    -- Mark sessions as matched
+    local success = self.db:markHistoricalSessionsMatched(book.koreader_book_id, book_id)
+    
+    if not success then
+        UIManager:show(InfoMessage:new{
+            text = _("Failed to save match to database"),
+            timeout = 3,
+        })
+        return
+    end
+    
+    -- Store matched book in book_cache for future syncs
+    if book_hash and book_hash ~= "" then
+        -- Use the hash as a pseudo file path for historical books
+        local cache_path = "historical://" .. book_hash
+        self.db:saveBookCache(cache_path, book_hash, book_id, book_title, nil)
+        logger.info("BookloreSync: Cached matched book:", book_title, "with ID:", book_id)
+    end
+    
+    -- Get matched sessions
+    local sessions = self.db:getHistoricalSessionsForBook(book.koreader_book_id)
+    
+    if not sessions or #sessions == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No sessions found to sync"),
+            timeout = 2,
+        })
+        self.matching_index = self.matching_index + 1
+        self:_showNextBookMatch()
+        return
+    end
+    
+    -- Sync sessions to server
+    local synced_count = 0
+    local failed_count = 0
+    
+    for _, session in ipairs(sessions) do
+        if not session.synced or session.synced == 0 then
+            -- Progress values should be 0.0-1.0 (decimals)
+            local start_progress = session.start_progress or 0
+            local end_progress = session.end_progress or 0
+            local progress_delta = session.progress_delta or (end_progress - start_progress)
+            
+            -- Format duration
+            local duration_formatted = self:_formatDuration(session.duration_seconds or 0)
+            
+            local success = self.api:submitSession({
+                bookId = session.book_id,
+                bookType = session.book_type,
+                startTime = session.start_time,
+                endTime = session.end_time,
+                durationSeconds = session.duration_seconds,
+                durationFormatted = duration_formatted,
+                startProgress = start_progress,
+                endProgress = end_progress,
+                progressDelta = progress_delta,
+                startLocation = session.start_location,
+                endLocation = session.end_location,
+            })
+            
+            if success then
+                self.db:markHistoricalSessionSynced(
+                    session.koreader_book_id, 
+                    session.start_time, 
+                    session.end_time
+                )
+                synced_count = synced_count + 1
+            else
+                failed_count = failed_count + 1
+            end
+        end
+    end
+    
+    -- Show results
+    local result_text = T(_("Synced %1 sessions for:\n%2"), synced_count, book.koreader_book_title)
+    if failed_count > 0 then
+        result_text = result_text .. T(_("\n\n%1 sessions failed to sync"), failed_count)
+    end
+    
+    UIManager:show(InfoMessage:new{
+        text = result_text,
         timeout = 2,
     })
+    
+    -- Move to next book
+    self.matching_index = self.matching_index + 1
+    self:_showNextBookMatch()
 end
 
 function BookloreSync:viewMatchStatistics()
@@ -1267,17 +1939,34 @@ function BookloreSync:viewMatchStatistics()
         return
     end
     
-    local stats = self.db:getBookCacheStats()
+    local stats = self.db:getHistoricalSessionStats()
+    
+    if not stats then
+        UIManager:show(InfoMessage:new{
+            text = _("Failed to retrieve statistics"),
+            timeout = 2,
+        })
+        return
+    end
     
     -- Convert cdata to Lua numbers for template function
-    local total = tonumber(stats.total) or 0
-    local matched = tonumber(stats.matched) or 0
-    local unmatched = tonumber(stats.unmatched) or 0
+    local total = tonumber(stats.total_sessions) or 0
+    local matched = tonumber(stats.matched_sessions) or 0
+    local unmatched = tonumber(stats.unmatched_sessions) or 0
+    local synced = tonumber(stats.synced_sessions) or 0
+    
+    if total == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No historical sessions found.\n\nPlease copy sessions from KOReader first."),
+            timeout = 3,
+        })
+        return
+    end
     
     UIManager:show(InfoMessage:new{
-        text = T(_("Match Statistics:\n\nTotal cached books: %1\nMatched to Booklore: %2\nUnmatched books: %3"), 
-            total, matched, unmatched),
-        timeout = 4,
+        text = T(_("Historical Session Statistics:\n\nTotal sessions: %1\nMatched sessions: %2\nUnmatched sessions: %3\nSynced to server: %4"), 
+            total, matched, unmatched, synced),
+        timeout = 5,
     })
 end
 

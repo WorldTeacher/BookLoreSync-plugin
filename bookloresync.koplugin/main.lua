@@ -115,9 +115,14 @@ function BookloreSync:init()
         end
     end
     
+    -- Clean up expired bearer tokens
+    if self.db then
+        self.db:cleanupExpiredTokens()
+    end
+    
     -- Initialize API client
     self.api = APIClient:new()
-    self.api:init(self.server_url, self.username, self.password)
+    self.api:init(self.server_url, self.username, self.password, self.db)
     
     -- Register menu
     self.ui.menu:registerToMainMenu(self)
@@ -477,6 +482,26 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Re-sync Historical Data"),
+                help_text = _("Re-sync all previously synced historical sessions to the server. Sessions with invalid book IDs (404 errors) will be marked for re-matching."),
+                enabled_func = function()
+                    return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
+                end,
+                callback = function()
+                    self:resyncHistoricalData()
+                end,
+            },
+            {
+                text = _("Sync Re-matched Sessions"),
+                help_text = _("Sync sessions that were previously marked for re-matching (404 errors) and have now been matched to valid books."),
+                enabled_func = function()
+                    return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
+                end,
+                callback = function()
+                    self:syncRematchedSessions()
+                end,
+            },
+            {
                 text = _("View Historical Statistics"),
                 help_text = _("Display statistics about historical sessions: total sessions extracted, matched sessions, unmatched sessions, and synced sessions."),
                 callback = function()
@@ -595,7 +620,7 @@ function BookloreSync:testConnection()
     end
     
     -- Update API client with current credentials
-    self.api:init(self.server_url, self.username, self.password)
+    self.api:init(self.server_url, self.username, self.password, self.db)
     
     -- Test authentication
     local success, message = self.api:testAuth()
@@ -1196,7 +1221,7 @@ function BookloreSync:syncPendingSessions(silent)
     end
     
     -- Update API client with current credentials
-    self.api:init(self.server_url, self.username, self.password)
+    self.api:init(self.server_url, self.username, self.password, self.db)
     
     -- Get pending sessions from database
     local sessions = self.db:getPendingSessions(100) -- Sync up to 100 at a time
@@ -1280,6 +1305,8 @@ function BookloreSync:syncPendingSessions(silent)
         
         if success then
             synced_count = synced_count + 1
+            -- Archive to historical_sessions before deleting
+            self.db:archivePendingSession(session.id)
             -- Delete from pending sessions
             self.db:deletePendingSession(session.id)
             logger.info("BookloreSync: Session", i, "synced successfully")
@@ -1529,12 +1556,37 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
         end
     end
     
-    -- Try MD5 auto-matching
+    -- Try auto-matching with priority: Hash → ISBN → File Path
     local book_id = nil
+    local matched = 0
+    
     if book.md5 and book.md5 ~= "" then
-        local cached_book = self.db:findBookIdByHash(book.md5)
-        if cached_book then
+        -- Priority 1: Check by hash
+        local cached_book = self.db:getBookByHash(book.md5)
+        if cached_book and cached_book.book_id then
             book_id = cached_book.book_id
+            matched = 1
+            logger.info("BookloreSync: Auto-matched historical book by hash:", book.title, "→ ID:", book_id)
+        else
+            -- Priority 2: Check by ISBN (if we have cached ISBN for this hash)
+            if cached_book and (cached_book.isbn13 or cached_book.isbn10) then
+                local isbn_match = self.db:findBookIdByIsbn(cached_book.isbn10, cached_book.isbn13)
+                if isbn_match and isbn_match.book_id then
+                    book_id = isbn_match.book_id
+                    matched = 1
+                    logger.info("BookloreSync: Auto-matched historical book by ISBN:", book.title, "→ ID:", book_id)
+                end
+            end
+        end
+    end
+    
+    -- Priority 3: Check by file path (if book file exists)
+    if not book_id and book.file and book.file ~= "" then
+        local file_cached = self.db:getBookByFilePath(book.file)
+        if file_cached and file_cached.book_id then
+            book_id = file_cached.book_id
+            matched = 1
+            logger.info("BookloreSync: Auto-matched historical book by file path:", book.title, "→ ID:", book_id)
         end
     end
     
@@ -1545,7 +1597,7 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
         session.book_id = book_id
         session.book_hash = book.md5
         session.book_type = self:_detectBookType(book)
-        session.matched = book_id and 1 or 0
+        session.matched = matched
     end
     
     return sessions
@@ -1735,6 +1787,38 @@ function BookloreSync:_showNextBookMatch()
     
     local book = self.unmatched_books[self.matching_index]
     local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
+    
+    -- PRIORITY 0: Check if book already has book_id cached (auto-sync without confirmation)
+    -- This happens when sessions were extracted with enhanced auto-matching enabled
+    if book.book_hash and book.book_hash ~= "" then
+        local cached_book = self.db:getBookByHash(book.book_hash)
+        
+        if cached_book and cached_book.book_id then
+            logger.info("BookloreSync: Found cached book_id for unmatched book, auto-syncing:", book.koreader_book_title)
+            
+            -- Mark sessions as matched
+            local match_success = self.db:markHistoricalSessionsMatched(book.koreader_book_id, cached_book.book_id)
+            
+            if not match_success then
+                logger.err("BookloreSync: Failed to mark sessions as matched for auto-sync")
+                self.matching_index = self.matching_index + 1
+                self:_showNextBookMatch()
+                return
+            end
+            
+            -- Get sessions and sync directly using the helper function
+            local sessions = self.db:getHistoricalSessionsForBook(book.koreader_book_id)
+            
+            if sessions and #sessions > 0 then
+                self:_syncHistoricalSessions(book, sessions, progress_text)
+            else
+                logger.warn("BookloreSync: No sessions found for auto-matched book")
+                self.matching_index = self.matching_index + 1
+                self:_showNextBookMatch()
+            end
+            return
+        end
+    end
     
     -- PRIORITY 1: Check for ISBN in cache and search by ISBN
     if book.book_hash and book.book_hash ~= "" then
@@ -1933,11 +2017,20 @@ function BookloreSync:_performManualSearch(book)
     local success, results = self.api:searchBooksWithAuth(book.koreader_book_title, self.booklore_username, self.booklore_password)
     
     if not success then
+        -- Get error message (results contains error message on failure)
+        local error_msg = type(results) == "string" and results or "Unknown error"
+        
         UIManager:show(ConfirmBox:new{
-            text = T(_("Search failed for:\n%1\n\n%2\n\nSkip this book?"), 
-                book.koreader_book_title, progress_text),
+            text = T(_("Search failed for:\n%1\n\nError: %2\n\n%3\n\nSkip this book?"), 
+                book.koreader_book_title, error_msg, progress_text),
+            ok_text = _("Skip"),
+            cancel_text = _("Retry"),
             ok_callback = function()
                 self.matching_index = self.matching_index + 1
+                self:_showNextBookMatch()
+            end,
+            cancel_callback = function()
+                -- Retry the same book
                 self:_showNextBookMatch()
             end,
         })
@@ -2012,8 +2105,7 @@ end
 function BookloreSync:_saveMatchAndSync(book, selected_result)
     -- Extract book_id from selected_result (can be object or just ID for auto-match)
     local book_id = type(selected_result) == "table" and selected_result.id or selected_result
-    local book_title = type(selected_result) == "table" and selected_result.title or nil
-    local book_hash = type(selected_result) == "table" and selected_result.hash or nil
+    local book_title = type(selected_result) == "table" and selected_result.title or book.koreader_book_title
     local isbn10 = type(selected_result) == "table" and selected_result.isbn10 or nil
     local isbn13 = type(selected_result) == "table" and selected_result.isbn13 or nil
     
@@ -2031,10 +2123,11 @@ function BookloreSync:_saveMatchAndSync(book, selected_result)
     end
     
     -- Store matched book in book_cache for future syncs
-    if book_hash and book_hash ~= "" then
+    -- Use the hash from the book record (from historical_sessions)
+    if book.book_hash and book.book_hash ~= "" then
         -- Use the hash as a pseudo file path for historical books
-        local cache_path = "historical://" .. book_hash
-        self.db:saveBookCache(cache_path, book_hash, book_id, book_title, nil, isbn10, isbn13)
+        local cache_path = "historical://" .. book.book_hash
+        self.db:saveBookCache(cache_path, book.book_hash, book_id, book_title, nil, isbn10, isbn13)
         logger.info("BookloreSync: Cached matched book:", book_title, "with ID:", book_id)
     end
     
@@ -2051,7 +2144,13 @@ function BookloreSync:_saveMatchAndSync(book, selected_result)
         return
     end
     
-    -- Sync sessions to server
+    -- Use the helper function to sync sessions
+    self:_syncHistoricalSessions(book, sessions, nil)
+end
+
+function BookloreSync:_syncHistoricalSessions(book, sessions, progress_text)
+    -- Helper function to sync historical sessions for a matched book
+    -- Used by both _saveMatchAndSync and auto-sync in _showNextBookMatch
     local synced_count = 0
     local failed_count = 0
     
@@ -2080,11 +2179,7 @@ function BookloreSync:_saveMatchAndSync(book, selected_result)
             })
             
             if success then
-                self.db:markHistoricalSessionSynced(
-                    session.koreader_book_id, 
-                    session.start_time, 
-                    session.end_time
-                )
+                self.db:markHistoricalSessionSynced(session.id)
                 synced_count = synced_count + 1
             else
                 failed_count = failed_count + 1
@@ -2094,6 +2189,9 @@ function BookloreSync:_saveMatchAndSync(book, selected_result)
     
     -- Show results
     local result_text = T(_("Synced %1 sessions for:\n%2"), synced_count, book.koreader_book_title)
+    if progress_text then
+        result_text = result_text .. "\n\n" .. progress_text
+    end
     if failed_count > 0 then
         result_text = result_text .. T(_("\n\n%1 sessions failed to sync"), failed_count)
     end
@@ -2146,6 +2244,154 @@ function BookloreSync:viewMatchStatistics()
             total, matched, unmatched, synced),
         timeout = 5,
     })
+end
+
+function BookloreSync:resyncHistoricalData()
+    if not self.db then
+        UIManager:show(InfoMessage:new{
+            text = _("Database not initialized"),
+            timeout = 2,
+        })
+        return
+    end
+    
+    -- Show confirmation dialog
+    UIManager:show(ConfirmBox:new{
+        text = _("This will re-sync all previously synced historical sessions to the server.\n\nSessions with invalid book IDs (404 errors) will be marked for re-matching.\n\nContinue?"),
+        ok_text = _("Re-sync"),
+        cancel_text = _("Cancel"),
+        ok_callback = function()
+            self:_performResyncHistoricalData()
+        end,
+    })
+end
+
+function BookloreSync:_performResyncHistoricalData()
+    -- Get all synced historical sessions
+    local sessions = self.db:getAllSyncedHistoricalSessions()
+    
+    if not sessions or #sessions == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No synced historical sessions found to re-sync"),
+            timeout = 3,
+        })
+        return
+    end
+    
+    logger.info("BookloreSync: Re-syncing", #sessions, "historical sessions")
+    
+    -- Show initial progress message
+    local progress_msg = InfoMessage:new{
+        text = T(_("Re-syncing historical sessions...\n\n0 / %1 completed"), #sessions),
+    }
+    UIManager:show(progress_msg)
+    
+    local synced_count = 0
+    local failed_count = 0
+    local not_found_count = 0
+    
+    for i, session in ipairs(sessions) do
+        -- Update progress every 10 sessions or on last session
+        if i % 10 == 0 or i == #sessions then
+            UIManager:close(progress_msg)
+            progress_msg = InfoMessage:new{
+                text = T(_("Re-syncing historical sessions...\n\n%1 / %2 completed\n\nSynced: %3\nFailed: %4\n404 errors: %5"),
+                    i, #sessions, synced_count, failed_count, not_found_count),
+            }
+            UIManager:show(progress_msg)
+            UIManager:forceRePaint()
+        end
+        
+        -- Progress values should be 0.0-1.0 (decimals)
+        local start_progress = session.start_progress or 0
+        local end_progress = session.end_progress or 0
+        local progress_delta = session.progress_delta or (end_progress - start_progress)
+        
+        -- Format duration
+        local duration_formatted = self:_formatDuration(session.duration_seconds or 0)
+        
+        -- Submit session
+        local success, message, code = self.api:submitSession({
+            bookId = session.book_id,
+            bookType = session.book_type,
+            startTime = session.start_time,
+            endTime = session.end_time,
+            durationSeconds = session.duration_seconds,
+            durationFormatted = duration_formatted,
+            startProgress = start_progress,
+            endProgress = end_progress,
+            progressDelta = progress_delta,
+            startLocation = session.start_location,
+            endLocation = session.end_location,
+        })
+        
+        if success then
+            synced_count = synced_count + 1
+            logger.info("BookloreSync: Re-synced session", i, "of", #sessions)
+        else
+            -- Check if it's a 404 (book not found)
+            if code == 404 then
+                logger.warn("BookloreSync: Book ID", session.book_id, "not found (404), marking for re-matching")
+                self.db:markHistoricalSessionUnmatched(session.id)
+                not_found_count = not_found_count + 1
+            else
+                logger.warn("BookloreSync: Failed to re-sync session", i, ":", message)
+                failed_count = failed_count + 1
+            end
+        end
+    end
+    
+    -- Close the progress message
+    UIManager:close(progress_msg)
+    
+    -- Show results
+    local result_text = T(_("Re-sync complete!\n\nSuccessfully synced: %1\nFailed: %2\nMarked for re-matching (404): %3"), 
+        synced_count, failed_count, not_found_count)
+    
+    if not_found_count > 0 then
+        result_text = result_text .. _("\n\nUse 'Match Historical Data' to re-match sessions with 404 errors.")
+    end
+    
+    UIManager:show(InfoMessage:new{
+        text = result_text,
+        timeout = 5,
+    })
+    
+    logger.info("BookloreSync: Re-sync complete - synced:", synced_count, 
+                "failed:", failed_count, "not found:", not_found_count)
+end
+
+function BookloreSync:syncRematchedSessions()
+    -- Sync sessions that were previously marked for re-matching (404 errors)
+    -- and have now been matched to valid books
+    if not self.db then
+        UIManager:show(InfoMessage:new{
+            text = _("Database not initialized"),
+            timeout = 2,
+        })
+        return
+    end
+    
+    -- Get matched but unsynced sessions
+    local sessions = self.db:getMatchedUnsyncedHistoricalSessions()
+    
+    if not sessions or #sessions == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No re-matched sessions found to sync"),
+            timeout = 3,
+        })
+        return
+    end
+    
+    logger.info("BookloreSync: Syncing", #sessions, "re-matched sessions")
+    
+    -- Use the existing helper function to sync these sessions
+    self:_syncHistoricalSessions(sessions, function(synced_count)
+        UIManager:show(InfoMessage:new{
+            text = T(_("Successfully synced %1 re-matched session(s)"), synced_count),
+            timeout = 3,
+        })
+    end)
 end
 
 return BookloreSync

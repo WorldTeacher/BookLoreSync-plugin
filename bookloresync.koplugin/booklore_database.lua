@@ -11,7 +11,7 @@ local DataStorage = require("datastorage")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 5,  -- Current database schema version
+    VERSION = 7,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -190,6 +190,22 @@ Database.migrations = {
         -- Then drop the table
         [[
             DROP TABLE IF EXISTS match_history
+        ]],
+    },
+    
+    -- Migration 6: Add book_title to pending_sessions
+    [6] = {
+        -- Add book_title column to store the title for archiving
+        [[
+            ALTER TABLE pending_sessions ADD COLUMN book_title TEXT
+        ]],
+    },
+    
+    -- Migration 7: Add koreader_book_id to pending_sessions
+    [7] = {
+        -- Add koreader_book_id column to store the KOReader book ID
+        [[
+            ALTER TABLE pending_sessions ADD COLUMN koreader_book_id INTEGER
         ]],
     },
 }
@@ -672,10 +688,10 @@ function Database:addPendingSession(session_data)
     
     local stmt = self.conn:prepare([[
         INSERT INTO pending_sessions (
-            book_id, book_hash, book_type, start_time, end_time,
+            book_id, book_hash, book_title, koreader_book_id, book_type, start_time, end_time,
             duration_seconds, start_progress, end_progress, progress_delta,
             start_location, end_location
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ]])
     
     if not stmt then
@@ -686,6 +702,8 @@ function Database:addPendingSession(session_data)
     stmt:bind(
         book_id,
         session_data.bookHash or "",
+        session_data.bookTitle or "Unknown",
+        session_data.koreaderBookId,  -- Can be nil
         session_data.bookType or "EPUB",
         session_data.startTime or "",
         session_data.endTime or "",
@@ -712,7 +730,7 @@ function Database:getPendingSessions(limit)
     limit = limit or 100
     
     local stmt = self.conn:prepare([[
-        SELECT id, book_id, book_hash, book_type, start_time, end_time,
+        SELECT id, book_id, book_hash, book_title, koreader_book_id, book_type, start_time, end_time,
                duration_seconds, start_progress, end_progress, progress_delta,
                start_location, end_location, retry_count
         FROM pending_sessions
@@ -733,16 +751,18 @@ function Database:getPendingSessions(limit)
             id = tonumber(row[1]),
             bookId = row[2] and tonumber(row[2]) or nil,
             bookHash = tostring(row[3]),
-            bookType = tostring(row[4]),
-            startTime = tostring(row[5]),
-            endTime = tostring(row[6]),
-            durationSeconds = tonumber(row[7]),
-            startProgress = tonumber(row[8]),
-            endProgress = tonumber(row[9]),
-            progressDelta = tonumber(row[10]),
-            startLocation = tostring(row[11]),
-            endLocation = tostring(row[12]),
-            retryCount = tonumber(row[13]),
+            bookTitle = row[4] and tostring(row[4]) or "Unknown",
+            koreaderBookId = row[5] and tonumber(row[5]) or nil,
+            bookType = tostring(row[6]),
+            startTime = tostring(row[7]),
+            endTime = tostring(row[8]),
+            durationSeconds = tonumber(row[9]),
+            startProgress = tonumber(row[10]),
+            endProgress = tonumber(row[11]),
+            progressDelta = tonumber(row[12]),
+            startLocation = tostring(row[13]),
+            endLocation = tostring(row[14]),
+            retryCount = tonumber(row[15]),
         })
     end
     
@@ -772,7 +792,7 @@ function Database:archivePendingSession(session_id)
     -- First, get the pending session data
     local get_stmt = self.conn:prepare([[
         SELECT 
-            book_id, book_hash, book_type, start_time, end_time,
+            book_id, book_hash, book_title, koreader_book_id, book_type, start_time, end_time,
             duration_seconds, start_progress, end_progress, progress_delta,
             start_location, end_location
         FROM pending_sessions
@@ -789,17 +809,19 @@ function Database:archivePendingSession(session_id)
     local session_data = nil
     for row in get_stmt:rows() do
         session_data = {
-            book_id = tonumber(row[1]),
+            book_id = row[1] and tonumber(row[1]) or nil,
             book_hash = tostring(row[2] or ""),
-            book_type = tostring(row[3] or "EPUB"),
-            start_time = tostring(row[4]),
-            end_time = tostring(row[5]),
-            duration_seconds = tonumber(row[6]),
-            start_progress = tonumber(row[7]),
-            end_progress = tonumber(row[8]),
-            progress_delta = tonumber(row[9]),
-            start_location = tostring(row[10] or ""),
-            end_location = tostring(row[11] or ""),
+            book_title = row[3] and tostring(row[3]) or "Unknown",
+            koreader_book_id = row[4] and tonumber(row[4]) or nil,
+            book_type = tostring(row[5] or "EPUB"),
+            start_time = tostring(row[6]),
+            end_time = tostring(row[7]),
+            duration_seconds = tonumber(row[8]) or 0,
+            start_progress = tonumber(row[9]) or 0,
+            end_progress = tonumber(row[10]) or 0,
+            progress_delta = tonumber(row[11]) or 0,
+            start_location = tostring(row[12] or ""),
+            end_location = tostring(row[13] or ""),
         }
         break
     end
@@ -811,17 +833,9 @@ function Database:archivePendingSession(session_id)
         return false
     end
     
-    -- Get book title from cache if available
-    local book_title = "Live Session"
-    if session_data.book_hash and session_data.book_hash ~= "" then
-        local cached_book = self:getBookByHash(session_data.book_hash)
-        if cached_book and cached_book.title then
-            book_title = cached_book.title
-        end
-    end
-    
-    -- Insert into historical_sessions
-    -- Use koreader_book_id = 0 to indicate this is from pending_sessions, not KOReader stats
+    -- Use the stored title and koreader_book_id directly
+    local book_title = session_data.book_title
+    local koreader_book_id = session_data.koreader_book_id or 0
     local insert_stmt = self.conn:prepare([[
         INSERT INTO historical_sessions (
             koreader_book_id, koreader_book_title, book_id, book_hash,
@@ -837,7 +851,7 @@ function Database:archivePendingSession(session_id)
     end
     
     insert_stmt:bind(
-        0,  -- koreader_book_id = 0 (indicates live session, not from stats)
+        koreader_book_id,
         book_title,
         session_data.book_id,
         session_data.book_hash,

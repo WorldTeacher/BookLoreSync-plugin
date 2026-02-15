@@ -481,7 +481,7 @@ function BookloreSync:addToMainMenu(menu_items)
         },
     })
     
-    -- Historical Data submenu (NEW)
+    -- Historical Data submenu
     table.insert(base_menu, {
         text = _("Historical Data"),
         sub_item_table = {
@@ -3069,19 +3069,12 @@ function BookloreSync:installUpdate(download_url, version)
     success, error_msg = self.updater:installUpdate(zip_path_or_error)
     
     if success then
-        -- Success!
-        UIManager:show(ConfirmBox:new{
-            text = T(_([[Update installed successfully!
+        -- Success! Ask for restart with custom message
+        UIManager:askForRestart(T(_([[Update installed successfully!
 
 Version %1 is ready.
 
-Restart KOReader now?]]), version),
-            ok_text = _("Restart"),
-            ok_callback = function()
-                UIManager:askForRestart()
-            end,
-            cancel_text = _("Later"),
-        })
+Restart KOReader now?]]), version))
     else
         -- Installation failed, offer rollback
         UIManager:show(ConfirmBox:new{
@@ -3110,14 +3103,8 @@ function BookloreSync:rollbackUpdate()
     local success, error_msg = self.updater:rollback()
     
     if success then
-        UIManager:show(ConfirmBox:new{
-            text = _("Rollback successful!\n\nRestart KOReader now?"),
-            ok_text = _("Restart"),
-            ok_callback = function()
-                UIManager:askForRestart()
-            end,
-            cancel_text = _("Later"),
-        })
+        -- Rollback successful, ask for restart
+        UIManager:askForRestart(_("Rollback successful!\n\nRestart KOReader now?"))
     else
         UIManager:show(InfoMessage:new{
             text = T(_("Rollback failed:\n%1"), error_msg),

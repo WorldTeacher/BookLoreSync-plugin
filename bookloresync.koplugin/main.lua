@@ -2981,12 +2981,6 @@ function BookloreSync:checkForUpdates(silent)
         self.update_available = true
         
         local size_text = self.updater:formatBytes(result.release_info.size)
-        local changelog = result.release_info.changelog or "No changelog available"
-        
-        -- Truncate changelog if too long
-        if #changelog > 300 then
-            changelog = changelog:sub(1, 300) .. "..."
-        end
         
         -- Show confirmation dialog
         UIManager:show(ConfirmBox:new{
@@ -2997,14 +2991,10 @@ Latest version: %2
 
 Download size: %3
 
-Changelog:
-%4
-
 Install update now?]]),
                 result.current_version,
                 result.latest_version,
-                size_text,
-                changelog),
+                size_text),
             ok_text = _("Install"),
             ok_callback = function()
                 self:installUpdate(result.release_info.download_url, result.latest_version)

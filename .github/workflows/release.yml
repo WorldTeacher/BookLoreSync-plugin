@@ -1,0 +1,61 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Generate version information
+        run: |
+          chmod +x generate-version.sh
+          ./generate-version.sh
+      
+      - name: Create plugin archive
+        run: |
+          zip -r bookloresync.koplugin.zip bookloresync.koplugin/
+      
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Try to extract changelog section for this version
+          if [ -f CHANGELOG.md ]; then
+            # Extract section between this version and the next version heading
+            CHANGELOG=$(awk "/^## \[$VERSION\]/,/^## \[/ {if (/^## \[$VERSION\]/) f=1; else if (/^## \[/) f=0; if (f) print}" CHANGELOG.md | sed '1d')
+            if [ -n "$CHANGELOG" ]; then
+              echo "Found changelog for $VERSION"
+              echo "changelog<<EOF" >> $GITHUB_OUTPUT
+              echo "$CHANGELOG" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+            else
+              echo "changelog=Release $VERSION" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "changelog=Release $VERSION" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: bookloresync.koplugin.zip
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

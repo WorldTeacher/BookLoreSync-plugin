@@ -4,7 +4,7 @@ include:
   - component: "$CI_SERVER_FQDN/to-be-continuous/semantic-release/gitlab-ci-semrel@4.0"
     inputs:
       changelog-enabled: true
-      auto-release-enabled: true
+      auto-release-enabled: false
 
 # secret variables
 # (define the variables below in your GitLab group/project variables)

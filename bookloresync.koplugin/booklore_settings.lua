@@ -38,7 +38,7 @@ function Settings:configureServerUrl(parent)
                         
                         -- Reinitialize API client with new URL
                         if parent.api then
-                            parent.api:init(parent.server_url, parent.username, parent.password)
+                            parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
                         end
                         
                         UIManager:close(input_dialog)
@@ -78,7 +78,7 @@ function Settings:configureUsername(parent)
                         
                         -- Reinitialize API client with new username
                         if parent.api then
-                            parent.api:init(parent.server_url, parent.username, parent.password)
+                            parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
                         end
                         
                         UIManager:close(input_dialog)
@@ -119,7 +119,7 @@ function Settings:configurePassword(parent)
                         
                         -- Reinitialize API client with new password
                         if parent.api then
-                            parent.api:init(parent.server_url, parent.username, parent.password)
+                            parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
                         end
                         
                         UIManager:close(input_dialog)
@@ -317,6 +317,22 @@ function Settings:buildMenu(parent)
                 parent.settings:flush()
                 UIManager:show(InfoMessage:new{
                     text = parent.log_to_file and _("File logging enabled") or _("File logging disabled"),
+                    timeout = 2,
+                })
+            end,
+        },
+        {
+            text = _("Secure logs"),
+            help_text = _("Redact URLs from logs to protect sensitive information. When enabled, all URLs in log messages will be replaced with [URL REDACTED] so logs can be safely shared."),
+            checked_func = function()
+                return parent.secure_logs
+            end,
+            callback = function()
+                parent.secure_logs = not parent.secure_logs
+                parent.settings:saveSetting("secure_logs", parent.secure_logs)
+                parent.settings:flush()
+                UIManager:show(InfoMessage:new{
+                    text = parent.secure_logs and _("Secure logging enabled") or _("Secure logging disabled"),
                     timeout = 2,
                 })
             end,

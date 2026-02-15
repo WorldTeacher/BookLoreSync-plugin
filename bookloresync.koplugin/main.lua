@@ -1011,18 +1011,40 @@ function BookloreSync:startSession()
     -- Get current reading position
     local start_progress, start_location = self:getCurrentProgress()
     
+    -- Get book title and KOReader book ID from statistics database
+    local koreader_book_id = nil
+    local book_title = nil
+    
+    if file_hash then
+        local koreader_book = self:_getKOReaderBookByHash(file_hash)
+        if koreader_book then
+            koreader_book_id = koreader_book.koreader_book_id
+            book_title = koreader_book.koreader_book_title
+            logger.info("BookloreSync: Found in KOReader stats - ID:", koreader_book_id, "Title:", book_title)
+        end
+    end
+    
+    -- Fallback: extract from filename if not found in KOReader database
+    if not book_title then
+        book_title = file_path:match("([^/]+)$") or file_path
+        book_title = book_title:gsub("%.[^.]+$", "")  -- Remove extension
+        logger.info("BookloreSync: Using filename as title:", book_title)
+    end
+    
     -- Create session tracking object
     self.current_session = {
         file_path = file_path,
         book_id = book_id,
         file_hash = file_hash,
+        book_title = book_title,
+        koreader_book_id = koreader_book_id,
         start_time = os.time(),
         start_progress = start_progress,
         start_location = start_location,
         book_type = self:getBookType(file_path),
     }
     
-    logger.info("BookloreSync: Session started at", start_progress, "% (location:", start_location, ")")
+    logger.info("BookloreSync: Session started for '", book_title, "' at", start_progress, "% (location:", start_location, ")")
 end
 
 --[[--
@@ -1080,6 +1102,8 @@ function BookloreSync:endSession(options)
     local session_data = {
         bookId = self.current_session.book_id,
         bookHash = self.current_session.file_hash,
+        bookTitle = self.current_session.book_title,
+        koreaderBookId = self.current_session.koreader_book_id,
         bookType = self.current_session.book_type,
         startTime = formatTimestamp(self.current_session.start_time),
         endTime = formatTimestamp(end_time),
@@ -1311,7 +1335,10 @@ function BookloreSync:syncPendingSessions(silent)
         if success then
             synced_count = synced_count + 1
             -- Archive to historical_sessions before deleting
-            self.db:archivePendingSession(session.id)
+            local archived = self.db:archivePendingSession(session.id)
+            if not archived then
+                logger.warn("BookloreSync: Failed to archive session", i, "to historical_sessions")
+            end
             -- Delete from pending sessions
             self.db:deletePendingSession(session.id)
             logger.info("BookloreSync: Session", i, "synced successfully")
@@ -1644,6 +1671,49 @@ function BookloreSync:_getKOReaderBooks(conn)
     
     stmt:close()
     return books
+end
+
+function BookloreSync:_getKOReaderBookByHash(file_hash)
+    -- Query KOReader statistics database to get book ID and title by hash
+    if not file_hash or file_hash == "" then
+        return nil
+    end
+    
+    local stats_db_path = self:_findKOReaderStatisticsDB()
+    if not stats_db_path then
+        logger.dbg("BookloreSync: Statistics database not found")
+        return nil
+    end
+    
+    local SQ3 = require("lua-ljsqlite3/init")
+    local stats_conn = SQ3.open(stats_db_path)
+    if not stats_conn then
+        logger.warn("BookloreSync: Failed to open statistics database")
+        return nil
+    end
+    
+    local stmt = stats_conn:prepare("SELECT id, title FROM book WHERE md5 = ?")
+    if not stmt then
+        logger.warn("BookloreSync: Failed to prepare statement:", stats_conn:errmsg())
+        stats_conn:close()
+        return nil
+    end
+    
+    stmt:bind(file_hash)
+    
+    local book_info = nil
+    for row in stmt:rows() do
+        book_info = {
+            koreader_book_id = tonumber(row[1]),
+            koreader_book_title = tostring(row[2] or "Unknown"),
+        }
+        break
+    end
+    
+    stmt:close()
+    stats_conn:close()
+    
+    return book_info
 end
 
 function BookloreSync:_getPageStats(conn, book_id)

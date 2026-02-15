@@ -207,6 +207,13 @@ function APIClient:request(method, path, body, headers)
         return false, nil, "Network error: " .. error_msg
     end
     
+    -- Ensure code is a number (http client can return strings like "connection refused")
+    if type(code) ~= "number" then
+        local error_msg = tostring(code)
+        logger.err("BookloreSync API: Non-numeric response code:", error_msg)
+        return false, nil, "Connection error: " .. error_msg
+    end
+    
     -- Success codes (2xx)
     if code >= 200 and code < 300 then
         -- Try to parse JSON response

@@ -11,7 +11,7 @@ local DataStorage = require("datastorage")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 4,  -- Current database schema version
+    VERSION = 5,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -178,6 +178,18 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_bearer_tokens_expires 
             ON bearer_tokens(expires_at)
+        ]],
+    },
+    
+    -- Migration 5: Remove unused match_history table
+    [5] = {
+        -- Drop the index first
+        [[
+            DROP INDEX IF EXISTS idx_match_history_file_hash
+        ]],
+        -- Then drop the table
+        [[
+            DROP TABLE IF EXISTS match_history
         ]],
     },
 }
@@ -893,61 +905,6 @@ function Database:incrementSessionRetryCount(session_id)
     stmt:close()
     
     return true
-end
-
--- Match History operations
-
-function Database:saveMatchHistory(file_hash, book_id, match_method, confidence, title, author)
-    local stmt = self.conn:prepare([[
-        INSERT INTO match_history (file_hash, book_id, match_method, confidence, matched_title, matched_author)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ]])
-    
-    if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
-        return false
-    end
-    
-    stmt:bind(file_hash, book_id, match_method or "manual", confidence or 1.0, title, author)
-    
-    stmt:step()
-    stmt:close()
-    
-    return true
-end
-
-function Database:getMatchHistory(file_hash)
-    local stmt = self.conn:prepare([[
-        SELECT id, book_id, match_method, confidence, matched_at, matched_title, matched_author
-        FROM match_history
-        WHERE file_hash = ?
-        ORDER BY matched_at DESC
-        LIMIT 1
-    ]])
-    
-    if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
-        return nil
-    end
-    
-    stmt:bind(file_hash)
-    
-    local history = nil
-    for row in stmt:rows() do
-        history = {
-            id = tonumber(row[1]),
-            book_id = tonumber(row[2]),
-            match_method = tostring(row[3]),
-            confidence = tonumber(row[4]),
-            matched_at = tonumber(row[5]),
-            matched_title = row[6] and tostring(row[6]) or nil,
-            matched_author = row[7] and tostring(row[7]) or nil,
-        }
-        break
-    end
-    
-    stmt:close()
-    return history
 end
 
 -- Historical Session Functions

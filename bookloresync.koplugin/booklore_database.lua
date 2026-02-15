@@ -11,7 +11,7 @@ local DataStorage = require("datastorage")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 7,  -- Current database schema version
+    VERSION = 8,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -206,6 +206,18 @@ Database.migrations = {
         -- Add koreader_book_id column to store the KOReader book ID
         [[
             ALTER TABLE pending_sessions ADD COLUMN koreader_book_id INTEGER
+        ]],
+    },
+    
+    -- Migration 8: Add updater_cache table for caching GitHub release info
+    [8] = {
+        -- Create updater_cache table for caching release information
+        [[
+            CREATE TABLE IF NOT EXISTS updater_cache (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                cached_at INTEGER NOT NULL
+            )
         ]],
     },
 }
@@ -1584,6 +1596,85 @@ function Database:cleanupExpiredTokens()
     stmt:close()
     
     logger.info("BookloreSync Database: Cleaned up expired Bearer tokens")
+    return true
+end
+
+--[[--
+Get cached value from updater_cache if not expired
+
+@param key Cache key
+@return string|nil Cached value (JSON string) or nil if expired/not found
+--]]
+function Database:getUpdaterCache(key)
+    local stmt = self.conn:prepare("SELECT value, cached_at FROM updater_cache WHERE key = ?")
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return nil
+    end
+    
+    stmt:bind(key)
+    local row = stmt:step()
+    stmt:close()
+    
+    if not row then
+        return nil
+    end
+    
+    local value = tostring(row[1])
+    local cached_at = tonumber(row[2])
+    local current_time = os.time()
+    
+    -- Check if cache is expired (older than 1 hour)
+    if current_time - cached_at > 3600 then
+        logger.info("BookloreSync Database: Cache expired for key:", key)
+        return nil
+    end
+    
+    logger.info("BookloreSync Database: Retrieved cached value for key:", key)
+    return value
+end
+
+--[[--
+Save value to updater_cache with current timestamp
+
+@param key Cache key
+@param value Value to cache (JSON string)
+@return boolean success
+--]]
+function Database:setUpdaterCache(key, value)
+    local stmt = self.conn:prepare("INSERT OR REPLACE INTO updater_cache (key, value, cached_at) VALUES (?, ?, ?)")
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return false
+    end
+    
+    stmt:bind(key, value, os.time())
+    stmt:step()
+    stmt:close()
+    
+    logger.info("BookloreSync Database: Cached value for key:", key)
+    return true
+end
+
+--[[--
+Clear all cached updater data
+
+@return boolean success
+--]]
+function Database:clearUpdaterCache()
+    local stmt = self.conn:prepare("DELETE FROM updater_cache")
+    
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return false
+    end
+    
+    stmt:step()
+    stmt:close()
+    
+    logger.info("BookloreSync Database: Cleared updater cache")
     return true
 end
 

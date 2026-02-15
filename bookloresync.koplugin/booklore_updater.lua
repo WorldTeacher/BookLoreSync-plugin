@@ -164,52 +164,89 @@ function Updater:compareVersions(v1, v2)
 end
 
 --[[--
-Make HTTP GET request with timeout
+Make HTTP GET request with timeout and redirect support
 
 @param url URL to fetch
 @param headers Optional headers table
+@param max_redirects Maximum number of redirects to follow (default 5)
 @return boolean success
 @return string|nil response_text or error
 @return number|nil HTTP status code
+@return table|nil response headers
 --]]
-function Updater:_makeHttpRequest(url, headers)
-    logger.info("BookloreSync Updater: HTTP GET", url)
+function Updater:_makeHttpRequest(url, headers, max_redirects)
+    max_redirects = max_redirects or 5
+    local redirect_count = 0
+    local current_url = url
     
-    local response_body = {}
-    local request_headers = headers or {}
-    
-    -- Set User-Agent for GitHub API
-    if not request_headers["User-Agent"] then
-        request_headers["User-Agent"] = "BookloreSync-KOReader-Plugin"
+    while redirect_count <= max_redirects do
+        logger.info("BookloreSync Updater: HTTP GET", current_url)
+        
+        local response_body = {}
+        local request_headers = headers or {}
+        
+        -- Set User-Agent for GitHub API
+        if not request_headers["User-Agent"] then
+            request_headers["User-Agent"] = "BookloreSync-KOReader-Plugin"
+        end
+        
+        -- Choose http or https based on URL
+        local protocol = current_url:match("^https") and https or http
+        
+        -- Set timeout
+        protocol.TIMEOUT = self.HTTP_TIMEOUT
+        
+        local response, code, response_headers = protocol.request{
+            url = current_url,
+            method = "GET",
+            headers = request_headers,
+            sink = ltn12.sink.table(response_body),
+        }
+        
+        -- Check for network errors
+        if type(code) ~= "number" then
+            local error_msg = tostring(code)
+            logger.err("BookloreSync Updater: HTTP request failed:", error_msg)
+            return false, "Connection error: " .. error_msg, nil, nil
+        end
+        
+        local response_text = table.concat(response_body)
+        
+        -- Handle redirects (3xx status codes)
+        if code >= 300 and code < 400 then
+            local location = response_headers and response_headers["location"]
+            if not location then
+                logger.err("BookloreSync Updater: Redirect without Location header")
+                return false, "Redirect without location", code, response_headers
+            end
+            
+            -- Handle relative redirects
+            if location:sub(1, 1) == "/" then
+                local base_url = current_url:match("^(https?://[^/]+)")
+                location = base_url .. location
+            end
+            
+            redirect_count = redirect_count + 1
+            if redirect_count > max_redirects then
+                logger.err("BookloreSync Updater: Too many redirects")
+                return false, "Too many redirects", code, response_headers
+            end
+            
+            logger.info("BookloreSync Updater: Following redirect to", location)
+            current_url = location
+            -- Continue loop to follow redirect
+        elseif code >= 200 and code < 300 then
+            -- Success
+            return true, response_text, code, response_headers
+        else
+            -- Error
+            logger.err("BookloreSync Updater: HTTP", code, "response")
+            return false, response_text, code, response_headers
+        end
     end
     
-    -- Choose http or https
-    local protocol = url:match("^https") and https or http
-    
-    local response, code, response_headers = protocol.request{
-        url = url,
-        method = "GET",
-        headers = request_headers,
-        sink = ltn12.sink.table(response_body),
-        redirect = true,
-        timeout = self.HTTP_TIMEOUT,
-    }
-    
-    -- Check for network errors
-    if type(code) ~= "number" then
-        local error_msg = tostring(code)
-        logger.err("BookloreSync Updater: HTTP request failed:", error_msg)
-        return false, "Connection error: " .. error_msg, nil
-    end
-    
-    local response_text = table.concat(response_body)
-    
-    if code >= 200 and code < 300 then
-        return true, response_text, code
-    else
-        logger.err("BookloreSync Updater: HTTP", code, "response")
-        return false, response_text, code
-    end
+    -- Should never reach here
+    return false, "Redirect loop", nil, nil
 end
 
 --[[--
@@ -399,7 +436,7 @@ function Updater:formatBytes(bytes)
 end
 
 --[[--
-Download update file with progress callback
+Download update file with progress callback and redirect support
 
 @param url Download URL
 @param progress_callback Function called with (bytes_downloaded, total_bytes)
@@ -413,8 +450,66 @@ function Updater:downloadUpdate(url, progress_callback)
     os.execute("mkdir -p " .. self.temp_dir)
     
     local zip_path = self.temp_dir .. "/download.zip"
-    local file = io.open(zip_path, "wb")
     
+    -- Follow redirects manually to get final URL
+    local final_url = url
+    local max_redirects = 5
+    local redirect_count = 0
+    
+    while redirect_count <= max_redirects do
+        logger.info("BookloreSync Updater: Checking URL", final_url)
+        
+        -- Choose protocol
+        local protocol = final_url:match("^https") and https or http
+        protocol.TIMEOUT = 60  -- Longer timeout for downloads
+        
+        -- Make HEAD request to check for redirects
+        local head_response = {}
+        local response, code, response_headers = protocol.request{
+            url = final_url,
+            method = "HEAD",
+            sink = ltn12.sink.table(head_response),
+            headers = {
+                ["User-Agent"] = "BookloreSync-KOReader-Plugin"
+            }
+        }
+        
+        if type(code) ~= "number" then
+            return false, "Connection error: " .. tostring(code)
+        end
+        
+        -- Handle redirects
+        if code >= 300 and code < 400 then
+            local location = response_headers and response_headers["location"]
+            if not location then
+                return false, "Redirect without location"
+            end
+            
+            -- Handle relative redirects
+            if location:sub(1, 1) == "/" then
+                local base_url = final_url:match("^(https?://[^/]+)")
+                location = base_url .. location
+            end
+            
+            redirect_count = redirect_count + 1
+            if redirect_count > max_redirects then
+                return false, "Too many redirects"
+            end
+            
+            logger.info("BookloreSync Updater: Following redirect to", location)
+            final_url = location
+        elseif code >= 200 and code < 300 then
+            -- Found final URL, proceed with download
+            break
+        else
+            return false, "HTTP error: " .. tostring(code)
+        end
+    end
+    
+    -- Now download from final URL
+    logger.info("BookloreSync Updater: Downloading from final URL", final_url)
+    
+    local file = io.open(zip_path, "wb")
     if not file then
         return false, "Failed to create download file"
     end
@@ -436,16 +531,15 @@ function Updater:downloadUpdate(url, progress_callback)
         return 1
     end
     
-    -- Choose protocol
-    local protocol = url:match("^https") and https or http
+    -- Choose protocol for final download
+    local protocol = final_url:match("^https") and https or http
+    protocol.TIMEOUT = 60
     
-    -- Make request
+    -- Make GET request to download
     local response, code, response_headers = protocol.request{
-        url = url,
+        url = final_url,
         method = "GET",
         sink = progress_sink,
-        redirect = true,
-        timeout = 60,  -- Longer timeout for downloads
         headers = {
             ["User-Agent"] = "BookloreSync-KOReader-Plugin"
         }
@@ -465,6 +559,7 @@ function Updater:downloadUpdate(url, progress_callback)
     end
     
     -- Get file size
+    local lfs = require("libs/lfs")
     local attr = lfs and lfs.attributes(zip_path)
     if attr then
         total_bytes = attr.size

@@ -1,3 +1,10 @@
+## [1.1.1](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/1.1.0...1.1.1) (2026-02-15)
+
+
+### Bug Fixes
+
+* tag version in github ([189ed4d](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/189ed4de7e47dec2961753392054c047aa1cd5db))
+
 # [1.1.0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/1.0.5...1.1.0) (2026-02-15)
 
 

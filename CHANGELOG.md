@@ -1,3 +1,10 @@
+## [1.0.2](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/1.0.1...1.0.2) (2026-02-15)
+
+
+### Bug Fixes
+
+* ci now allows addition? ([e8d2075](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/e8d2075652cfad1182f8f0e4dd1c0d7e570947bb))
+
 ## [1.0.1](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/1.0.0...1.0.1) (2026-02-15)
 
 

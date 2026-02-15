@@ -716,7 +716,10 @@ end
 --[[--
 Get current reading progress and location
 
-@return number progress (0-100)
+Returns raw percentage with maximum precision.
+Rounding is applied later during API sync based on config.
+
+@return number progress (0-100) with maximum precision
 @return string location (page number or position)
 --]]
 function BookloreSync:getCurrentProgress()
@@ -732,7 +735,8 @@ function BookloreSync:getCurrentProgress()
         local current_page = self.ui.document:getCurrentPage()
         local total_pages = self.ui.document:getPageCount()
         if total_pages > 0 then
-            progress = self:roundProgress((current_page / total_pages) * 100)
+            -- Store raw percentage with maximum precision
+            progress = (current_page / total_pages) * 100
         end
         location = tostring(current_page)
     elseif self.ui.rolling then
@@ -740,7 +744,8 @@ function BookloreSync:getCurrentProgress()
         local cur_page = self.ui.document:getCurrentPage()
         local total_pages = self.ui.document:getPageCount()
         if total_pages > 0 then
-            progress = self:roundProgress((cur_page / total_pages) * 100)
+            -- Store raw percentage with maximum precision
+            progress = (cur_page / total_pages) * 100
         end
         location = tostring(cur_page)
     end
@@ -1063,8 +1068,8 @@ function BookloreSync:endSession(options)
         return
     end
     
-    -- Calculate progress delta
-    local progress_delta = self:roundProgress(end_progress - self.current_session.start_progress)
+    -- Calculate progress delta (store with maximum precision)
+    local progress_delta = end_progress - self.current_session.start_progress
     
     -- Format timestamp for API (ISO 8601)
     local function formatTimestamp(unix_time)
@@ -1282,7 +1287,7 @@ function BookloreSync:syncPendingSessions(silent)
         -- Add formatted duration to session data
         local duration_formatted = self:formatDuration(session.durationSeconds)
         
-        -- Prepare session data for API (remove internal fields)
+        -- Prepare session data for API (apply decimal rounding here)
         local session_data = {
             bookId = session.bookId,
             bookType = session.bookType,
@@ -1290,9 +1295,9 @@ function BookloreSync:syncPendingSessions(silent)
             endTime = session.endTime,
             durationSeconds = session.durationSeconds,
             durationFormatted = duration_formatted,
-            startProgress = session.startProgress,
-            endProgress = session.endProgress,
-            progressDelta = session.progressDelta,
+            startProgress = self:roundProgress(session.startProgress),
+            endProgress = self:roundProgress(session.endProgress),
+            progressDelta = self:roundProgress(session.progressDelta),
             startLocation = session.startLocation,
             endLocation = session.endLocation,
         }
@@ -1479,8 +1484,9 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
         -- Convert to ISO 8601 for Booklore API
         local iso_time = self:_unixToISO8601(timestamp)
         
+        -- Calculate progress as 0-100 percentage (consistent with live sessions)
         local progress = (stat.total_pages and stat.total_pages > 0) 
-            and (stat.page / stat.total_pages) or 0
+            and ((stat.page / stat.total_pages) * 100) or 0
         
         if not current_session then
             -- Start first session
@@ -2315,7 +2321,6 @@ function BookloreSync:_syncHistoricalSessions(book, sessions, progress_text)
     
     for _, session in ipairs(sessions) do
         if not session.synced or session.synced == 0 then
-            -- Progress values should be 0.0-1.0 (decimals)
             local start_progress = session.start_progress or 0
             local end_progress = session.end_progress or 0
             local progress_delta = session.progress_delta or (end_progress - start_progress)
@@ -2323,6 +2328,7 @@ function BookloreSync:_syncHistoricalSessions(book, sessions, progress_text)
             -- Format duration
             local duration_formatted = self:_formatDuration(session.duration_seconds or 0)
             
+            -- Apply decimal rounding based on config
             local success = self.api:submitSession({
                 bookId = session.book_id,
                 bookType = session.book_type,
@@ -2330,9 +2336,9 @@ function BookloreSync:_syncHistoricalSessions(book, sessions, progress_text)
                 endTime = session.end_time,
                 durationSeconds = session.duration_seconds,
                 durationFormatted = duration_formatted,
-                startProgress = start_progress,
-                endProgress = end_progress,
-                progressDelta = progress_delta,
+                startProgress = self:roundProgress(start_progress),
+                endProgress = self:roundProgress(end_progress),
+                progressDelta = self:roundProgress(progress_delta),
                 startLocation = session.start_location,
                 endLocation = session.end_location,
             })
@@ -2461,7 +2467,6 @@ function BookloreSync:_performResyncHistoricalData()
             UIManager:forceRePaint()
         end
         
-        -- Progress values should be 0.0-1.0 (decimals)
         local start_progress = session.start_progress or 0
         local end_progress = session.end_progress or 0
         local progress_delta = session.progress_delta or (end_progress - start_progress)
@@ -2469,7 +2474,7 @@ function BookloreSync:_performResyncHistoricalData()
         -- Format duration
         local duration_formatted = self:_formatDuration(session.duration_seconds or 0)
         
-        -- Submit session
+        -- Submit session with decimal rounding based on config
         local success, message, code = self.api:submitSession({
             bookId = session.book_id,
             bookType = session.book_type,
@@ -2477,9 +2482,9 @@ function BookloreSync:_performResyncHistoricalData()
             endTime = session.end_time,
             durationSeconds = session.duration_seconds,
             durationFormatted = duration_formatted,
-            startProgress = start_progress,
-            endProgress = end_progress,
-            progressDelta = progress_delta,
+            startProgress = self:roundProgress(start_progress),
+            endProgress = self:roundProgress(end_progress),
+            progressDelta = self:roundProgress(progress_delta),
             startLocation = session.start_location,
             endLocation = session.end_location,
         })

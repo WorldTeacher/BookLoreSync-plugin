@@ -392,14 +392,6 @@ function Settings:buildMenu(parent)
                 },
             },
         },
-        {
-            text = _("Version"),
-            help_text = _("Display plugin version information including version number, build date, and git commit."),
-            keep_menu_open = true,
-            callback = function()
-                self:showVersion(parent)
-            end,
-        },
     }
 end
 

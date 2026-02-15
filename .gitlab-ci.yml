@@ -41,14 +41,18 @@ zip-koplugin-release:
     - bash generate-version.sh
 
     - echo "Creating koplugin release archive"
-    - cd bookloresync.koplugin && zip -r ../bookloresync.koplugin.zip *.lua
-    - cd ..
+    - cd "$CI_PROJECT_DIR/bookloresync.koplugin"
+    - zip -r "$CI_PROJECT_DIR/bookloresync.koplugin.zip" *.lua
+    - cd "$CI_PROJECT_DIR"
 
-    # Attach asset to the existing release (semantic-release already created it)
-    - glab release upload "$CI_COMMIT_TAG" \
-      "bookloresync.koplugin.zip#bookloresync.koplugin.zip#package" \
-      --use-package-registry \
+    - ls -lah "$CI_PROJECT_DIR/bookloresync.koplugin.zip"
+
+    - >
+      glab release upload "$CI_COMMIT_TAG"
+      "$CI_PROJECT_DIR/bookloresync.koplugin.zip#bookloresync.koplugin.zip#package"
+      --use-package-registry
       -R "$CI_PROJECT_PATH"
+
   artifacts:
     paths:
       - bookloresync.koplugin.zip

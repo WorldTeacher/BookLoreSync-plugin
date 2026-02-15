@@ -20,6 +20,7 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local Settings = require("booklore_settings")
 local Database = require("booklore_database")
 local APIClient = require("booklore_api_client")
+local Updater = require("booklore_updater")
 local logger = require("logger")
 
 local _ = require("gettext")
@@ -180,6 +181,35 @@ function BookloreSync:init()
     -- Initialize API client
     self.api = APIClient:new()
     self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    
+    -- Initialize updater
+    self.updater = Updater:new()
+    
+    -- Detect plugin directory from current file path
+    local source = debug.getinfo(1, "S").source
+    local plugin_dir = source:match("@(.*)/")
+    if not plugin_dir or not plugin_dir:match("bookloresync%.koplugin$") then
+        -- Fallback: use data directory
+        plugin_dir = DataStorage:getDataDir() .. "/bookloresync.koplugin"
+    end
+    
+    self.updater:init(plugin_dir, self.db)
+    
+    -- Auto-update check settings
+    self.auto_update_check = self.settings:readSetting("auto_update_check")
+    if self.auto_update_check == nil then
+        self.auto_update_check = true  -- Default enabled
+    end
+    
+    self.last_update_check = self.settings:readSetting("last_update_check") or 0
+    self.update_available = false  -- Flag for menu badge
+    
+    -- Schedule auto-check for updates (5-second delay, once per day)
+    if self.auto_update_check then
+        UIManager:scheduleIn(5, function()
+            self:autoCheckForUpdates()
+        end)
+    end
     
     -- Register menu
     self.ui.menu:registerToMainMenu(self)
@@ -563,6 +593,44 @@ function BookloreSync:addToMainMenu(menu_items)
                 help_text = _("Display statistics about historical sessions: total sessions extracted, matched sessions, unmatched sessions, and synced sessions."),
                 callback = function()
                     self:viewMatchStatistics()
+                end,
+            },
+        },
+    })
+    
+    -- About & Updates submenu
+    table.insert(base_menu, {
+        text = self.update_available and _("About & Updates ⚠") or _("About & Updates"),
+        sub_item_table = {
+            {
+                text = _("Version Information"),
+                keep_menu_open = true,
+                callback = function()
+                    self:showVersionInfo()
+                end,
+            },
+            {
+                text = self.update_available and _("Check for Updates ⚠ Update Available!") or _("Check for Updates"),
+                keep_menu_open = true,
+                callback = function()
+                    self:checkForUpdates(false)  -- silent=false
+                end,
+            },
+            {
+                text = _("Auto-check on Startup"),
+                checked_func = function()
+                    return self.auto_update_check
+                end,
+                callback = function()
+                    self:toggleAutoUpdateCheck()
+                end,
+            },
+            {
+                text = _("Clear Update Cache"),
+                help_text = _("Force a fresh check by clearing cached release info"),
+                keep_menu_open = true,
+                callback = function()
+                    self:clearUpdateCache()
                 end,
             },
         },
@@ -2841,6 +2909,306 @@ function BookloreSync:syncRematchedSessions()
             timeout = 3,
         })
     end)
+end
+
+--[[--
+Show version information dialog
+--]]
+function BookloreSync:showVersionInfo()
+    local version_info = self.updater:getCurrentVersion()
+    
+    local text = T(_([[Version Information
+
+Current Version: %1
+Version Type: %2
+Build Date: %3
+Git Commit: %4]]),
+        version_info.version,
+        version_info.version_type,
+        version_info.build_date,
+        version_info.git_commit
+    )
+    
+    -- Add update status if known
+    if self.update_available then
+        text = text .. _("\n\n⚠ Update available!")
+    end
+    
+    UIManager:show(InfoMessage:new{
+        text = text,
+        timeout = 10,
+    })
+end
+
+--[[--
+Auto-check for updates (runs once per day, silent mode)
+--]]
+function BookloreSync:autoCheckForUpdates()
+    -- Check if 24 hours passed since last check
+    local now = os.time()
+    if now - self.last_update_check < 86400 then
+        logger.info("BookloreSync Updater: Auto-check skipped (last check was less than 24 hours ago)")
+        return
+    end
+    
+    -- Update last check timestamp
+    self.last_update_check = now
+    self.settings:saveSetting("last_update_check", now)
+    self.settings:flush()
+    
+    -- Check network
+    if not NetworkMgr:isConnected() then
+        logger.info("BookloreSync Updater: No network, skipping auto-check")
+        return
+    end
+    
+    logger.info("BookloreSync Updater: Running auto-check for updates")
+    
+    -- Check for updates (use cache)
+    local result = self.updater:checkForUpdates(true)
+    
+    if not result then
+        logger.warn("BookloreSync Updater: Auto-check failed")
+        return
+    end
+    
+    if result.available then
+        -- Set flag for menu badge
+        self.update_available = true
+        
+        logger.info("BookloreSync Updater: Update available:", result.latest_version)
+        
+        -- Show notification
+        UIManager:show(InfoMessage:new{
+            text = T(_([[BookloreSync update available!
+
+Current: %1
+Latest: %2
+
+Go to Tools → Booklore Sync → About & Updates to install.]]),
+                result.current_version, result.latest_version),
+            timeout = 8,
+        })
+    else
+        logger.info("BookloreSync Updater: Already up to date")
+    end
+end
+
+--[[--
+Check for updates (manual or auto)
+
+@param silent If true, only show message when update available
+--]]
+function BookloreSync:checkForUpdates(silent)
+    -- Check network
+    if not NetworkMgr:isConnected() then
+        if not silent then
+            UIManager:show(InfoMessage:new{
+                text = _("No network connection.\n\nPlease connect to check for updates."),
+                timeout = 3,
+            })
+        end
+        return
+    end
+    
+    -- Show "Checking..." message
+    if not silent then
+        UIManager:show(InfoMessage:new{
+            text = _("Checking for updates..."),
+            timeout = 1,
+        })
+    end
+    
+    -- Check for updates (use cache if silent, fresh if manual)
+    local result = self.updater:checkForUpdates(silent)
+    
+    if not result then
+        if not silent then
+            UIManager:show(InfoMessage:new{
+                text = _("Failed to check for updates.\n\nPlease try again later."),
+                timeout = 3,
+            })
+        end
+        return
+    end
+    
+    if result.available then
+        -- Update available
+        self.update_available = true
+        
+        local size_text = self.updater:formatBytes(result.release_info.size)
+        local changelog = result.release_info.changelog or "No changelog available"
+        
+        -- Truncate changelog if too long
+        if #changelog > 300 then
+            changelog = changelog:sub(1, 300) .. "..."
+        end
+        
+        -- Show confirmation dialog
+        UIManager:show(ConfirmBox:new{
+            text = T(_([[Update available!
+
+Current version: %1
+Latest version: %2
+
+Download size: %3
+
+Changelog:
+%4
+
+Install update now?]]),
+                result.current_version,
+                result.latest_version,
+                size_text,
+                changelog),
+            ok_text = _("Install"),
+            ok_callback = function()
+                self:installUpdate(result.release_info.download_url, result.latest_version)
+            end,
+        })
+    else
+        -- No update available
+        self.update_available = false
+        
+        if not silent then
+            UIManager:show(InfoMessage:new{
+                text = T(_("You're up to date!\n\nCurrent version: %1"), result.current_version),
+                timeout = 3,
+            })
+        end
+    end
+end
+
+--[[--
+Install update from download URL
+
+@param download_url URL to download ZIP from
+@param version Version being installed
+--]]
+function BookloreSync:installUpdate(download_url, version)
+    -- Show initial progress message
+    local progress_msg = InfoMessage:new{
+        text = _("Downloading update...\n0%"),
+    }
+    UIManager:show(progress_msg)
+    
+    -- Download with progress callback
+    local success, zip_path_or_error = self.updater:downloadUpdate(
+        download_url,
+        function(bytes_downloaded, total_bytes)
+            -- Update progress message
+            if total_bytes > 0 then
+                local progress = math.floor((bytes_downloaded / total_bytes) * 100)
+                progress_msg:setText(T(_("Downloading update...\n%1%%"), progress))
+                UIManager:setDirty(progress_msg, "ui")
+            end
+        end
+    )
+    
+    UIManager:close(progress_msg)
+    
+    if not success then
+        UIManager:show(InfoMessage:new{
+            text = T(_("Download failed:\n%1"), zip_path_or_error),
+            timeout = 5,
+        })
+        return
+    end
+    
+    -- Show installation progress
+    UIManager:show(InfoMessage:new{
+        text = _("Installing update..."),
+        timeout = 2,
+    })
+    
+    -- Install update (includes backup)
+    success, error_msg = self.updater:installUpdate(zip_path_or_error)
+    
+    if success then
+        -- Success!
+        UIManager:show(ConfirmBox:new{
+            text = T(_([[Update installed successfully!
+
+Version %1 is ready.
+
+Restart KOReader now?]]), version),
+            ok_text = _("Restart"),
+            ok_callback = function()
+                UIManager:askForRestart()
+            end,
+            cancel_text = _("Later"),
+        })
+    else
+        -- Installation failed, offer rollback
+        UIManager:show(ConfirmBox:new{
+            text = T(_([[Installation failed:
+%1
+
+Rollback to previous version?]]), error_msg),
+            ok_text = _("Rollback"),
+            ok_callback = function()
+                self:rollbackUpdate()
+            end,
+            cancel_text = _("Cancel"),
+        })
+    end
+end
+
+--[[--
+Rollback to previous version after failed update
+--]]
+function BookloreSync:rollbackUpdate()
+    UIManager:show(InfoMessage:new{
+        text = _("Rolling back to previous version..."),
+        timeout = 2,
+    })
+    
+    local success, error_msg = self.updater:rollback()
+    
+    if success then
+        UIManager:show(ConfirmBox:new{
+            text = _("Rollback successful!\n\nRestart KOReader now?"),
+            ok_text = _("Restart"),
+            ok_callback = function()
+                UIManager:askForRestart()
+            end,
+            cancel_text = _("Later"),
+        })
+    else
+        UIManager:show(InfoMessage:new{
+            text = T(_("Rollback failed:\n%1"), error_msg),
+            timeout = 5,
+        })
+    end
+end
+
+--[[--
+Toggle auto-update check setting
+--]]
+function BookloreSync:toggleAutoUpdateCheck()
+    self.auto_update_check = not self.auto_update_check
+    self.settings:saveSetting("auto_update_check", self.auto_update_check)
+    self.settings:flush()
+    
+    UIManager:show(InfoMessage:new{
+        text = self.auto_update_check and 
+            _("Auto-update check enabled.\n\nWill check once per day on startup.") or
+            _("Auto-update check disabled."),
+        timeout = 2,
+    })
+end
+
+--[[--
+Clear update cache to force fresh check
+--]]
+function BookloreSync:clearUpdateCache()
+    self.updater:clearCache()
+    self.update_available = false
+    
+    UIManager:show(InfoMessage:new{
+        text = _("Update cache cleared.\n\nNext check will fetch fresh data."),
+        timeout = 2,
+    })
 end
 
 return BookloreSync

@@ -30,6 +30,61 @@ local BookloreSync = WidgetContainer:extend{
     is_doc_only = false,
 }
 
+--[[--
+Redact URLs from log message for secure logging
+
+@param message The log message that may contain URLs
+@return string Message with URLs redacted
+--]]
+local function redactUrls(message)
+    if type(message) ~= "string" then
+        message = tostring(message)
+    end
+    -- Match http:// or https:// URLs and replace them with [URL REDACTED]
+    return message:gsub("https?://[^%s]+", "[URL REDACTED]")
+end
+
+-- Secure logger wrappers
+function BookloreSync:logInfo(...)
+    local args = {...}
+    if self.secure_logs then
+        for i = 1, #args do
+            args[i] = redactUrls(args[i])
+        end
+    end
+    logger.info(table.unpack(args))
+end
+
+function BookloreSync:logWarn(...)
+    local args = {...}
+    if self.secure_logs then
+        for i = 1, #args do
+            args[i] = redactUrls(args[i])
+        end
+    end
+    logger.warn(table.unpack(args))
+end
+
+function BookloreSync:logErr(...)
+    local args = {...}
+    if self.secure_logs then
+        for i = 1, #args do
+            args[i] = redactUrls(args[i])
+        end
+    end
+    logger.err(table.unpack(args))
+end
+
+function BookloreSync:logDbg(...)
+    local args = {...}
+    if self.secure_logs then
+        for i = 1, #args do
+            args[i] = redactUrls(args[i])
+        end
+    end
+    logger.dbg(table.unpack(args))
+end
+
 function BookloreSync:init()
     self.settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/booklore.lua")
     
@@ -42,6 +97,7 @@ function BookloreSync:init()
     self.is_enabled = self.settings:readSetting("is_enabled") or false
     self.log_to_file = self.settings:readSetting("log_to_file") or false
     self.silent_messages = self.settings:readSetting("silent_messages") or false
+    self.secure_logs = self.settings:readSetting("secure_logs") or false
     
     -- Session settings
     self.min_duration = self.settings:readSetting("min_duration") or 30
@@ -69,7 +125,7 @@ function BookloreSync:init()
     local db_initialized = self.db:init()
     
     if not db_initialized then
-        logger.err("BookloreSync: Failed to initialize database")
+        self:logErr("BookloreSync: Failed to initialize database")
         UIManager:show(InfoMessage:new{
             text = _("Failed to initialize Booklore database"),
             timeout = 3,
@@ -81,12 +137,12 @@ function BookloreSync:init()
         
         if old_db_file then
             old_db_file:close()
-            logger.info("BookloreSync: Found old database, checking if migration needed")
+            self:logInfo("BookloreSync: Found old database, checking if migration needed")
             
             -- Check if database is empty (needs migration)
             local stats = self.db:getBookCacheStats()
             if stats.total == 0 then
-                logger.info("BookloreSync: Database is empty, migrating from LuaSettings")
+                self:logInfo("BookloreSync: Database is empty, migrating from LuaSettings")
                 
                 local ok, err = pcall(function()
                     local local_db = LuaSettings:open(old_db_path)
@@ -106,7 +162,7 @@ function BookloreSync:init()
                 end)
                 
                 if not ok then
-                    logger.err("BookloreSync: Migration failed:", err)
+                    self:logErr("BookloreSync: Migration failed:", err)
                     UIManager:show(InfoMessage:new{
                         text = _("Failed to migrate old data. Check logs."),
                         timeout = 3,
@@ -123,7 +179,7 @@ function BookloreSync:init()
     
     -- Initialize API client
     self.api = APIClient:new()
-    self.api:init(self.server_url, self.username, self.password, self.db)
+    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
     
     -- Register menu
     self.ui.menu:registerToMainMenu(self)
@@ -621,7 +677,7 @@ function BookloreSync:testConnection()
     end
     
     -- Update API client with current credentials
-    self.api:init(self.server_url, self.username, self.password, self.db)
+    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
     
     -- Test authentication
     local success, message = self.api:testAuth()
@@ -792,11 +848,11 @@ Uses the same algorithm as Booklore's FileFingerprint:
 @return string MD5 hash or nil on error
 --]]
 function BookloreSync:calculateBookHash(file_path)
-    logger.info("BookloreSync: Calculating MD5 hash for:", file_path)
+    self:logInfo("BookloreSync: Calculating MD5 hash for:", file_path)
     
     local file = io.open(file_path, "rb")
     if not file then
-        logger.warn("BookloreSync: Could not open file for hashing")
+        self:logWarn("BookloreSync: Could not open file for hashing")
         return nil
     end
     
@@ -809,7 +865,7 @@ function BookloreSync:calculateBookHash(file_path)
     local file_size = file:seek("end")
     file:seek("set", 0)
     
-    logger.info("BookloreSync: File size:", file_size)
+    self:logInfo("BookloreSync: File size:", file_size)
     
     -- Sample file at specific positions (matching Booklore's FileFingerprint algorithm)
     -- Positions: base << (2*i) for i from -1 to 10
@@ -833,7 +889,7 @@ function BookloreSync:calculateBookHash(file_path)
     local combined_data = table.concat(buffer)
     local hash = md5(combined_data)
     
-    logger.info("BookloreSync: Hash calculated:", hash)
+    self:logInfo("BookloreSync: Hash calculated:", hash)
     return hash
 end
 
@@ -848,38 +904,38 @@ Caches successful lookups in the database.
 --]]
 function BookloreSync:getBookIdByHash(book_hash)
     if not book_hash then
-        logger.warn("BookloreSync: No book hash provided to getBookIdByHash")
+        self:logWarn("BookloreSync: No book hash provided to getBookIdByHash")
         return nil, nil, nil
     end
     
-    logger.info("BookloreSync: Looking up book ID for hash:", book_hash)
+    self:logInfo("BookloreSync: Looking up book ID for hash:", book_hash)
     
     -- Check database cache first
     local cached_book = self.db:getBookByHash(book_hash)
     if cached_book and cached_book.book_id then
-        logger.info("BookloreSync: Found book ID in database cache:", cached_book.book_id)
+        self:logInfo("BookloreSync: Found book ID in database cache:", cached_book.book_id)
         return cached_book.book_id, cached_book.isbn10, cached_book.isbn13
     end
     
     -- Not in cache, query server
-    logger.info("BookloreSync: Book ID not in cache, querying server")
+    self:logInfo("BookloreSync: Book ID not in cache, querying server")
     
     local success, book_data = self.api:getBookByHash(book_hash)
     
     if not success then
-        logger.warn("BookloreSync: Failed to get book from server (offline or error)")
+        self:logWarn("BookloreSync: Failed to get book from server (offline or error)")
         return nil, nil, nil
     end
     
     if not book_data or not book_data.id then
-        logger.info("BookloreSync: Book not found on server")
+        self:logInfo("BookloreSync: Book not found on server")
         return nil, nil, nil
     end
     
     -- Ensure book_id is a number (API might return string)
     local book_id = tonumber(book_data.id)
     if not book_id then
-        logger.warn("BookloreSync: Invalid book ID from server:", book_data.id)
+        self:logWarn("BookloreSync: Invalid book ID from server:", book_data.id)
         return nil, nil, nil
     end
     
@@ -887,8 +943,8 @@ function BookloreSync:getBookIdByHash(book_hash)
     local isbn10 = book_data.isbn10 or nil
     local isbn13 = book_data.isbn13 or nil
     
-    logger.info("BookloreSync: Found book ID on server:", book_id)
-    logger.info("BookloreSync: Book data from server includes ISBN-10:", isbn10, "ISBN-13:", isbn13)
+    self:logInfo("BookloreSync: Found book ID on server:", book_id)
+    self:logInfo("BookloreSync: Book data from server includes ISBN-10:", isbn10, "ISBN-13:", isbn13)
     
     -- Update cache with the book ID and ISBN fields we found
     if cached_book then
@@ -903,7 +959,7 @@ function BookloreSync:getBookIdByHash(book_hash)
             isbn10,
             isbn13
         )
-        logger.info("BookloreSync: Updated database cache with book ID and ISBN")
+        self:logInfo("BookloreSync: Updated database cache with book ID and ISBN")
     end
     
     -- Return both book_id and ISBN data so caller can save if needed
@@ -921,95 +977,95 @@ function BookloreSync:startSession()
     end
     
     if not self.ui or not self.ui.document then
-        logger.warn("BookloreSync: No document available to start session")
+        self:logWarn("BookloreSync: No document available to start session")
         return
     end
     
     local file_path = self.ui.document.file
     if not file_path then
-        logger.warn("BookloreSync: No file path available")
+        self:logWarn("BookloreSync: No file path available")
         return
     end
     
     -- Ensure file_path is a string
     file_path = tostring(file_path)
     
-    logger.info("BookloreSync: ========== Starting session ==========")
-    logger.info("BookloreSync: File:", file_path)
-    logger.info("BookloreSync: File path type:", type(file_path))
-    logger.info("BookloreSync: File path length:", #file_path)
+    self:logInfo("BookloreSync: ========== Starting session ==========")
+    self:logInfo("BookloreSync: File:", file_path)
+    self:logInfo("BookloreSync: File path type:", type(file_path))
+    self:logInfo("BookloreSync: File path length:", #file_path)
     
     -- Check database for this file
-    logger.info("BookloreSync: Calling getBookByFilePath...")
+    self:logInfo("BookloreSync: Calling getBookByFilePath...")
     local ok, cached_book = pcall(function()
         return self.db:getBookByFilePath(file_path)
     end)
     
     if not ok then
-        logger.err("BookloreSync: Error in getBookByFilePath:", cached_book)
-        logger.err("  file_path:", file_path)
+        self:logErr("BookloreSync: Error in getBookByFilePath:", cached_book)
+        self:logErr("  file_path:", file_path)
         return
     end
     
-    logger.info("BookloreSync: getBookByFilePath completed")
+    self:logInfo("BookloreSync: getBookByFilePath completed")
     local file_hash = nil
     local book_id = nil
     
     if cached_book then
-        logger.info("BookloreSync: Found book in cache - ID:", cached_book.book_id, "Hash:", cached_book.file_hash)
+        self:logInfo("BookloreSync: Found book in cache - ID:", cached_book.book_id, "Hash:", cached_book.file_hash)
         file_hash = cached_book.file_hash
         -- Ensure book_id from cache is a number (defensive programming)
         book_id = cached_book.book_id and tonumber(cached_book.book_id) or nil
     else
-        logger.info("BookloreSync: Book not in cache, calculating hash")
+        self:logInfo("BookloreSync: Book not in cache, calculating hash")
         -- Calculate hash for new book
         file_hash = self:calculateBookHash(file_path)
         
         if not file_hash then
-            logger.warn("BookloreSync: Failed to calculate book hash, continuing without hash")
+            self:logWarn("BookloreSync: Failed to calculate book hash, continuing without hash")
         else
-            logger.info("BookloreSync: Hash calculated:", file_hash)
+            self:logInfo("BookloreSync: Hash calculated:", file_hash)
             
             -- Try to look up book ID from server by hash (only if network available)
             local isbn10, isbn13
             if NetworkMgr:isConnected() then
-                logger.info("BookloreSync: Network connected, looking up book on server")
+                self:logInfo("BookloreSync: Network connected, looking up book on server")
                 book_id, isbn10, isbn13 = self:getBookIdByHash(file_hash)
                 
                 if book_id then
-                    logger.info("BookloreSync: Book ID found on server:", book_id)
+                    self:logInfo("BookloreSync: Book ID found on server:", book_id)
                     if isbn10 or isbn13 then
-                        logger.info("BookloreSync: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
+                        self:logInfo("BookloreSync: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
                     end
                 else
-                    logger.info("BookloreSync: Book not found on server (not in library)")
+                    self:logInfo("BookloreSync: Book not found on server (not in library)")
                 end
             else
-                logger.info("BookloreSync: No network connection, skipping server lookup")
-                logger.info("BookloreSync: Book will be cached locally and resolved when online")
+                self:logInfo("BookloreSync: No network connection, skipping server lookup")
+                self:logInfo("BookloreSync: Book will be cached locally and resolved when online")
             end
             
             -- Cache the book info in database (including ISBN if available)
-            logger.info("BookloreSync: Calling saveBookCache with:")
-            logger.info("  file_path:", file_path, "type:", type(file_path))
-            logger.info("  file_hash:", file_hash, "type:", type(file_hash))
-            logger.info("  book_id:", book_id, "type:", type(book_id))
-            logger.info("  isbn10:", isbn10, "isbn13:", isbn13)
+            self:logInfo("BookloreSync: Calling saveBookCache with:")
+            self:logInfo("  file_path:", file_path, "type:", type(file_path))
+            self:logInfo("  file_hash:", file_hash, "type:", type(file_hash))
+            self:logInfo("  book_id:", book_id, "type:", type(book_id))
+            self:logInfo("  isbn10:", isbn10, "isbn13:", isbn13)
             
             local ok, result = pcall(function()
                 return self.db:saveBookCache(file_path, file_hash, book_id, nil, nil, isbn10, isbn13)
             end)
             
             if not ok then
-                logger.err("BookloreSync: Error in saveBookCache:", result)
-                logger.err("  file_path:", file_path)
-                logger.err("  file_hash:", file_hash)
-                logger.err("  book_id:", book_id)
+                self:logErr("BookloreSync: Error in saveBookCache:", result)
+                self:logErr("  file_path:", file_path)
+                self:logErr("  file_hash:", file_hash)
+                self:logErr("  book_id:", book_id)
             else
                 if result then
-                    logger.info("BookloreSync: Book cached in database successfully")
+                    self:logInfo("BookloreSync: Book cached in database successfully")
                 else
-                    logger.warn("BookloreSync: Failed to cache book in database")
+                    self:logWarn("BookloreSync: Failed to cache book in database")
                 end
             end
         end
@@ -1027,7 +1083,7 @@ function BookloreSync:startSession()
         if koreader_book then
             koreader_book_id = koreader_book.koreader_book_id
             book_title = koreader_book.koreader_book_title
-            logger.info("BookloreSync: Found in KOReader stats - ID:", koreader_book_id, "Title:", book_title)
+            self:logInfo("BookloreSync: Found in KOReader stats - ID:", koreader_book_id, "Title:", book_title)
         end
     end
     
@@ -1035,7 +1091,7 @@ function BookloreSync:startSession()
     if not book_title then
         book_title = file_path:match("([^/]+)$") or file_path
         book_title = book_title:gsub("%.[^.]+$", "")  -- Remove extension
-        logger.info("BookloreSync: Using filename as title:", book_title)
+        self:logInfo("BookloreSync: Using filename as title:", book_title)
     end
     
     -- Create session tracking object
@@ -1051,7 +1107,7 @@ function BookloreSync:startSession()
         book_type = self:getBookType(file_path),
     }
     
-    logger.info("BookloreSync: Session started for '", book_title, "' at", start_progress, "% (location:", start_location, ")")
+    self:logInfo("BookloreSync: Session started for '", book_title, "' at", start_progress, "% (location:", start_location, ")")
 end
 
 --[[--
@@ -1069,11 +1125,11 @@ function BookloreSync:endSession(options)
     local force_queue = options.force_queue or self.manual_sync_only
     
     if not self.current_session then
-        logger.info("BookloreSync: No active session to end")
+        self:logInfo("BookloreSync: No active session to end")
         return
     end
     
-    logger.info("BookloreSync: ========== Ending session ==========")
+    self:logInfo("BookloreSync: ========== Ending session ==========")
     
     -- Get current reading position
     local end_progress, end_location = self:getCurrentProgress()
@@ -1086,13 +1142,13 @@ function BookloreSync:endSession(options)
     local end_loc = tonumber(end_location) or 0
     pages_read = math.abs(end_loc - start_loc)
     
-    logger.info("BookloreSync: Duration:", duration_seconds, "s, Pages read:", pages_read)
-    logger.info("BookloreSync: Progress:", self.current_session.start_progress, "% ->", end_progress, "%")
+    self:logInfo("BookloreSync: Duration:", duration_seconds, "s, Pages read:", pages_read)
+    self:logInfo("BookloreSync: Progress:", self.current_session.start_progress, "% ->", end_progress, "%")
     
     -- Validate session
     local valid, reason = self:validateSession(duration_seconds, pages_read)
     if not valid then
-        logger.info("BookloreSync: Session invalid -", reason)
+        self:logInfo("BookloreSync: Session invalid -", reason)
         self.current_session = nil
         return
     end
@@ -1122,13 +1178,13 @@ function BookloreSync:endSession(options)
         endLocation = end_location,
     }
     
-    logger.info("BookloreSync: Session valid - Duration:", duration_seconds, "s, Progress delta:", progress_delta, "%")
+    self:logInfo("BookloreSync: Session valid - Duration:", duration_seconds, "s, Progress delta:", progress_delta, "%")
     
     -- Save to pending sessions database
     local success = self.db:addPendingSession(session_data)
     
     if success then
-        logger.info("BookloreSync: Session saved to pending queue")
+        self:logInfo("BookloreSync: Session saved to pending queue")
         
         if not silent and not self.silent_messages then
             local pending_count = self.db:getPendingSessionCount()
@@ -1140,11 +1196,11 @@ function BookloreSync:endSession(options)
         
         -- If not in manual-only mode and not forced to queue, try to sync
         if not force_queue and not self.manual_sync_only then
-            logger.info("BookloreSync: Attempting automatic sync")
+            self:logInfo("BookloreSync: Attempting automatic sync")
             self:syncPendingSessions(true) -- silent sync
         end
     else
-        logger.err("BookloreSync: Failed to save session to database")
+        self:logErr("BookloreSync: Failed to save session to database")
         if not silent then
             UIManager:show(InfoMessage:new{
                 text = _("Failed to save reading session"),
@@ -1163,7 +1219,7 @@ end
 Handler for when a document is opened and ready
 --]]
 function BookloreSync:onReaderReady()
-    logger.info("BookloreSync: Reader ready")
+    self:logInfo("BookloreSync: Reader ready")
     self:startSession()
     return false -- Allow other plugins to process this event
 end
@@ -1176,7 +1232,7 @@ function BookloreSync:onCloseDocument()
         return false
     end
     
-    logger.info("BookloreSync: Document closing")
+    self:logInfo("BookloreSync: Document closing")
     self:endSession({ silent = false, force_queue = false })
     return false
 end
@@ -1194,21 +1250,21 @@ function BookloreSync:connectNetwork()
     
     -- Check if device has network capability
     if not Device:hasWifiToggle() then
-        logger.warn("BookloreSync: Device does not support WiFi toggle")
+        self:logWarn("BookloreSync: Device does not support WiFi toggle")
         return false
     end
     
     -- Check if already connected
     if Device.isOnline and Device:isOnline() then
-        logger.info("BookloreSync: Network already connected")
+        self:logInfo("BookloreSync: Network already connected")
         return true
     end
     
-    logger.info("BookloreSync: Attempting to connect to network")
+    self:logInfo("BookloreSync: Attempting to connect to network")
     
     -- Turn on WiFi if it's off
     if not Device:isConnected() then
-        logger.info("BookloreSync: Enabling WiFi")
+        self:logInfo("BookloreSync: Enabling WiFi")
         Device:setWifiState(true)
     end
     
@@ -1219,7 +1275,7 @@ function BookloreSync:connectNetwork()
     
     while elapsed < timeout do
         if Device.isOnline and Device:isOnline() then
-            logger.info("BookloreSync: Network connected successfully after", elapsed, "seconds")
+            self:logInfo("BookloreSync: Network connected successfully after", elapsed, "seconds")
             return true
         end
         
@@ -1229,7 +1285,7 @@ function BookloreSync:connectNetwork()
         elapsed = elapsed + check_interval
     end
     
-    logger.warn("BookloreSync: Network connection timeout after", timeout, "seconds")
+    self:logWarn("BookloreSync: Network connection timeout after", timeout, "seconds")
     return false
 end
 
@@ -1241,30 +1297,30 @@ function BookloreSync:onSuspend()
         return false
     end
     
-    logger.info("BookloreSync: Device suspending")
+    self:logInfo("BookloreSync: Device suspending")
     
     -- Always end current session and queue it
     self:endSession({ silent = true, force_queue = true })
     
     -- Check if force push on suspend is enabled
     if self.force_push_session_on_suspend then
-        logger.info("BookloreSync: Force push on suspend enabled")
+        self:logInfo("BookloreSync: Force push on suspend enabled")
         
         -- Check if we should connect to network first
         if self.connect_network_on_suspend then
-            logger.info("BookloreSync: Attempting to connect to network before sync")
+            self:logInfo("BookloreSync: Attempting to connect to network before sync")
             local network_ok = self:connectNetwork()
             
             if not network_ok then
-                logger.warn("BookloreSync: Network connection failed, will attempt sync anyway")
+                self:logWarn("BookloreSync: Network connection failed, will attempt sync anyway")
             end
         end
         
         -- Force sync all pending sessions silently
-        logger.info("BookloreSync: Force syncing pending sessions on suspend")
+        self:logInfo("BookloreSync: Force syncing pending sessions on suspend")
         self:syncPendingSessions(true) -- true = silent mode
     else
-        logger.info("BookloreSync: Force push on suspend disabled, sessions will sync on resume")
+        self:logInfo("BookloreSync: Force push on suspend disabled, sessions will sync on resume")
     end
     
     return false
@@ -1278,23 +1334,23 @@ function BookloreSync:onResume()
         return false
     end
     
-    logger.info("BookloreSync: Device resuming")
+    self:logInfo("BookloreSync: Device resuming")
     
     -- Try to sync pending sessions in the background
     if not self.manual_sync_only then
-        logger.info("BookloreSync: Attempting background sync on resume")
+        self:logInfo("BookloreSync: Attempting background sync on resume")
         self:syncPendingSessions(true) -- silent sync
         
         -- Try to resolve book IDs for cached books (if we have network now)
         if NetworkMgr:isConnected() then
-            logger.info("BookloreSync: Network available, checking for unmatched books")
+            self:logInfo("BookloreSync: Network available, checking for unmatched books")
             self:resolveUnmatchedBooks(true) -- silent mode
         end
     end
     
     -- If a book is currently open, start a new session
     if self.ui and self.ui.document then
-        logger.info("BookloreSync: Book is open, starting new session")
+        self:logInfo("BookloreSync: Book is open, starting new session")
         self:startSession()
     end
     
@@ -1305,7 +1361,7 @@ function BookloreSync:syncPendingSessions(silent)
     silent = silent or false
     
     if not self.db then
-        logger.err("BookloreSync: Database not initialized")
+        self:logErr("BookloreSync: Database not initialized")
         if not silent then
             UIManager:show(InfoMessage:new{
                 text = _("Database not initialized"),
@@ -1319,7 +1375,7 @@ function BookloreSync:syncPendingSessions(silent)
     pending_count = tonumber(pending_count) or 0
     
     if pending_count == 0 then
-        logger.info("BookloreSync: No pending sessions to sync")
+        self:logInfo("BookloreSync: No pending sessions to sync")
         if not silent then
             UIManager:show(InfoMessage:new{
                 text = _("No pending sessions to sync"),
@@ -1329,7 +1385,7 @@ function BookloreSync:syncPendingSessions(silent)
         return
     end
     
-    logger.info("BookloreSync: Starting sync of", pending_count, "pending sessions")
+    self:logInfo("BookloreSync: Starting sync of", pending_count, "pending sessions")
     
     if not silent and not self.silent_messages then
         UIManager:show(InfoMessage:new{
@@ -1339,7 +1395,7 @@ function BookloreSync:syncPendingSessions(silent)
     end
     
     -- Update API client with current credentials
-    self.api:init(self.server_url, self.username, self.password, self.db)
+    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
     
     -- Get pending sessions from database
     local sessions = self.db:getPendingSessions(100) -- Sync up to 100 at a time
@@ -1349,17 +1405,17 @@ function BookloreSync:syncPendingSessions(silent)
     local resolved_count = 0
     
     for i, session in ipairs(sessions) do
-        logger.info("BookloreSync: Processing pending session", i, "of", #sessions)
+        self:logInfo("BookloreSync: Processing pending session", i, "of", #sessions)
         
         -- If session has hash but no bookId, try to resolve it now
         if session.bookHash and not session.bookId then
-            logger.info("BookloreSync: Attempting to resolve book ID for hash:", session.bookHash)
+            self:logInfo("BookloreSync: Attempting to resolve book ID for hash:", session.bookHash)
             
             -- Check if we have it in cache first
             local cached_book = self.db:getBookByHash(session.bookHash)
             if cached_book and cached_book.book_id then
                 session.bookId = cached_book.book_id
-                logger.info("BookloreSync: Resolved book ID from cache:", session.bookId)
+                self:logInfo("BookloreSync: Resolved book ID from cache:", session.bookId)
                 resolved_count = resolved_count + 1
             else
                 -- Try to fetch from server
@@ -1371,16 +1427,16 @@ function BookloreSync:syncPendingSessions(silent)
                         session.bookId = book_id
                         -- Cache the result
                         self.db:updateBookId(session.bookHash, book_id)
-                        logger.info("BookloreSync: Resolved book ID from server:", book_id)
+                        self:logInfo("BookloreSync: Resolved book ID from server:", book_id)
                         resolved_count = resolved_count + 1
                     else
-                        logger.warn("BookloreSync: Invalid book ID from server:", book_data.id)
+                        self:logWarn("BookloreSync: Invalid book ID from server:", book_data.id)
                         self.db:incrementSessionRetryCount(session.id)
                         failed_count = failed_count + 1
                         goto continue
                     end
                 else
-                    logger.warn("BookloreSync: Failed to resolve book ID, will retry later")
+                    self:logWarn("BookloreSync: Failed to resolve book ID, will retry later")
                     -- Increment retry count and skip this session
                     self.db:incrementSessionRetryCount(session.id)
                     failed_count = failed_count + 1
@@ -1391,7 +1447,7 @@ function BookloreSync:syncPendingSessions(silent)
         
         -- Ensure we have a book ID before submitting
         if not session.bookId then
-            logger.warn("BookloreSync: Session", i, "has no book ID, skipping")
+            self:logWarn("BookloreSync: Session", i, "has no book ID, skipping")
             self.db:incrementSessionRetryCount(session.id)
             failed_count = failed_count + 1
             goto continue
@@ -1415,7 +1471,7 @@ function BookloreSync:syncPendingSessions(silent)
             endLocation = session.endLocation,
         }
         
-        logger.info("BookloreSync: Submitting session", i, "- Book ID:", session.bookId, 
+        self:logInfo("BookloreSync: Submitting session", i, "- Book ID:", session.bookId, 
                     "Duration:", duration_formatted)
         
         -- Submit to server
@@ -1426,14 +1482,14 @@ function BookloreSync:syncPendingSessions(silent)
             -- Archive to historical_sessions before deleting
             local archived = self.db:archivePendingSession(session.id)
             if not archived then
-                logger.warn("BookloreSync: Failed to archive session", i, "to historical_sessions")
+                self:logWarn("BookloreSync: Failed to archive session", i, "to historical_sessions")
             end
             -- Delete from pending sessions
             self.db:deletePendingSession(session.id)
-            logger.info("BookloreSync: Session", i, "synced successfully")
+            self:logInfo("BookloreSync: Session", i, "synced successfully")
         else
             failed_count = failed_count + 1
-            logger.warn("BookloreSync: Session", i, "failed to sync:", message)
+            self:logWarn("BookloreSync: Session", i, "failed to sync:", message)
             -- Increment retry count
             self.db:incrementSessionRetryCount(session.id)
         end
@@ -1441,7 +1497,7 @@ function BookloreSync:syncPendingSessions(silent)
         ::continue::
     end
     
-    logger.info("BookloreSync: Sync complete - synced:", synced_count, 
+    self:logInfo("BookloreSync: Sync complete - synced:", synced_count, 
                 "failed:", failed_count, "resolved:", resolved_count)
     
     if not silent and not self.silent_messages then
@@ -1472,12 +1528,12 @@ function BookloreSync:resolveUnmatchedBooks(silent)
     silent = silent or false
     
     if not self.db then
-        logger.err("BookloreSync: Database not initialized")
+        self:logErr("BookloreSync: Database not initialized")
         return
     end
     
     if not NetworkMgr:isConnected() then
-        logger.info("BookloreSync: No network connection, skipping book resolution")
+        self:logInfo("BookloreSync: No network connection, skipping book resolution")
         return
     end
     
@@ -1485,25 +1541,25 @@ function BookloreSync:resolveUnmatchedBooks(silent)
     local unmatched_books = self.db:getAllUnmatchedBooks()
     
     if #unmatched_books == 0 then
-        logger.info("BookloreSync: No unmatched books to resolve")
+        self:logInfo("BookloreSync: No unmatched books to resolve")
         return
     end
     
-    logger.info("BookloreSync: Resolving", #unmatched_books, "unmatched books")
+    self:logInfo("BookloreSync: Resolving", #unmatched_books, "unmatched books")
     
     -- Update API client with current credentials
-    self.api:init(self.server_url, self.username, self.password, self.db)
+    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
     
     local resolved_count = 0
     
     for _, book in ipairs(unmatched_books) do
         if book.file_hash and book.file_hash ~= "" then
-            logger.info("BookloreSync: Resolving book:", book.file_path)
+            self:logInfo("BookloreSync: Resolving book:", book.file_path)
             
             local book_id, isbn10, isbn13 = self:getBookIdByHash(book.file_hash)
             
             if book_id then
-                logger.info("BookloreSync: Resolved book ID:", book_id)
+                self:logInfo("BookloreSync: Resolved book ID:", book_id)
                 -- Update cache with found book_id
                 self.db:saveBookCache(
                     book.file_path,
@@ -1516,12 +1572,12 @@ function BookloreSync:resolveUnmatchedBooks(silent)
                 )
                 resolved_count = resolved_count + 1
             else
-                logger.info("BookloreSync: Book not found on server")
+                self:logInfo("BookloreSync: Book not found on server")
             end
         end
     end
     
-    logger.info("BookloreSync: Resolved", resolved_count, "of", #unmatched_books, "books")
+    self:logInfo("BookloreSync: Resolved", resolved_count, "of", #unmatched_books, "books")
     
     if not silent and resolved_count > 0 and not self.silent_messages then
         UIManager:show(InfoMessage:new{
@@ -1575,7 +1631,7 @@ function BookloreSync:_extractHistoricalSessions()
         return
     end
     
-    logger.info("BookloreSync: Found statistics database at:", stats_db_path)
+    self:logInfo("BookloreSync: Found statistics database at:", stats_db_path)
     
     -- 2. Open statistics database
     local SQ3 = require("lua-ljsqlite3/init")
@@ -1590,7 +1646,7 @@ function BookloreSync:_extractHistoricalSessions()
     
     -- 3. Get all books
     local books = self:_getKOReaderBooks(stats_conn)
-    logger.info("BookloreSync: Found", #books, "books in statistics")
+    self:logInfo("BookloreSync: Found", #books, "books in statistics")
     
     -- 4. Calculate sessions for each book
     local all_sessions = {}
@@ -1663,7 +1719,7 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
         local timestamp_str = tostring(stat.start_time):gsub("LL$", "")
         local timestamp = tonumber(timestamp_str)
         if not timestamp then
-            logger.warn("BookloreSync: Failed to parse timestamp:", stat.start_time)
+            self:logWarn("BookloreSync: Failed to parse timestamp:", stat.start_time)
             goto continue
         end
         
@@ -1758,7 +1814,7 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
         if cached_book and cached_book.book_id then
             book_id = cached_book.book_id
             matched = 1
-            logger.info("BookloreSync: Auto-matched historical book by hash:", book.title, "→ ID:", book_id)
+            self:logInfo("BookloreSync: Auto-matched historical book by hash:", book.title, "→ ID:", book_id)
         else
             -- Priority 2: Check by ISBN (if we have cached ISBN for this hash)
             if cached_book and (cached_book.isbn13 or cached_book.isbn10) then
@@ -1766,7 +1822,7 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
                 if isbn_match and isbn_match.book_id then
                     book_id = isbn_match.book_id
                     matched = 1
-                    logger.info("BookloreSync: Auto-matched historical book by ISBN:", book.title, "→ ID:", book_id)
+                    self:logInfo("BookloreSync: Auto-matched historical book by ISBN:", book.title, "→ ID:", book_id)
                 end
             end
         end
@@ -1778,7 +1834,7 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
         if file_cached and file_cached.book_id then
             book_id = file_cached.book_id
             matched = 1
-            logger.info("BookloreSync: Auto-matched historical book by file path:", book.title, "→ ID:", book_id)
+            self:logInfo("BookloreSync: Auto-matched historical book by file path:", book.title, "→ ID:", book_id)
         end
     end
     
@@ -1815,7 +1871,7 @@ function BookloreSync:_getKOReaderBooks(conn)
     local stmt = conn:prepare("SELECT id, title, authors, md5 FROM book")
     
     if not stmt then
-        logger.err("BookloreSync: Failed to prepare statement:", conn:errmsg())
+        self:logErr("BookloreSync: Failed to prepare statement:", conn:errmsg())
         return books
     end
     
@@ -1840,20 +1896,20 @@ function BookloreSync:_getKOReaderBookByHash(file_hash)
     
     local stats_db_path = self:_findKOReaderStatisticsDB()
     if not stats_db_path then
-        logger.dbg("BookloreSync: Statistics database not found")
+        self:logDbg("BookloreSync: Statistics database not found")
         return nil
     end
     
     local SQ3 = require("lua-ljsqlite3/init")
     local stats_conn = SQ3.open(stats_db_path)
     if not stats_conn then
-        logger.warn("BookloreSync: Failed to open statistics database")
+        self:logWarn("BookloreSync: Failed to open statistics database")
         return nil
     end
     
     local stmt = stats_conn:prepare("SELECT id, title FROM book WHERE md5 = ?")
     if not stmt then
-        logger.warn("BookloreSync: Failed to prepare statement:", stats_conn:errmsg())
+        self:logWarn("BookloreSync: Failed to prepare statement:", stats_conn:errmsg())
         stats_conn:close()
         return nil
     end
@@ -1887,7 +1943,7 @@ function BookloreSync:_getPageStats(conn, book_id)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync: Failed to prepare statement:", conn:errmsg())
+        self:logErr("BookloreSync: Failed to prepare statement:", conn:errmsg())
         return stats
     end
     
@@ -1999,7 +2055,7 @@ function BookloreSync:matchHistoricalData()
     local matched_unsynced_books = self.db:getMatchedUnsyncedBooks()
     
     if matched_unsynced_books and #matched_unsynced_books > 0 then
-        logger.info("BookloreSync: Found", #matched_unsynced_books, 
+        self:logInfo("BookloreSync: Found", #matched_unsynced_books, 
                    "books with auto-matched but unsynced sessions")
         self:_autoSyncMatchedSessions(matched_unsynced_books)
         return
@@ -2024,7 +2080,7 @@ function BookloreSync:_autoSyncMatchedSessions(books)
         total_sessions = total_sessions + book.unsynced_session_count
     end
     
-    logger.info("BookloreSync: Auto-syncing", total_sessions, "sessions from", total_books, "matched books")
+    self:logInfo("BookloreSync: Auto-syncing", total_sessions, "sessions from", total_books, "matched books")
     
     -- Initialize progress indicator
     local progress_msg = InfoMessage:new{
@@ -2061,7 +2117,7 @@ function BookloreSync:_syncNextMatchedBook()
             timeout = 4,
         })
         
-        logger.info("BookloreSync: Auto-sync complete - synced:", self.autosync_total_synced,
+        self:logInfo("BookloreSync: Auto-sync complete - synced:", self.autosync_total_synced,
                    "failed:", self.autosync_total_failed)
         
         -- Clean up state
@@ -2099,7 +2155,7 @@ function BookloreSync:_syncNextMatchedBook()
     local sessions = self.db:getHistoricalSessionsForBookUnsynced(book.koreader_book_id)
     
     if not sessions or #sessions == 0 then
-        logger.warn("BookloreSync: No unsynced sessions found for book:", book.koreader_book_title)
+        self:logWarn("BookloreSync: No unsynced sessions found for book:", book.koreader_book_title)
         self.autosync_index = self.autosync_index + 1
         self:_syncNextMatchedBook()
         return
@@ -2134,7 +2190,7 @@ function BookloreSync:_syncNextMatchedBook()
             synced_count = synced_count + 1
         else
             failed_count = failed_count + 1
-            logger.warn("BookloreSync: Failed to sync session for book:", book.koreader_book_title, "Error:", message)
+            self:logWarn("BookloreSync: Failed to sync session for book:", book.koreader_book_title, "Error:", message)
         end
     end
     
@@ -2142,7 +2198,7 @@ function BookloreSync:_syncNextMatchedBook()
     self.autosync_total_synced = self.autosync_total_synced + synced_count
     self.autosync_total_failed = self.autosync_total_failed + failed_count
     
-    logger.info("BookloreSync: Auto-synced", synced_count, "sessions for:", book.koreader_book_title,
+    self:logInfo("BookloreSync: Auto-synced", synced_count, "sessions for:", book.koreader_book_title,
                "(", failed_count, "failed)")
     
     -- Move to next book
@@ -2162,7 +2218,7 @@ function BookloreSync:_startManualMatching()
         return
     end
     
-    logger.info("BookloreSync: Starting manual matching for", #unmatched, "books")
+    self:logInfo("BookloreSync: Starting manual matching for", #unmatched, "books")
     
     -- Start matching process with first unmatched book
     self.matching_index = 1
@@ -2188,13 +2244,13 @@ function BookloreSync:_showNextBookMatch()
         local cached_book = self.db:getBookByHash(book.book_hash)
         
         if cached_book and cached_book.book_id then
-            logger.info("BookloreSync: Found cached book_id for unmatched book, auto-syncing:", book.koreader_book_title)
+            self:logInfo("BookloreSync: Found cached book_id for unmatched book, auto-syncing:", book.koreader_book_title)
             
             -- Mark sessions as matched
             local match_success = self.db:markHistoricalSessionsMatched(book.koreader_book_id, cached_book.book_id)
             
             if not match_success then
-                logger.err("BookloreSync: Failed to mark sessions as matched for auto-sync")
+                self:logErr("BookloreSync: Failed to mark sessions as matched for auto-sync")
                 self.matching_index = self.matching_index + 1
                 self:_showNextBookMatch()
                 return
@@ -2206,7 +2262,7 @@ function BookloreSync:_showNextBookMatch()
             if sessions and #sessions > 0 then
                 self:_syncHistoricalSessions(book, sessions, progress_text)
             else
-                logger.warn("BookloreSync: No sessions found for auto-matched book")
+                self:logWarn("BookloreSync: No sessions found for auto-matched book")
                 self.matching_index = self.matching_index + 1
                 self:_showNextBookMatch()
             end
@@ -2246,7 +2302,7 @@ function BookloreSync:_showNextBookMatch()
                         return
                     end
                     
-                    logger.info("BookloreSync: ISBN search failed or no results, continuing to hash lookup")
+                    self:logInfo("BookloreSync: ISBN search failed or no results, continuing to hash lookup")
                 end
             end
             
@@ -2503,7 +2559,7 @@ function BookloreSync:_saveMatchAndSync(book, selected_result)
     local isbn10 = type(selected_result) == "table" and selected_result.isbn10 or nil
     local isbn13 = type(selected_result) == "table" and selected_result.isbn13 or nil
     
-    logger.info("BookloreSync: Saving match with ISBN-10:", isbn10, "ISBN-13:", isbn13)
+    self:logInfo("BookloreSync: Saving match with ISBN-10:", isbn10, "ISBN-13:", isbn13)
     
     -- Mark sessions as matched
     local success = self.db:markHistoricalSessionsMatched(book.koreader_book_id, book_id)
@@ -2522,7 +2578,7 @@ function BookloreSync:_saveMatchAndSync(book, selected_result)
         -- Use the hash as a pseudo file path for historical books
         local cache_path = "historical://" .. book.book_hash
         self.db:saveBookCache(cache_path, book.book_hash, book_id, book_title, nil, isbn10, isbn13)
-        logger.info("BookloreSync: Cached matched book:", book_title, "with ID:", book_id)
+        self:logInfo("BookloreSync: Cached matched book:", book_title, "with ID:", book_id)
     end
     
     -- Get matched sessions
@@ -2672,7 +2728,7 @@ function BookloreSync:_performResyncHistoricalData()
         return
     end
     
-    logger.info("BookloreSync: Re-syncing", #sessions, "historical sessions")
+    self:logInfo("BookloreSync: Re-syncing", #sessions, "historical sessions")
     
     -- Show initial progress message
     local progress_msg = InfoMessage:new{
@@ -2720,15 +2776,15 @@ function BookloreSync:_performResyncHistoricalData()
         
         if success then
             synced_count = synced_count + 1
-            logger.info("BookloreSync: Re-synced session", i, "of", #sessions)
+            self:logInfo("BookloreSync: Re-synced session", i, "of", #sessions)
         else
             -- Check if it's a 404 (book not found)
             if code == 404 then
-                logger.warn("BookloreSync: Book ID", session.book_id, "not found (404), marking for re-matching")
+                self:logWarn("BookloreSync: Book ID", session.book_id, "not found (404), marking for re-matching")
                 self.db:markHistoricalSessionUnmatched(session.id)
                 not_found_count = not_found_count + 1
             else
-                logger.warn("BookloreSync: Failed to re-sync session", i, ":", message)
+                self:logWarn("BookloreSync: Failed to re-sync session", i, ":", message)
                 failed_count = failed_count + 1
             end
         end
@@ -2750,7 +2806,7 @@ function BookloreSync:_performResyncHistoricalData()
         timeout = 5,
     })
     
-    logger.info("BookloreSync: Re-sync complete - synced:", synced_count, 
+    self:logInfo("BookloreSync: Re-sync complete - synced:", synced_count, 
                 "failed:", failed_count, "not found:", not_found_count)
 end
 
@@ -2776,7 +2832,7 @@ function BookloreSync:syncRematchedSessions()
         return
     end
     
-    logger.info("BookloreSync: Syncing", #sessions, "re-matched sessions")
+    self:logInfo("BookloreSync: Syncing", #sessions, "re-matched sessions")
     
     -- Use the existing helper function to sync these sessions
     self:_syncHistoricalSessions(sessions, function(synced_count)

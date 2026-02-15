@@ -558,12 +558,15 @@ function Updater:downloadUpdate(url, progress_callback)
         return false, "HTTP error: " .. tostring(code)
     end
     
-    -- Get file size
-    local lfs = require("libs/lfs")
-    local attr = lfs and lfs.attributes(zip_path)
-    if attr then
-        total_bytes = attr.size
-        logger.info("BookloreSync Updater: Downloaded", total_bytes, "bytes")
+    -- Get file size (optional, for logging only)
+    local ok, lfs = pcall(require, "libs/libkoreader-lfs")
+    if ok and lfs then
+        local attr = lfs.attributes(zip_path)
+        if attr and attr.size then
+            logger.info("BookloreSync Updater: Downloaded", attr.size, "bytes")
+        end
+    else
+        logger.dbg("BookloreSync Updater: Download complete (file size unavailable)")
     end
     
     return true, zip_path

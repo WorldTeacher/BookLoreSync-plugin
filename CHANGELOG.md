@@ -1,3 +1,10 @@
+# [1.1.0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/1.0.5...1.1.0) (2026-02-15)
+
+
+### Features
+
+* log obfuscation ([ca3be43](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/ca3be4300e0f095039d6a0c3df8ea496389058b3))
+
 ## [1.0.5](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/1.0.4...1.0.5) (2026-02-15)
 
 

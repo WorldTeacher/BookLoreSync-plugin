@@ -12,6 +12,7 @@ local EventListener = require("ui/widget/eventlistener")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local LuaSettings = require("luasettings")
+local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
@@ -848,7 +849,7 @@ Caches successful lookups in the database.
 function BookloreSync:getBookIdByHash(book_hash)
     if not book_hash then
         logger.warn("BookloreSync: No book hash provided to getBookIdByHash")
-        return nil
+        return nil, nil, nil
     end
     
     logger.info("BookloreSync: Looking up book ID for hash:", book_hash)
@@ -857,7 +858,7 @@ function BookloreSync:getBookIdByHash(book_hash)
     local cached_book = self.db:getBookByHash(book_hash)
     if cached_book and cached_book.book_id then
         logger.info("BookloreSync: Found book ID in database cache:", cached_book.book_id)
-        return cached_book.book_id
+        return cached_book.book_id, cached_book.isbn10, cached_book.isbn13
     end
     
     -- Not in cache, query server
@@ -867,19 +868,19 @@ function BookloreSync:getBookIdByHash(book_hash)
     
     if not success then
         logger.warn("BookloreSync: Failed to get book from server (offline or error)")
-        return nil
+        return nil, nil, nil
     end
     
     if not book_data or not book_data.id then
         logger.info("BookloreSync: Book not found on server")
-        return nil
+        return nil, nil, nil
     end
     
     -- Ensure book_id is a number (API might return string)
     local book_id = tonumber(book_data.id)
     if not book_id then
         logger.warn("BookloreSync: Invalid book ID from server:", book_data.id)
-        return nil
+        return nil, nil, nil
     end
     
     -- Extract ISBN fields from server response
@@ -969,17 +970,23 @@ function BookloreSync:startSession()
         else
             logger.info("BookloreSync: Hash calculated:", file_hash)
             
-            -- Try to look up book ID from server by hash
+            -- Try to look up book ID from server by hash (only if network available)
             local isbn10, isbn13
-            book_id, isbn10, isbn13 = self:getBookIdByHash(file_hash)
-            
-            if book_id then
-                logger.info("BookloreSync: Book ID found on server:", book_id)
-                if isbn10 or isbn13 then
-                    logger.info("BookloreSync: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
+            if NetworkMgr:isConnected() then
+                logger.info("BookloreSync: Network connected, looking up book on server")
+                book_id, isbn10, isbn13 = self:getBookIdByHash(file_hash)
+                
+                if book_id then
+                    logger.info("BookloreSync: Book ID found on server:", book_id)
+                    if isbn10 or isbn13 then
+                        logger.info("BookloreSync: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
+                    end
+                else
+                    logger.info("BookloreSync: Book not found on server (not in library)")
                 end
             else
-                logger.info("BookloreSync: Book not found on server (offline or not in library)")
+                logger.info("BookloreSync: No network connection, skipping server lookup")
+                logger.info("BookloreSync: Book will be cached locally and resolved when online")
             end
             
             -- Cache the book info in database (including ISBN if available)
@@ -1201,6 +1208,12 @@ function BookloreSync:onResume()
     if not self.manual_sync_only then
         logger.info("BookloreSync: Attempting background sync on resume")
         self:syncPendingSessions(true) -- silent sync
+        
+        -- Try to resolve book IDs for cached books (if we have network now)
+        if NetworkMgr:isConnected() then
+            logger.info("BookloreSync: Network available, checking for unmatched books")
+            self:resolveUnmatchedBooks(true) -- silent mode
+        end
     end
     
     -- If a book is currently open, start a new session
@@ -1372,6 +1385,76 @@ function BookloreSync:syncPendingSessions(silent)
     end
     
     return synced_count, failed_count
+end
+
+--[[--
+Resolve book IDs for cached books that don't have them yet
+Queries the server for books cached while offline
+@param silent boolean Don't show UI messages if true
+--]]
+function BookloreSync:resolveUnmatchedBooks(silent)
+    silent = silent or false
+    
+    if not self.db then
+        logger.err("BookloreSync: Database not initialized")
+        return
+    end
+    
+    if not NetworkMgr:isConnected() then
+        logger.info("BookloreSync: No network connection, skipping book resolution")
+        return
+    end
+    
+    -- Get books without book_id
+    local unmatched_books = self.db:getAllUnmatchedBooks()
+    
+    if #unmatched_books == 0 then
+        logger.info("BookloreSync: No unmatched books to resolve")
+        return
+    end
+    
+    logger.info("BookloreSync: Resolving", #unmatched_books, "unmatched books")
+    
+    -- Update API client with current credentials
+    self.api:init(self.server_url, self.username, self.password, self.db)
+    
+    local resolved_count = 0
+    
+    for _, book in ipairs(unmatched_books) do
+        if book.file_hash and book.file_hash ~= "" then
+            logger.info("BookloreSync: Resolving book:", book.file_path)
+            
+            local book_id, isbn10, isbn13 = self:getBookIdByHash(book.file_hash)
+            
+            if book_id then
+                logger.info("BookloreSync: Resolved book ID:", book_id)
+                -- Update cache with found book_id
+                self.db:saveBookCache(
+                    book.file_path,
+                    book.file_hash,
+                    book_id,
+                    book.title,
+                    book.author,
+                    isbn10,
+                    isbn13
+                )
+                resolved_count = resolved_count + 1
+            else
+                logger.info("BookloreSync: Book not found on server")
+            end
+        end
+    end
+    
+    logger.info("BookloreSync: Resolved", resolved_count, "of", #unmatched_books, "books")
+    
+    if not silent and resolved_count > 0 and not self.silent_messages then
+        UIManager:show(InfoMessage:new{
+            text = T(_("Resolved %1 books from server"), resolved_count),
+            timeout = 2,
+        })
+    end
+    
+    return resolved_count
 end
 
 function BookloreSync:copySessionsFromKOReader()

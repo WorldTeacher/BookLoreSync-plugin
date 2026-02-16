@@ -29,6 +29,7 @@ Automatically track your reading sessions in KOReader and sync them to your Book
 - **Auto-Sync** - Syncs queued sessions when connection restored
 - **Retry Logic** - Failed syncs automatically retried with counter
 - **Book ID Resolution** - Offline sessions resolved by hash during sync
+- **Batch Upload** - Historical sessions uploaded in batches (up to 100 per batch) for 10-20x faster syncing, with automatic fallback to individual uploads for older servers
 
 ### 🗄️ Smart Caching
 - **Book Hash Calculation** - Fast MD5 fingerprinting using sample-based algorithm

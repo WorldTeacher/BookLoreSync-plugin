@@ -1,3 +1,16 @@
+# [3.2.0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/3.1.0...3.2.0) (2026-02-16)
+
+
+### Bug Fixes
+
+* **database:** improve journal mode handling for better reliability ([f65f871](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/f65f8711490b6d43fbb54e407f174cf713d4f550))
+
+
+### Features
+
+* **logging:** enhance file logging with initialization and closure handling ([e6ca635](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/e6ca635800ad21adb6dd6b53a1d490926b576752))
+* **logging:** implement file-based logging with daily rotation and automatic cleanup ([8bb03e8](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/8bb03e839331ed5c6fa1583208b94450c5577470))
+
 # [3.1.0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/3.0.0...3.1.0) (2026-02-16)
 
 

@@ -54,6 +54,19 @@ function BookloreSync:init()
     self.force_push_session_on_suspend = self.settings:readSetting("force_push_session_on_suspend") or false
     self.connect_network_on_suspend = self.settings:readSetting("connect_network_on_suspend") or false
     self.manual_sync_only = self.settings:readSetting("manual_sync_only") or false
+    self.sync_mode = self.settings:readSetting("sync_mode") -- "automatic", "manual", or "custom"
+    
+    -- Migrate old settings to new preset system if needed
+    if not self.sync_mode then
+        if self.manual_sync_only then
+            self.sync_mode = "manual"
+        elseif self.force_push_session_on_suspend and self.connect_network_on_suspend then
+            self.sync_mode = "automatic"
+        else
+            self.sync_mode = "custom"
+        end
+        self.settings:saveSetting("sync_mode", self.sync_mode)
+    end
     
     -- Historical data tracking
     self.historical_sync_ack = self.settings:readSetting("historical_sync_ack") or false
@@ -267,15 +280,90 @@ function BookloreSync:toggleManualSyncOnly()
     })
 end
 
-function BookloreSync:addToMainMenu(menu_items)
-    local base_menu = Settings:buildMenu(self)
+function BookloreSync:setSyncMode(mode)
+    self.sync_mode = mode
+    self.settings:saveSetting("sync_mode", mode)
     
-    -- Session Management submenu
+    -- Apply preset values
+    if mode == "automatic" then
+        self.manual_sync_only = false
+        self.force_push_session_on_suspend = true
+        self.connect_network_on_suspend = true
+    elseif mode == "manual" then
+        self.manual_sync_only = true
+        self.force_push_session_on_suspend = false
+        self.connect_network_on_suspend = false
+    end
+    -- custom mode: leave individual settings as-is
+    
+    if mode ~= "custom" then
+        self.settings:saveSetting("manual_sync_only", self.manual_sync_only)
+        self.settings:saveSetting("force_push_session_on_suspend", self.force_push_session_on_suspend)
+        self.settings:saveSetting("connect_network_on_suspend", self.connect_network_on_suspend)
+    end
+    
+    self.settings:flush()
+end
+
+function BookloreSync:viewSessionDetails()
+    if not self.db then
+        UIManager:show(InfoMessage:new{
+            text = _("Database not initialized"),
+            timeout = 2,
+        })
+        return
+    end
+    
+    local stats = self.db:getBookCacheStats()
+    local pending_count = self.db:getPendingSessionCount()
+    
+    -- Convert cdata to Lua numbers
+    local total = tonumber(stats.total) or 0
+    local matched = tonumber(stats.matched) or 0
+    local unmatched = tonumber(stats.unmatched) or 0
+    local pending = tonumber(pending_count) or 0
+    
+    UIManager:show(InfoMessage:new{
+        text = T(_(
+            "Total books: %1\n" ..
+            "Matched: %2\n" ..
+            "Unmatched: %3\n" ..
+            "Pending sessions: %4"
+        ), total, matched, unmatched, pending),
+        timeout = 3,
+    })
+end
+
+function BookloreSync:addToMainMenu(menu_items)
+    local base_menu = {}
+    
+    -- Enable Sync toggle
     table.insert(base_menu, {
-        text = _("Session Management"),
+        text = _("Enable Sync"),
+        help_text = _("Enable or disable automatic syncing of reading sessions to Booklore server. When disabled, no sessions will be tracked or synced."),
+        checked_func = function()
+            return self.is_enabled
+        end,
+        callback = function()
+            self.is_enabled = not self.is_enabled
+            self.settings:saveSetting("is_enabled", self.is_enabled)
+            self.settings:flush()
+            UIManager:show(InfoMessage:new{
+                text = self.is_enabled and _("Booklore sync enabled") or _("Booklore sync disabled"),
+                timeout = 2,
+            })
+        end,
+    })
+    
+    -- Setup & Connection submenu
+    table.insert(base_menu, Settings:buildConnectionMenu(self))
+    
+    -- Session Settings submenu
+    table.insert(base_menu, {
+        text = _("Session Settings"),
         sub_item_table = {
             {
-                text = _("Session Detection Mode"),
+                text = _("Detection Mode"),
                 help_text = _("Choose how sessions are validated: Duration-based (minimum seconds) or Pages-based (minimum pages read). Default is duration-based."),
                 sub_item_table = {
                     {
@@ -293,6 +381,7 @@ function BookloreSync:addToMainMenu(menu_items)
                                 timeout = 2,
                             })
                         end,
+                        keep_menu_open = true,
                     },
                     {
                         text = _("Pages-based"),
@@ -309,12 +398,16 @@ function BookloreSync:addToMainMenu(menu_items)
                                 timeout = 2,
                             })
                         end,
+                        keep_menu_open = true,
                     },
                 },
             },
             {
-                text = _("Minimum Session Duration"),
+                text = _("Minimum Duration (seconds)"),
                 help_text = _("Set the minimum number of seconds a reading session must last to be synced. Sessions shorter than this will be discarded. Default is 30 seconds. Only applies when using duration-based detection."),
+                enabled_func = function()
+                    return self.session_detection_mode == "duration"
+                end,
                 keep_menu_open = true,
                 callback = function()
                     Settings:configureMinDuration(self)
@@ -323,6 +416,9 @@ function BookloreSync:addToMainMenu(menu_items)
             {
                 text = _("Minimum Pages Read"),
                 help_text = _("Set the minimum number of pages that must be read in a session for it to be synced. Default is 1 page. Only applies when using pages-based detection."),
+                enabled_func = function()
+                    return self.session_detection_mode == "pages"
+                end,
                 keep_menu_open = true,
                 callback = function()
                     Settings:configureMinPages(self)
@@ -336,14 +432,128 @@ function BookloreSync:addToMainMenu(menu_items)
                     Settings:configureProgressDecimalPlaces(self)
                 end,
             },
+        },
+    })
+    
+    -- Sync Behavior submenu (NEW)
+    table.insert(base_menu, {
+        text = _("Sync Behavior"),
+        sub_item_table = {
             {
-                text = _("Sync Pending Sessions"),
-                help_text = _("Manually sync all sessions that failed to upload previously. Sessions are cached locally when the network is unavailable and synced automatically on resume."),
+                text = _("Automatic (sync on suspend + WiFi)"),
+                help_text = _("Automatically sync sessions when device suspends. Enables WiFi and attempts connection before syncing."),
+                checked_func = function()
+                    return self.sync_mode == "automatic"
+                end,
+                callback = function()
+                    self:setSyncMode("automatic")
+                    UIManager:show(InfoMessage:new{
+                        text = _("Sync mode set to Automatic"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("Manual only (cache everything)"),
+                help_text = _("Cache all sessions and prevent automatic syncing. Use 'Sync Pending Now' when ready to upload."),
+                checked_func = function()
+                    return self.sync_mode == "manual"
+                end,
+                callback = function()
+                    self:setSyncMode("manual")
+                    UIManager:show(InfoMessage:new{
+                        text = _("Sync mode set to Manual only"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("Custom"),
+                help_text = _("Configure individual sync options manually."),
+                checked_func = function()
+                    return self.sync_mode == "custom"
+                end,
+                callback = function()
+                    self:setSyncMode("custom")
+                    UIManager:show(InfoMessage:new{
+                        text = _("Sync mode set to Custom"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("Custom Options:"),
+                enabled_func = function()
+                    return self.sync_mode == "custom"
+                end,
+                enabled = false,
+            },
+            {
+                text = _("  Auto-sync on suspend"),
+                help_text = _("Automatically sync the current reading session and all pending sessions when the device suspends."),
+                enabled_func = function()
+                    return self.sync_mode == "custom"
+                end,
+                checked_func = function()
+                    return self.force_push_session_on_suspend
+                end,
+                callback = function()
+                    self.force_push_session_on_suspend = not self.force_push_session_on_suspend
+                    self.settings:saveSetting("force_push_session_on_suspend", self.force_push_session_on_suspend)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.force_push_session_on_suspend and _("Auto-sync on suspend enabled") or _("Auto-sync on suspend disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text = _("  Connect WiFi on suspend"),
+                help_text = _("Automatically enable WiFi and attempt to connect when the device suspends. Waits up to 15 seconds for connection."),
+                enabled_func = function()
+                    return self.sync_mode == "custom"
+                end,
+                checked_func = function()
+                    return self.connect_network_on_suspend
+                end,
+                callback = function()
+                    self.connect_network_on_suspend = not self.connect_network_on_suspend
+                    self.settings:saveSetting("connect_network_on_suspend", self.connect_network_on_suspend)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.connect_network_on_suspend and _("Connect WiFi on suspend enabled") or _("Connect WiFi on suspend disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+        },
+    })
+    
+    -- Manage Sessions submenu
+    table.insert(base_menu, {
+        text = _("Manage Sessions"),
+        sub_item_table = {
+            {
+                text = function()
+                    local count = self.db and self.db:getPendingSessionCount() or 0
+                    return T(_("Sync Pending Now (%1 sessions)"), tonumber(count) or 0)
+                end,
+                help_text = _("Manually sync all sessions that failed to upload previously. Sessions are cached locally when the network is unavailable."),
                 enabled_func = function()
                     return self.db and self.db:getPendingSessionCount() > 0
                 end,
                 callback = function()
                     self:syncPendingSessions()
+                end,
+            },
+            {
+                text = _("View Details"),
+                help_text = _("Display statistics about the local cache: number of book hashes cached, file paths cached, and pending sessions."),
+                callback = function()
+                    self:viewSessionDetails()
                 end,
             },
             {
@@ -363,48 +573,8 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("View Pending Count"),
-                help_text = _("Display the number of reading sessions currently cached locally and waiting to be synced to the server."),
-                callback = function()
-                    local count = self.db and self.db:getPendingSessionCount() or 0
-                    count = tonumber(count) or 0
-                    UIManager:show(InfoMessage:new{
-                        text = T(_("%1 sessions pending sync"), count),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("View Cache Status"),
-                help_text = _("Display statistics about the local cache: number of book hashes cached, file paths cached, and pending sessions. The cache improves performance by avoiding redundant hash calculations."),
-                callback = function()
-                    if not self.db then
-                        UIManager:show(InfoMessage:new{
-                            text = _("Database not initialized"),
-                            timeout = 2,
-                        })
-                        return
-                    end
-                    
-                    local stats = self.db:getBookCacheStats()
-                    local pending_count = self.db:getPendingSessionCount()
-                    
-                    -- Convert cdata to Lua numbers
-                    local total = tonumber(stats.total) or 0
-                    local matched = tonumber(stats.matched) or 0
-                    local unmatched = tonumber(stats.unmatched) or 0
-                    local pending = tonumber(pending_count) or 0
-                    
-                    UIManager:show(InfoMessage:new{
-                        text = T(_("Total books: %1\nMatched: %2\nUnmatched: %3\nPending sessions: %4"), 
-                            total, matched, unmatched, pending),
-                        timeout = 3,
-                    })
-                end,
-            },
-            {
-                text = _("Clear Local Cache"),
-                help_text = _("Delete all cached book hashes and file path mappings. This will not affect pending sessions. The cache will be rebuilt as you read. Use this if you encounter book identification issues."),
+                text = _("Clear Cache"),
+                help_text = _("Delete all cached book hashes and file path mappings. This will not affect pending sessions. The cache will be rebuilt as you read."),
                 enabled_func = function()
                     if not self.db then
                         return false
@@ -425,75 +595,19 @@ function BookloreSync:addToMainMenu(menu_items)
         },
     })
     
-    -- Sync Options submenu
+    -- Import Reading History submenu (renamed from Historical Data)
     table.insert(base_menu, {
-        text = _("Sync Options"),
+        text = _("Import Reading History"),
         sub_item_table = {
             {
-                text = _("Only manual syncs"),
-                help_text = _("Cache all sessions and prevent automatic syncing. Use 'Sync Pending Sessions' (menu or gesture) when you want to upload. Mutually exclusive with 'Force push on suspend'."),
-                checked_func = function()
-                    return self.manual_sync_only
-                end,
-                callback = function()
-                    self:toggleManualSyncOnly()
-                end,
-            },
-            {
-                text = _("Force push session on suspend"),
-                help_text = _("Automatically sync the current reading session and all pending sessions when the device suspends. Enables 'Connect network on suspend' option and requires network connectivity. Mutually exclusive with 'Only manual syncs'."),
-                checked_func = function()
-                    return self.force_push_session_on_suspend
-                end,
-                callback = function()
-                    self.force_push_session_on_suspend = not self.force_push_session_on_suspend
-                    self.settings:saveSetting("force_push_session_on_suspend", self.force_push_session_on_suspend)
-                    
-                    -- If enabling force_push, disable manual_sync_only
-                    if self.force_push_session_on_suspend and self.manual_sync_only then
-                        self.manual_sync_only = false
-                        self.settings:saveSetting("manual_sync_only", false)
-                    end
-                    
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.force_push_session_on_suspend and _("Will force push session on suspend if network available") or _("Force push on suspend disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("Connect network on suspend"),
-                help_text = _("Automatically enable WiFi and attempt to connect when the device suspends. Waits up to 15 seconds for connection. Useful for syncing when going offline."),
-                checked_func = function()
-                    return self.connect_network_on_suspend
-                end,
-                callback = function()
-                    self.connect_network_on_suspend = not self.connect_network_on_suspend
-                    self.settings:saveSetting("connect_network_on_suspend", self.connect_network_on_suspend)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.connect_network_on_suspend and _("Will enable and scan for network on suspend (15s timeout)") or _("Connect network on suspend disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-        },
-    })
-    
-    -- Historical Data submenu
-    table.insert(base_menu, {
-        text = _("Historical Data"),
-        sub_item_table = {
-            {
-                text = _("Booklore Login"),
+                text = _("Configure Booklore Account"),
                 help_text = _("Configure Booklore username and password for accessing the books/search endpoint."),
                 callback = function()
                     self:configureBookloreLogin()
                 end,
             },
             {
-                text = _("Copy Sessions from KOReader"),
+                text = _("Extract Sessions from KOReader"),
                 help_text = _("One-time extraction of reading sessions from KOReader's statistics database. This reads page statistics and groups them into sessions. Run this first before matching."),
                 enabled_func = function()
                     return self.is_enabled
@@ -503,7 +617,7 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("Match Historical Data"),
+                text = _("Match Books with Booklore"),
                 help_text = _("Match extracted sessions with books on Booklore server. For each unmatched book, searches by title and lets you select the correct match. Matched sessions are automatically synced."),
                 enabled_func = function()
                     return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
@@ -513,7 +627,14 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("Re-sync Historical Data"),
+                text = _("View Match Statistics"),
+                help_text = _("Display statistics about historical sessions: total sessions extracted, matched sessions, unmatched sessions, and synced sessions."),
+                callback = function()
+                    self:viewMatchStatistics()
+                end,
+            },
+            {
+                text = _("Re-sync All Historical"),
                 help_text = _("Re-sync all previously synced historical sessions to the server. Sessions with invalid book IDs (404 errors) will be marked for re-matching."),
                 enabled_func = function()
                     return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
@@ -532,22 +653,18 @@ function BookloreSync:addToMainMenu(menu_items)
                     self:syncRematchedSessions()
                 end,
             },
-            {
-                text = _("View Historical Statistics"),
-                help_text = _("Display statistics about historical sessions: total sessions extracted, matched sessions, unmatched sessions, and synced sessions."),
-                callback = function()
-                    self:viewMatchStatistics()
-                end,
-            },
         },
     })
+    
+    -- Preferences submenu
+    table.insert(base_menu, Settings:buildPreferencesMenu(self))
     
     -- About & Updates submenu
     table.insert(base_menu, {
         text = self.update_available and _("About & Updates ⚠") or _("About & Updates"),
         sub_item_table = {
             {
-                text = _("Version Information"),
+                text = _("Plugin Information"),
                 keep_menu_open = true,
                 callback = function()
                     self:showVersionInfo()

@@ -1,3 +1,54 @@
+# [2.0.0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/1.1.1...2.0.0) (2026-02-16)
+
+
+### Bug Fixes
+
+* **updater:** handle HTTP redirects manually for KOReader compatibility ([6fd4dae](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/6fd4dae63213a00bf49b00eff99a0a0f11cca579))
+* **updater:** remove duplicate restart confirmation dialog ([161a0c0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/161a0c031c2a761417c2d11edc225b5b03d095d8))
+* **updater:** use correct lfs library path for KOReader ([f521b1c](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/f521b1c10c162bbf612492cafcf15c733c97ee1e))
+
+
+### Features
+
+* add auto-updater system with GitHub integration ([7ae0d61](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/7ae0d61f29b716785973426e0008914d029df975))
+
+
+### BREAKING CHANGES
+
+* Database schema version 7 -> 8, requires migration
+
+New Features:
+- Auto-update check on startup (configurable)
+- Manual update check with changelog preview
+- One-tap update installation
+- Automatic version backup before update
+- Rollback support if update fails
+- Update cache to respect GitHub API rate limits
+- Download size display in confirmation dialog
+- Progress tracking during download
+- Restart prompt after successful update
+
+Technical Details:
+- booklore_updater.lua: ~500 lines, 734 total with comments
+- main.lua: +368 lines (7 new functions)
+- booklore_database.lua: +93 lines (Migration 8 + cache functions)
+- features.md: Updated to 119 total features (88.2% implemented)
+- All Lua syntax checks passed
+- All version comparison tests passed (9/9)
+- GitHub API integration verified
+- Download mechanism validated
+
+Files Added:
+- bookloresync.koplugin/booklore_updater.lua
+- AUTO_UPDATER_TESTING.md (comprehensive test checklist)
+- test_updater.lua (standalone version comparison tests)
+- features.md (feature tracking document)
+
+Files Modified:
+- bookloresync.koplugin/main.lua (new About & Updates menu)
+- bookloresync.koplugin/booklore_database.lua (Migration 8)
+- README.md (auto-update documentation)
+
 ## [1.1.1](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/1.1.0...1.1.1) (2026-02-15)
 
 

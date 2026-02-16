@@ -392,6 +392,57 @@ function APIClient:submitSession(session_data)
 end
 
 --[[--
+Submit batch of reading sessions for a single book
+
+Submits multiple sessions in a single request for improved performance.
+Automatically falls back to individual uploads if batch endpoint is not available (404).
+
+@param book_id Booklore book ID (number)
+@param book_type Book type (string): "EPUB", "PDF", etc.
+@param sessions Array of session objects (table), max 100 sessions recommended
+@return boolean success
+@return string message (success or error message)
+@return number|nil code HTTP status code
+--]]
+function APIClient:submitSessionBatch(book_id, book_type, sessions)
+    -- Validation
+    if not book_id or type(book_id) ~= "number" then
+        self:logErr("BookloreSync API: Invalid book_id for batch upload:", book_id)
+        return false, "Invalid book_id", nil
+    end
+    
+    if not sessions or type(sessions) ~= "table" or #sessions == 0 then
+        self:logErr("BookloreSync API: Invalid or empty sessions array for batch upload")
+        return false, "Invalid or empty sessions array", nil
+    end
+    
+    -- Log batch submission
+    self:logInfo("BookloreSync API: Submitting batch of", #sessions, "sessions for book:", book_id)
+    
+    -- Build payload
+    local payload = {
+        bookId = book_id,
+        bookType = book_type or "EPUB",
+        sessions = sessions
+    }
+    
+    -- Submit batch
+    local success, code, response = self:request("POST", "/api/v1/reading-sessions/batch", payload)
+    
+    if success then
+        self:logInfo("BookloreSync API: Batch submitted successfully -", #sessions, "sessions")
+        return true, "Batch synced successfully", code
+    else
+        local error_msg = response or "Failed to submit batch"
+        if code then
+            error_msg = "HTTP " .. tostring(code) .. ": " .. error_msg
+        end
+        self:logWarn("BookloreSync API: Batch submission failed:", error_msg)
+        return false, error_msg, code
+    end
+end
+
+--[[--
 Check server health/connectivity
 
 @return boolean success

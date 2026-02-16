@@ -21,6 +21,7 @@ local Settings = require("booklore_settings")
 local Database = require("booklore_database")
 local APIClient = require("booklore_api_client")
 local Updater = require("booklore_updater")
+local FileLogger = require("booklore_file_logger")
 local logger = require("logger")
 
 local _ = require("gettext")
@@ -54,6 +55,11 @@ function BookloreSync:logInfo(...)
         end
     end
     logger.info(table.unpack(args))
+    
+    -- Write to file if enabled
+    if self.log_to_file and self.file_logger then
+        self.file_logger:write("INFO", table.unpack(args))
+    end
 end
 
 function BookloreSync:logWarn(...)
@@ -64,6 +70,11 @@ function BookloreSync:logWarn(...)
         end
     end
     logger.warn(table.unpack(args))
+    
+    -- Write to file if enabled
+    if self.log_to_file and self.file_logger then
+        self.file_logger:write("WARN", table.unpack(args))
+    end
 end
 
 function BookloreSync:logErr(...)
@@ -74,6 +85,11 @@ function BookloreSync:logErr(...)
         end
     end
     logger.err(table.unpack(args))
+    
+    -- Write to file if enabled
+    if self.log_to_file and self.file_logger then
+        self.file_logger:write("ERROR", table.unpack(args))
+    end
 end
 
 function BookloreSync:logDbg(...)
@@ -84,6 +100,11 @@ function BookloreSync:logDbg(...)
         end
     end
     logger.dbg(table.unpack(args))
+    
+    -- Write to file if enabled
+    if self.log_to_file and self.file_logger then
+        self.file_logger:write("DEBUG", table.unpack(args))
+    end
 end
 
 -- Constants
@@ -136,6 +157,18 @@ function BookloreSync:init()
     
     -- Current reading session tracking
     self.current_session = nil
+    
+    -- Initialize file logger if enabled
+    if self.log_to_file then
+        self.file_logger = FileLogger:new()
+        local logger_ok = self.file_logger:init()
+        if logger_ok then
+            self:logInfo("BookloreSync: File logging initialized")
+        else
+            self:logErr("BookloreSync: Failed to initialize file logger")
+            self.file_logger = nil
+        end
+    end
     
     -- Initialize SQLite database
     self.db = Database:new()
@@ -267,6 +300,11 @@ function BookloreSync:onExit()
     -- Close database connection when plugin exits
     if self.db then
         self.db:close()
+    end
+    
+    -- Close file logger if it's open
+    if self.file_logger then
+        self.file_logger:close()
     end
 end
 

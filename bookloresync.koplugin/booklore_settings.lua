@@ -351,7 +351,7 @@ function Settings:buildPreferencesMenu(parent)
             },
             {
                 text = _("Debug logging"),
-                help_text = _("Enable detailed logging to a file for debugging purposes. Logs are saved to koreader/plugins/booklore.koplugin/booklore_sync.log"),
+                help_text = _("Enable detailed logging to files for debugging purposes. Logs are saved daily to the plugin's logs directory. The last 3 log files are kept automatically."),
                 checked_func = function()
                     return parent.log_to_file
                 end,
@@ -359,6 +359,27 @@ function Settings:buildPreferencesMenu(parent)
                     parent.log_to_file = not parent.log_to_file
                     parent.settings:saveSetting("log_to_file", parent.log_to_file)
                     parent.settings:flush()
+                    
+                    -- Initialize or close file logger based on new setting
+                    if parent.log_to_file then
+                        if not parent.file_logger then
+                            local FileLogger = require("booklore_file_logger")
+                            parent.file_logger = FileLogger:new()
+                            local logger_ok = parent.file_logger:init()
+                            if logger_ok then
+                                parent:logInfo("BookloreSync: File logging enabled")
+                            else
+                                parent:logErr("BookloreSync: Failed to initialize file logger")
+                                parent.file_logger = nil
+                            end
+                        end
+                    else
+                        if parent.file_logger then
+                            parent.file_logger:close()
+                            parent.file_logger = nil
+                        end
+                    end
+                    
                     UIManager:show(InfoMessage:new{
                         text = parent.log_to_file and _("Debug logging enabled") or _("Debug logging disabled"),
                         timeout = 2,

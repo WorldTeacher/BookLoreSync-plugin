@@ -21,7 +21,22 @@ local APIClient = {
     password = nil,
     timeout = 10,
     db = nil,  -- Database reference for token caching
+    secure_logs = false,  -- Secure logging flag
 }
+
+--[[--
+Redact URLs from log message for secure logging
+
+@param message The log message that may contain URLs
+@return string Message with URLs redacted
+--]]
+local function redactUrls(message)
+    if type(message) ~= "string" then
+        message = tostring(message)
+    end
+    -- Match http:// or https:// URLs and replace them with [URL REDACTED]
+    return message:gsub("https?://[^%s]+", "[URL REDACTED]")
+end
 
 function APIClient:new(o)
     o = o or {}
@@ -30,20 +45,60 @@ function APIClient:new(o)
     return o
 end
 
-function APIClient:init(server_url, username, password, db)
+function APIClient:init(server_url, username, password, db, secure_logs)
     self.server_url = server_url
     self.username = username
     self.password = password
     self.db = db  -- Store database reference for token caching
+    self.secure_logs = secure_logs or false
     
     -- Remove trailing slash from server URL
     if self.server_url and self.server_url:sub(-1) == "/" then
         self.server_url = self.server_url:sub(1, -2)
     end
     
-    logger.info("BookloreSync API: Initialized with server:", self.server_url)
+    self:logInfo("BookloreSync API: Initialized with server:", self.server_url)
+end
+-- Secure logger wrappers
+function APIClient:logInfo(...)
+    local args = {...}
+    if self.secure_logs then
+        for i = 1, #args do
+            args[i] = redactUrls(args[i])
+        end
+    end
+    logger.info(table.unpack(args))
 end
 
+function APIClient:logWarn(...)
+    local args = {...}
+    if self.secure_logs then
+        for i = 1, #args do
+            args[i] = redactUrls(args[i])
+        end
+    end
+    logger.warn(table.unpack(args))
+end
+
+function APIClient:logErr(...)
+    local args = {...}
+    if self.secure_logs then
+        for i = 1, #args do
+            args[i] = redactUrls(args[i])
+        end
+    end
+    logger.err(table.unpack(args))
+end
+
+function APIClient:logDbg(...)
+    local args = {...}
+    if self.secure_logs then
+        for i = 1, #args do
+            args[i] = redactUrls(args[i])
+        end
+    end
+    logger.dbg(table.unpack(args))
+end
 --[[--
 Parse JSON response with error handling
 
@@ -58,7 +113,7 @@ function APIClient:parseJSON(response_text)
     
     local success, result = pcall(json.decode, response_text)
     if not success then
-        logger.warn("BookloreSync API: Failed to parse JSON:", result)
+        self:logWarn("BookloreSync API: Failed to parse JSON:", result)
         return nil, "Invalid JSON response"
     end
     
@@ -131,13 +186,13 @@ Make HTTP request with improved error handling
 --]]
 function APIClient:request(method, path, body, headers)
     if not self.server_url or self.server_url == "" then
-        logger.err("BookloreSync API: Server URL not configured")
+        self:logErr("BookloreSync API: Server URL not configured")
         return false, nil, "Server URL not configured"
     end
     
     -- Build full URL
     local url = self.server_url .. path
-    logger.info("BookloreSync API:", method, url)
+    self:logInfo("BookloreSync API:", method, url)
     
     -- Prepare headers
     local req_headers = headers or {}
@@ -164,7 +219,7 @@ function APIClient:request(method, path, body, headers)
         req_headers["Content-Length"] = tostring(#req_body)
         source = ltn12.source.string(req_body)
         
-        logger.dbg("BookloreSync API: Request body length:", #req_body)
+        self:logDbg("BookloreSync API: Request body length:", #req_body)
     end
     
     -- Prepare response capture
@@ -197,20 +252,20 @@ function APIClient:request(method, path, body, headers)
     -- Process response
     local response_text = table.concat(response_body)
     
-    logger.info("BookloreSync API: Response code:", tostring(code))
-    logger.dbg("BookloreSync API: Response length:", #response_text)
+    self:logInfo("BookloreSync API: Response code:", tostring(code))
+    self:logDbg("BookloreSync API: Response length:", #response_text)
     
     -- Check for network/connection errors
     if not code then
         local error_msg = res or "Connection failed"
-        logger.err("BookloreSync API: Network error:", error_msg)
+        self:logErr("BookloreSync API: Network error:", error_msg)
         return false, nil, "Network error: " .. error_msg
     end
     
     -- Ensure code is a number (http client can return strings like "connection refused")
     if type(code) ~= "number" then
         local error_msg = tostring(code)
-        logger.err("BookloreSync API: Non-numeric response code:", error_msg)
+        self:logErr("BookloreSync API: Non-numeric response code:", error_msg)
         return false, nil, "Connection error: " .. error_msg
     end
     
@@ -233,7 +288,7 @@ function APIClient:request(method, path, body, headers)
     
     -- Error codes (4xx, 5xx)
     local error_message = self:extractErrorMessage(response_text, code)
-    logger.warn("BookloreSync API: Request failed:", code, "-", error_message)
+    self:logWarn("BookloreSync API: Request failed:", code, "-", error_message)
     
     return false, code, error_message
 end
@@ -245,7 +300,7 @@ Test authentication with the server
 @return string message (success message or detailed error)
 --]]
 function APIClient:testAuth()
-    logger.info("BookloreSync API: Testing authentication")
+    self:logInfo("BookloreSync API: Testing authentication")
     
     if not self.username or self.username == "" then
         return false, "Username not configured"
@@ -258,14 +313,14 @@ function APIClient:testAuth()
     local success, code, response = self:request("GET", "/api/koreader/users/auth")
     
     if success then
-        logger.info("BookloreSync API: Authentication successful")
+        self:logInfo("BookloreSync API: Authentication successful")
         return true, "Authentication successful"
     else
         local error_detail = response or "Unknown error"
         if code then
             error_detail = "HTTP " .. tostring(code) .. ": " .. error_detail
         end
-        logger.err("BookloreSync API: Authentication failed:", error_detail)
+        self:logErr("BookloreSync API: Authentication failed:", error_detail)
         return false, error_detail
     end
 end
@@ -278,12 +333,12 @@ Get book by hash
 @return table|string book_data or error_message
 --]]
 function APIClient:getBookByHash(book_hash)
-    logger.info("BookloreSync API: Looking up book by hash:", book_hash)
+    self:logInfo("BookloreSync API: Looking up book by hash:", book_hash)
     
     local success, code, response = self:request("GET", "/api/koreader/books/by-hash/" .. book_hash)
     
     if success and type(response) == "table" then
-        logger.info("BookloreSync API: Found book, ID:", response.id)
+        self:logInfo("BookloreSync API: Found book, ID:", response.id)
         
         -- Extract ISBN from metadata if present
         local isbn10 = nil
@@ -298,15 +353,15 @@ function APIClient:getBookByHash(book_hash)
         response.isbn13 = isbn13
         
         if isbn10 or isbn13 then
-            logger.info("BookloreSync API: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
+            self:logInfo("BookloreSync API: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
         else
-            logger.info("BookloreSync API: Book has no ISBN data")
+            self:logInfo("BookloreSync API: Book has no ISBN data")
         end
         
         return true, response
     else
         local error_msg = response or "Book not found"
-        logger.warn("BookloreSync API: Book lookup failed:", error_msg)
+        self:logWarn("BookloreSync API: Book lookup failed:", error_msg)
         return false, error_msg
     end
 end
@@ -319,19 +374,19 @@ Submit reading session
 @return string message (success or error message)
 --]]
 function APIClient:submitSession(session_data)
-    logger.info("BookloreSync API: Submitting reading session for book:", session_data.bookId or session_data.bookHash)
+    self:logInfo("BookloreSync API: Submitting reading session for book:", session_data.bookId or session_data.bookHash)
     
     local success, code, response = self:request("POST", "/api/v1/reading-sessions", session_data)
     
     if success then
-        logger.info("BookloreSync API: Session submitted successfully")
+        self:logInfo("BookloreSync API: Session submitted successfully")
         return true, "Session synced successfully", code
     else
         local error_msg = response or "Failed to submit session"
         if code then
             error_msg = "HTTP " .. tostring(code) .. ": " .. error_msg
         end
-        logger.warn("BookloreSync API: Session submission failed:", error_msg)
+        self:logWarn("BookloreSync API: Session submission failed:", error_msg)
         return false, error_msg, code
     end
 end
@@ -343,17 +398,17 @@ Check server health/connectivity
 @return string message
 --]]
 function APIClient:checkHealth()
-    logger.info("BookloreSync API: Checking server health")
+    self:logInfo("BookloreSync API: Checking server health")
     
     local success, code, response = self:request("GET", "/api/health")
     
     if success or (code and code >= 200 and code < 500) then
         -- Server is reachable (even if endpoint doesn't exist)
-        logger.info("BookloreSync API: Server is reachable")
+        self:logInfo("BookloreSync API: Server is reachable")
         return true, "Server is online"
     else
         local error_msg = response or "Server unreachable"
-        logger.warn("BookloreSync API: Health check failed:", error_msg)
+        self:logWarn("BookloreSync API: Health check failed:", error_msg)
         return false, error_msg
     end
 end
@@ -366,7 +421,7 @@ Search books by title (fuzzy match)
 @return table|string matches or error message
 --]]
 function APIClient:searchBooks(title)
-    logger.info("BookloreSync API: Searching books with title:", title)
+    self:logInfo("BookloreSync API: Searching books with title:", title)
     
     -- URL encode the title
     local encoded_title = self:_urlEncode(title)
@@ -375,11 +430,11 @@ function APIClient:searchBooks(title)
     local success, code, response = self:request("GET", endpoint)
     
     if success and type(response) == "table" then
-        logger.info("BookloreSync API: Found", #response, "matches")
+        self:logInfo("BookloreSync API: Found", #response, "matches")
         return true, response
     else
         local error_msg = response or "No matches found"
-        logger.warn("BookloreSync API: Book search failed:", error_msg)
+        self:logWarn("BookloreSync API: Book search failed:", error_msg)
         return false, {}
     end
 end
@@ -393,7 +448,7 @@ Login to Booklore API and get Bearer token
 @return string|nil token or error message
 --]]
 function APIClient:loginBooklore(username, password)
-    logger.info("BookloreSync API: Logging in to Booklore with username:", username)
+    self:logInfo("BookloreSync API: Logging in to Booklore with username:", username)
     
     local endpoint = "/api/v1/auth/login"
     local body = {
@@ -405,18 +460,18 @@ function APIClient:loginBooklore(username, password)
     local success, code, response = self:request("POST", endpoint, body)
     
     if success and type(response) == "table" and response.accessToken then
-        logger.info("BookloreSync API: Successfully obtained Bearer token")
+        self:logInfo("BookloreSync API: Successfully obtained Bearer token")
         return true, response.accessToken
     else
         local error_msg = response or "Login failed"
         
         -- Check for duplicate token error (server-side bug)
         if type(error_msg) == "string" and error_msg:find("Duplicate entry") and error_msg:find("uq_refresh_token") then
-            logger.warn("BookloreSync API: Duplicate refresh token error (server-side bug)")
+            self:logWarn("BookloreSync API: Duplicate refresh token error (server-side bug)")
             error_msg = "Server error: Duplicate refresh token. This is a server-side bug. Workaround: Try logging out and back in on the Booklore web interface, or restart the Booklore server to clear stale tokens."
         end
         
-        logger.warn("BookloreSync API: Booklore login failed:", error_msg)
+        self:logWarn("BookloreSync API: Booklore login failed:", error_msg)
         return false, error_msg
     end
 end
@@ -446,17 +501,17 @@ function APIClient:getOrRefreshBearerToken(username, password, force_refresh)
             -- Check if token will expire within 1 day (86400 seconds)
             -- Proactively refresh to avoid mid-operation expiration
             if expires_at and (expires_at - os.time()) < 86400 then
-                logger.info("BookloreSync API: Token expires soon, refreshing for:", username)
+                self:logInfo("BookloreSync API: Token expires soon, refreshing for:", username)
                 force_refresh = true
             else
-                logger.info("BookloreSync API: Using cached Bearer token for:", username)
+                self:logInfo("BookloreSync API: Using cached Bearer token for:", username)
                 return true, cached_token
             end
         end
     end
     
     -- No cached token or force refresh - login to get new token
-    logger.info("BookloreSync API: Getting new Bearer token for:", username)
+    self:logInfo("BookloreSync API: Getting new Bearer token for:", username)
     local success, token = self:loginBooklore(username, password)
     
     if success and token then
@@ -488,7 +543,7 @@ function APIClient:validateBearerToken(token)
     -- Token is valid if request succeeds (200) or returns 404 (endpoint exists but no results)
     -- Token is invalid if we get 401/403 (unauthorized)
     if code == 401 or code == 403 then
-        logger.warn("BookloreSync API: Bearer token is invalid (401/403)")
+        self:logWarn("BookloreSync API: Bearer token is invalid (401/403)")
         return false
     end
     
@@ -505,13 +560,13 @@ Search books by title with custom authentication credentials
 @return table|string matches or error message
 --]]
 function APIClient:searchBooksWithAuth(title, username, password)
-    logger.info("BookloreSync API: Searching books with Booklore auth, title:", title)
+    self:logInfo("BookloreSync API: Searching books with Booklore auth, title:", title)
     
     -- Get or refresh cached Bearer token
     local login_success, token = self:getOrRefreshBearerToken(username, password)
     
     if not login_success then
-        logger.err("BookloreSync API: Failed to get Bearer token:", token)
+        self:logErr("BookloreSync API: Failed to get Bearer token:", token)
         return false, token or "Authentication failed"
     end
     
@@ -528,7 +583,7 @@ function APIClient:searchBooksWithAuth(title, username, password)
     
     -- If we get 401/403, token might be invalid - retry with fresh token
     if not success and (code == 401 or code == 403) then
-        logger.warn("BookloreSync API: Token rejected (401/403), refreshing and retrying")
+        self:logWarn("BookloreSync API: Token rejected (401/403), refreshing and retrying")
         
         -- Delete cached token and get fresh one
         if self.db then
@@ -545,7 +600,7 @@ function APIClient:searchBooksWithAuth(title, username, password)
     end
     
     if success and type(response) == "table" then
-        logger.info("BookloreSync API: Found", #response, "matches")
+        self:logInfo("BookloreSync API: Found", #response, "matches")
         
         -- Normalize each book object to extract ISBN from metadata
         for i, book in ipairs(response) do
@@ -555,7 +610,7 @@ function APIClient:searchBooksWithAuth(title, username, password)
         return true, response
     else
         local error_msg = response or "No matches found"
-        logger.warn("BookloreSync API: Book search failed:", error_msg)
+        self:logWarn("BookloreSync API: Book search failed:", error_msg)
         return false, error_msg
     end
 end
@@ -570,13 +625,13 @@ Search books by ISBN with custom authentication credentials
 @return table|string matches or error message
 --]]
 function APIClient:searchBooksByIsbn(isbn, username, password)
-    logger.info("BookloreSync API: Searching books by ISBN:", isbn)
+    self:logInfo("BookloreSync API: Searching books by ISBN:", isbn)
     
     -- Get or refresh cached Bearer token
     local login_success, token = self:getOrRefreshBearerToken(username, password)
     
     if not login_success then
-        logger.err("BookloreSync API: Failed to get Bearer token:", token)
+        self:logErr("BookloreSync API: Failed to get Bearer token:", token)
         return false, token or "Authentication failed"
     end
     
@@ -593,7 +648,7 @@ function APIClient:searchBooksByIsbn(isbn, username, password)
     
     -- If we get 401/403, token might be invalid - retry with fresh token
     if not success and (code == 401 or code == 403) then
-        logger.warn("BookloreSync API: Token rejected (401/403), refreshing and retrying")
+        self:logWarn("BookloreSync API: Token rejected (401/403), refreshing and retrying")
         
         if self.db then
             self.db:deleteBearerToken(username)
@@ -609,7 +664,7 @@ function APIClient:searchBooksByIsbn(isbn, username, password)
     end
     
     if success and type(response) == "table" then
-        logger.info("BookloreSync API: Found", #response, "ISBN matches")
+        self:logInfo("BookloreSync API: Found", #response, "ISBN matches")
         
         -- Normalize each book object to extract ISBN from metadata
         for i, book in ipairs(response) do
@@ -619,7 +674,7 @@ function APIClient:searchBooksByIsbn(isbn, username, password)
         return true, response
     else
         local error_msg = response or "No ISBN matches found"
-        logger.warn("BookloreSync API: ISBN search failed:", error_msg)
+        self:logWarn("BookloreSync API: ISBN search failed:", error_msg)
         return false, error_msg
     end
 end
@@ -634,13 +689,13 @@ Get book by hash with Bearer token authentication
 @return table|string book data or error message
 --]]
 function APIClient:getBookByHashWithAuth(book_hash, username, password)
-    logger.info("BookloreSync API: Looking up book by hash with Booklore auth:", book_hash)
+    self:logInfo("BookloreSync API: Looking up book by hash with Booklore auth:", book_hash)
     
     -- Get or refresh cached Bearer token
     local login_success, token = self:getOrRefreshBearerToken(username, password)
     
     if not login_success then
-        logger.err("BookloreSync API: Failed to get Bearer token:", token)
+        self:logErr("BookloreSync API: Failed to get Bearer token:", token)
         return false, "Authentication failed"
     end
     
@@ -653,7 +708,7 @@ function APIClient:getBookByHashWithAuth(book_hash, username, password)
     
     -- If we get 401/403, token might be invalid - retry with fresh token
     if not success and (code == 401 or code == 403) then
-        logger.warn("BookloreSync API: Token rejected (401/403), refreshing and retrying")
+        self:logWarn("BookloreSync API: Token rejected (401/403), refreshing and retrying")
         
         if self.db then
             self.db:deleteBearerToken(username)
@@ -669,7 +724,7 @@ function APIClient:getBookByHashWithAuth(book_hash, username, password)
     end
     
     if success and type(response) == "table" then
-        logger.info("BookloreSync API: Found book by hash, ID:", response.id)
+        self:logInfo("BookloreSync API: Found book by hash, ID:", response.id)
         
         -- Extract ISBN from metadata if present
         local isbn10 = nil
@@ -684,13 +739,13 @@ function APIClient:getBookByHashWithAuth(book_hash, username, password)
         response.isbn13 = isbn13
         
         if isbn10 or isbn13 then
-            logger.info("BookloreSync API: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
+            self:logInfo("BookloreSync API: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
         end
         
         return true, response
     else
         local error_msg = response or "Book not found"
-        logger.warn("BookloreSync API: Book by hash lookup failed:", error_msg)
+        self:logWarn("BookloreSync API: Book by hash lookup failed:", error_msg)
         return false, error_msg
     end
 end

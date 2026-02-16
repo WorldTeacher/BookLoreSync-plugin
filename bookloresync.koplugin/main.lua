@@ -2397,10 +2397,10 @@ function BookloreSync:_uploadSessionsWithBatching(book_id, book_type, sessions)
                 synced_count = synced_count + 1
             end
             self:logInfo("BookloreSync: Batch", batch_num, "of", batch_count, "uploaded successfully (" .. (end_idx - start_idx + 1) .. " sessions)")
-        elseif code == 404 then
-            -- Server doesn't have batch endpoint OR book not found
+        elseif code == 404 or code == 403 then
+            -- Server doesn't have batch endpoint (404/403) OR book not found (404)
             -- Fallback to individual upload to determine which
-            self:logWarn("BookloreSync: Batch returned 404, falling back to individual upload for batch", batch_num)
+            self:logWarn("BookloreSync: Batch returned", code, "falling back to individual upload for batch", batch_num)
             
             for i = start_idx, end_idx do
                 local session = sessions[i]

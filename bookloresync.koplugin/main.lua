@@ -782,44 +782,6 @@ function BookloreSync:addToMainMenu(menu_items)
         },
     })
     
-    -- About & Updates submenu
-    table.insert(base_menu, {
-        text = self.update_available and _("About & Updates ⚠") or _("About & Updates"),
-        sub_item_table = {
-            {
-                text = _("Version Information"),
-                keep_menu_open = true,
-                callback = function()
-                    self:showVersionInfo()
-                end,
-            },
-            {
-                text = self.update_available and _("Check for Updates ⚠ Update Available!") or _("Check for Updates"),
-                keep_menu_open = true,
-                callback = function()
-                    self:checkForUpdates(false)  -- silent=false
-                end,
-            },
-            {
-                text = _("Auto-check on Startup"),
-                checked_func = function()
-                    return self.auto_update_check
-                end,
-                callback = function()
-                    self:toggleAutoUpdateCheck()
-                end,
-            },
-            {
-                text = _("Clear Update Cache"),
-                help_text = _("Force a fresh check by clearing cached release info"),
-                keep_menu_open = true,
-                callback = function()
-                    self:clearUpdateCache()
-                end,
-            },
-        },
-    })
-    
     menu_items.booklore_sync = {
         text = _("Booklore Sync"),
         sorting_hint = "tools",

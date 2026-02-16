@@ -1965,7 +1965,9 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
             
             if gap > SESSION_GAP_SECONDS then
                 -- Save current session if progress increased
-                local progress_delta = current_session.end_progress - current_session.start_progress
+                local start_progress = current_session.start_progress or 0
+                local end_progress = current_session.end_progress or 0
+                local progress_delta = end_progress - start_progress
                 if progress_delta > 0 then
                     table.insert(sessions, {
                         start_time = current_session.start_time,
@@ -2006,7 +2008,9 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
     
     -- Save final session
     if current_session then
-        local progress_delta = current_session.end_progress - current_session.start_progress
+        local start_progress = current_session.start_progress or 0
+        local end_progress = current_session.end_progress or 0
+        local progress_delta = end_progress - start_progress
         if progress_delta > 0 then
             table.insert(sessions, {
                 start_time = current_session.start_time,
@@ -2364,21 +2368,27 @@ function BookloreSync:_uploadSessionsWithBatching(book_id, book_type, sessions)
         -- Build batch payload array
         for i = start_idx, end_idx do
             local session = sessions[i]
+            local start_progress = session.start_progress or 0
+            local end_progress = session.end_progress or 0
+            local progress_delta = session.progress_delta or (end_progress - start_progress)
+            
             table.insert(batch_sessions, {
                 startTime = session.start_time,
                 endTime = session.end_time,
                 durationSeconds = session.duration_seconds,
                 durationFormatted = self:_formatDuration(session.duration_seconds or 0),
-                startProgress = self:roundProgress(session.start_progress or 0),
-                endProgress = self:roundProgress(session.end_progress or 0),
-                progressDelta = self:roundProgress(session.progress_delta or (session.end_progress - session.start_progress)),
+                startProgress = self:roundProgress(start_progress),
+                endProgress = self:roundProgress(end_progress),
+                progressDelta = self:roundProgress(progress_delta),
                 startLocation = session.start_location,
                 endLocation = session.end_location,
             })
         end
         
         -- Try batch upload
+        self:logInfo("BookloreSync: Attempting batch", batch_num, "of", batch_count, "with", (end_idx - start_idx + 1), "sessions")
         local success, message, code = self.api:submitSessionBatch(book_id, book_type, batch_sessions)
+        self:logInfo("BookloreSync: Batch", batch_num, "result - success:", tostring(success), "code:", tostring(code or "nil"), "message:", tostring(message or "nil"))
         
         if success then
             -- Mark all sessions in batch as synced
@@ -2409,7 +2419,8 @@ function BookloreSync:_uploadSessionsWithBatching(book_id, book_type, sessions)
             end
         else
             -- Other error: all sessions in batch failed
-            self:logErr("BookloreSync: Batch upload failed for batch", batch_num, ":", message)
+            self:logErr("BookloreSync: Batch upload failed for batch", batch_num, "of", batch_count, 
+                       "(" .. (end_idx - start_idx + 1) .. " sessions) - Error:", message, "Code:", tostring(code or "nil"))
             failed_count = failed_count + (end_idx - start_idx + 1)
         end
     end

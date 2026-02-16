@@ -537,7 +537,7 @@ function BookloreSync:addToMainMenu(menu_items)
         text = _("Manage Sessions"),
         sub_item_table = {
             {
-                text = function()
+                text_func = function()
                     local count = self.db and self.db:getPendingSessionCount() or 0
                     return T(_("Sync Pending Now (%1 sessions)"), tonumber(count) or 0)
                 end,

@@ -247,8 +247,35 @@ function Database:init(db_name)
     -- Enable foreign keys
     self.conn:exec("PRAGMA foreign_keys = ON")
     
-    -- Set WAL mode for better concurrency
-    self.conn:exec("PRAGMA journal_mode = WAL")
+    -- Checkpoint any existing WAL file before changing journal mode
+    -- This is necessary when migrating from WAL mode to TRUNCATE mode
+    -- Without this, the journal_mode change may fail with "database is locked"
+    local checkpoint_ok, checkpoint_err = pcall(function()
+        self.conn:exec("PRAGMA wal_checkpoint(TRUNCATE)")
+    end)
+    if not checkpoint_ok then
+        -- Not fatal - there may be no WAL file, or db might be locked by another instance
+        logger.dbg("BookloreSync Database: WAL checkpoint skipped:", checkpoint_err)
+    end
+    
+    -- Use TRUNCATE journal mode for reliability on e-readers
+    -- - Avoids WAL checkpoint issues on Android-based devices
+    -- - Faster than DELETE mode (journal file reused, not deleted)
+    -- - More reliable on unexpected power loss or process termination
+    -- - No separate WAL/SHM files to manage
+    local journal_ok, journal_err = pcall(function()
+        self.conn:exec("PRAGMA journal_mode = TRUNCATE")
+    end)
+    
+    if not journal_ok then
+        logger.warn("BookloreSync Database: Could not set TRUNCATE mode:", journal_err)
+        logger.warn("This may happen if another KOReader instance is using the database.")
+        logger.warn("The database will continue using its current journal mode.")
+        -- Continue anyway - the database will use whatever mode it's already in
+        -- This is non-fatal; TRUNCATE is preferred but not required for operation
+    else
+        logger.dbg("BookloreSync Database: Successfully set TRUNCATE journal mode")
+    end
     
     -- Run migrations
     local success = self:runMigrations()

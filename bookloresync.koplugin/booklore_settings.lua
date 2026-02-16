@@ -287,109 +287,99 @@ function Settings:showVersion(parent)
     })
 end
 
-function Settings:buildMenu(parent)
+function Settings:buildConnectionMenu(parent)
     return {
-        {
-            text = _("Enable Sync"),
-            help_text = _("Enable or disable automatic syncing of reading sessions to Booklore server. When disabled, no sessions will be tracked or synced."),
-            checked_func = function()
-                return parent.is_enabled
-            end,
-            callback = function()
-                parent.is_enabled = not parent.is_enabled
-                parent.settings:saveSetting("is_enabled", parent.is_enabled)
-                parent.settings:flush()
-                UIManager:show(InfoMessage:new{
-                    text = parent.is_enabled and _("Booklore sync enabled") or _("Booklore sync disabled"),
-                    timeout = 2,
-                })
-            end,
+        text = _("Setup & Connection"),
+        sub_item_table = {
+            {
+                text = _("Server URL"),
+                help_text = _("The URL of your Booklore server (e.g., http://192.168.1.100:6060). This is where reading sessions will be synced."),
+                keep_menu_open = true,
+                callback = function()
+                    self:configureServerUrl(parent)
+                end,
+            },
+            {
+                text = _("Username"),
+                help_text = _("Your Booklore username for authentication."),
+                keep_menu_open = true,
+                callback = function()
+                    self:configureUsername(parent)
+                end,
+            },
+            {
+                text = _("Password"),
+                help_text = _("Your Booklore password. This is stored locally and used to authenticate with the server."),
+                keep_menu_open = true,
+                callback = function()
+                    self:configurePassword(parent)
+                end,
+            },
+            {
+                text = _("Test Connection"),
+                help_text = _("Test the connection to your Booklore server to verify your credentials and network connectivity."),
+                enabled_func = function()
+                    return parent.server_url ~= "" and parent.username ~= ""
+                end,
+                callback = function()
+                    parent:testConnection()
+                end,
+            },
         },
-        {
-            text = _("Log to file"),
-            help_text = _("Enable detailed logging to a file for debugging purposes. Logs are saved to koreader/plugins/booklore.koplugin/booklore_sync.log"),
-            checked_func = function()
-                return parent.log_to_file
-            end,
-            callback = function()
-                parent.log_to_file = not parent.log_to_file
-                parent.settings:saveSetting("log_to_file", parent.log_to_file)
-                parent.settings:flush()
-                UIManager:show(InfoMessage:new{
-                    text = parent.log_to_file and _("File logging enabled") or _("File logging disabled"),
-                    timeout = 2,
-                })
-            end,
-        },
-        {
-            text = _("Secure logs"),
-            help_text = _("Redact URLs from logs to protect sensitive information. When enabled, all URLs in log messages will be replaced with [URL REDACTED] so logs can be safely shared."),
-            checked_func = function()
-                return parent.secure_logs
-            end,
-            callback = function()
-                parent.secure_logs = not parent.secure_logs
-                parent.settings:saveSetting("secure_logs", parent.secure_logs)
-                parent.settings:flush()
-                UIManager:show(InfoMessage:new{
-                    text = parent.secure_logs and _("Secure logging enabled") or _("Secure logging disabled"),
-                    timeout = 2,
-                })
-            end,
-        },
-        {
-            text = _("Silent messages"),
-            help_text = _("Suppress all messages related to sessions being cached. The plugin will continue to work normally in the background."),
-            checked_func = function()
-                return parent.silent_messages
-            end,
-            callback = function()
-                parent.silent_messages = not parent.silent_messages
-                parent.settings:saveSetting("silent_messages", parent.silent_messages)
-                parent.settings:flush()
-                UIManager:show(InfoMessage:new{
-                    text = parent.silent_messages and _("Silent mode enabled") or _("Silent mode disabled"),
-                    timeout = 2,
-                })
-            end,
-        },
-        {
-            text = _("Login"),
-            sub_item_table = {
-                {
-                    text = _("Server URL"),
-                    help_text = _("The URL of your Booklore server (e.g., http://192.168.1.100:6060). This is where reading sessions will be synced."),
-                    keep_menu_open = true,
-                    callback = function()
-                        self:configureServerUrl(parent)
-                    end,
-                },
-                {
-                    text = _("Username"),
-                    help_text = _("Your Booklore username for authentication."),
-                    keep_menu_open = true,
-                    callback = function()
-                        self:configureUsername(parent)
-                    end,
-                },
-                {
-                    text = _("Password"),
-                    help_text = _("Your Booklore password. This is stored locally and used to authenticate with the server."),
-                    keep_menu_open = true,
-                    callback = function()
-                        self:configurePassword(parent)
-                    end,
-                },
-                {
-                    text = _("Test Connection"),
-                    help_text = _("Test the connection to your Booklore server to verify your credentials and network connectivity."),
-                    enabled_func = function()
-                        return parent.server_url ~= "" and parent.username ~= ""
-                    end,
-                    callback = function()
-                        parent:testConnection()
-                    end,
-                },
+    }
+end
+
+function Settings:buildPreferencesMenu(parent)
+    return {
+        text = _("Preferences"),
+        sub_item_table = {
+            {
+                text = _("Silent mode"),
+                help_text = _("Suppress all messages related to sessions being cached. The plugin will continue to work normally in the background."),
+                checked_func = function()
+                    return parent.silent_messages
+                end,
+                callback = function()
+                    parent.silent_messages = not parent.silent_messages
+                    parent.settings:saveSetting("silent_messages", parent.silent_messages)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = parent.silent_messages and _("Silent mode enabled") or _("Silent mode disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text = _("Debug logging"),
+                help_text = _("Enable detailed logging to a file for debugging purposes. Logs are saved to koreader/plugins/booklore.koplugin/booklore_sync.log"),
+                checked_func = function()
+                    return parent.log_to_file
+                end,
+                callback = function()
+                    parent.log_to_file = not parent.log_to_file
+                    parent.settings:saveSetting("log_to_file", parent.log_to_file)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = parent.log_to_file and _("Debug logging enabled") or _("Debug logging disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text = _("Secure logs"),
+                help_text = _("Redact URLs from logs to protect sensitive information. When enabled, all URLs in log messages will be replaced with [URL REDACTED] so logs can be safely shared."),
+                checked_func = function()
+                    return parent.secure_logs
+                end,
+                callback = function()
+                    parent.secure_logs = not parent.secure_logs
+                    parent.settings:saveSetting("secure_logs", parent.secure_logs)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = parent.secure_logs and _("Secure logging enabled") or _("Secure logging disabled"),
+                        timeout = 2,
+                    })
+                end,
             },
         },
     }

@@ -1,3 +1,16 @@
+# [3.1.0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/3.0.0...3.1.0) (2026-02-16)
+
+
+### Bug Fixes
+
+* **sync:** fallback to individual upload on 403 Forbidden ([0c1b188](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/0c1b188bfdc9fe6f6718fb1ee3e9ee107ebcd302))
+* **sync:** handle nil progress values in session processing and batch uploads ([15186b0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/15186b084bed0e50a84aaddf6a436699faf79e3a))
+
+
+### Features
+
+* **api:** add batch session upload endpoint with intelligent batching ([4d57c87](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/4d57c87a31ccef9eff6a750525327fa926b47a2a))
+
 # [3.0.0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/2.0.0...3.0.0) (2026-02-16)
 
 

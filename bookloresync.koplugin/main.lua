@@ -86,6 +86,9 @@ function BookloreSync:logDbg(...)
     logger.dbg(table.unpack(args))
 end
 
+-- Constants
+local BATCH_UPLOAD_SIZE = 100  -- Maximum number of sessions per batch upload
+
 function BookloreSync:init()
     self.settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/booklore.lua")
     
@@ -2248,6 +2251,172 @@ function BookloreSync:_formatDuration(seconds)
     return table.concat(parts, " ")
 end
 
+--[[--
+Group sessions by book_id for batch upload
+
+@param sessions Array of session objects
+@return table Grouped sessions { book_id = {book_type = ..., sessions = {...}} }
+--]]
+function BookloreSync:_groupSessionsByBook(sessions)
+    local grouped = {}
+    
+    for _, session in ipairs(sessions) do
+        local book_id = session.book_id
+        if book_id then
+            if not grouped[book_id] then
+                grouped[book_id] = {
+                    book_type = session.book_type,
+                    sessions = {}
+                }
+            end
+            table.insert(grouped[book_id].sessions, session)
+        end
+    end
+    
+    return grouped
+end
+
+--[[--
+Submit a single session to the server
+
+@param session Session object with all required fields
+@return boolean success
+@return string message
+@return number|nil code
+--]]
+function BookloreSync:_submitSingleSession(session)
+    local start_progress = session.start_progress or 0
+    local end_progress = session.end_progress or 0
+    local progress_delta = session.progress_delta or (end_progress - start_progress)
+    
+    local duration_formatted = self:_formatDuration(session.duration_seconds or 0)
+    
+    return self.api:submitSession({
+        bookId = session.book_id,
+        bookType = session.book_type,
+        startTime = session.start_time,
+        endTime = session.end_time,
+        durationSeconds = session.duration_seconds,
+        durationFormatted = duration_formatted,
+        startProgress = self:roundProgress(start_progress),
+        endProgress = self:roundProgress(end_progress),
+        progressDelta = self:roundProgress(progress_delta),
+        startLocation = session.start_location,
+        endLocation = session.end_location,
+    })
+end
+
+--[[--
+Upload sessions with intelligent batching
+
+Uses batch upload for 2+ sessions, individual for single session.
+Automatically splits large batches into chunks of BATCH_UPLOAD_SIZE.
+Falls back to individual upload if batch endpoint returns 404.
+
+@param book_id Booklore book ID
+@param book_type Book type (EPUB, PDF, etc.)
+@param sessions Array of session objects to upload
+@return number synced_count Number of successfully synced sessions
+@return number failed_count Number of failed sessions
+@return number not_found_count Number of 404 errors (book not found)
+--]]
+function BookloreSync:_uploadSessionsWithBatching(book_id, book_type, sessions)
+    local synced_count = 0
+    local failed_count = 0
+    local not_found_count = 0
+    
+    -- Handle empty input
+    if not sessions or #sessions == 0 then
+        return synced_count, failed_count, not_found_count
+    end
+    
+    -- Single session: use individual upload
+    if #sessions == 1 then
+        local session = sessions[1]
+        local success, message, code = self:_submitSingleSession(session)
+        
+        if success then
+            self.db:markHistoricalSessionSynced(session.id)
+            synced_count = 1
+        elseif code == 404 then
+            self:logWarn("BookloreSync: Book ID", book_id, "not found on server (404), marking session for re-matching")
+            self.db:markHistoricalSessionUnmatched(session.id)
+            not_found_count = 1
+        else
+            failed_count = 1
+        end
+        
+        return synced_count, failed_count, not_found_count
+    end
+    
+    -- Multiple sessions: use batch upload with chunking
+    local batch_size = BATCH_UPLOAD_SIZE
+    local total_sessions = #sessions
+    local batch_count = math.ceil(total_sessions / batch_size)
+    
+    self:logInfo("BookloreSync: Uploading", total_sessions, "sessions in", batch_count, "batch(es) for book:", book_id)
+    
+    for batch_num = 1, batch_count do
+        local start_idx = (batch_num - 1) * batch_size + 1
+        local end_idx = math.min(batch_num * batch_size, total_sessions)
+        local batch_sessions = {}
+        
+        -- Build batch payload array
+        for i = start_idx, end_idx do
+            local session = sessions[i]
+            table.insert(batch_sessions, {
+                startTime = session.start_time,
+                endTime = session.end_time,
+                durationSeconds = session.duration_seconds,
+                durationFormatted = self:_formatDuration(session.duration_seconds or 0),
+                startProgress = self:roundProgress(session.start_progress or 0),
+                endProgress = self:roundProgress(session.end_progress or 0),
+                progressDelta = self:roundProgress(session.progress_delta or (session.end_progress - session.start_progress)),
+                startLocation = session.start_location,
+                endLocation = session.end_location,
+            })
+        end
+        
+        -- Try batch upload
+        local success, message, code = self.api:submitSessionBatch(book_id, book_type, batch_sessions)
+        
+        if success then
+            -- Mark all sessions in batch as synced
+            for i = start_idx, end_idx do
+                self.db:markHistoricalSessionSynced(sessions[i].id)
+                synced_count = synced_count + 1
+            end
+            self:logInfo("BookloreSync: Batch", batch_num, "of", batch_count, "uploaded successfully (" .. (end_idx - start_idx + 1) .. " sessions)")
+        elseif code == 404 then
+            -- Server doesn't have batch endpoint OR book not found
+            -- Fallback to individual upload to determine which
+            self:logWarn("BookloreSync: Batch returned 404, falling back to individual upload for batch", batch_num)
+            
+            for i = start_idx, end_idx do
+                local session = sessions[i]
+                local single_success, single_message, single_code = self:_submitSingleSession(session)
+                
+                if single_success then
+                    self.db:markHistoricalSessionSynced(session.id)
+                    synced_count = synced_count + 1
+                elseif single_code == 404 then
+                    self:logWarn("BookloreSync: Book ID", book_id, "not found on server (404), marking session for re-matching")
+                    self.db:markHistoricalSessionUnmatched(session.id)
+                    not_found_count = not_found_count + 1
+                else
+                    failed_count = failed_count + 1
+                end
+            end
+        else
+            -- Other error: all sessions in batch failed
+            self:logErr("BookloreSync: Batch upload failed for batch", batch_num, ":", message)
+            failed_count = failed_count + (end_idx - start_idx + 1)
+        end
+    end
+    
+    return synced_count, failed_count, not_found_count
+end
+
 function BookloreSync:matchHistoricalData()
     if not self.db then
         UIManager:show(InfoMessage:new{
@@ -2308,6 +2477,7 @@ function BookloreSync:_autoSyncMatchedSessions(books)
     self.autosync_index = 1
     self.autosync_total_synced = 0
     self.autosync_total_failed = 0
+    self.autosync_total_not_found = 0
     self.autosync_total_books = total_books
     self.autosync_total_sessions = total_sessions
     self.autosync_progress_msg = progress_msg
@@ -2326,19 +2496,25 @@ function BookloreSync:_syncNextMatchedBook()
                              self.autosync_total_synced, 
                              self.autosync_total_failed)
         
+        -- Add not found count if any
+        if self.autosync_total_not_found and self.autosync_total_not_found > 0 then
+            result_text = result_text .. T(_("\nMarked for re-matching (404): %1"), self.autosync_total_not_found)
+        end
+        
         UIManager:show(InfoMessage:new{
             text = result_text,
             timeout = 4,
         })
         
         self:logInfo("BookloreSync: Auto-sync complete - synced:", self.autosync_total_synced,
-                   "failed:", self.autosync_total_failed)
+                   "failed:", self.autosync_total_failed, "not found:", self.autosync_total_not_found or 0)
         
         -- Clean up state
         self.autosync_books = nil
         self.autosync_index = nil
         self.autosync_total_synced = nil
         self.autosync_total_failed = nil
+        self.autosync_total_not_found = nil
         self.autosync_total_books = nil
         self.autosync_total_sessions = nil
         self.autosync_progress_msg = nil
@@ -2375,45 +2551,21 @@ function BookloreSync:_syncNextMatchedBook()
         return
     end
     
-    -- Sync sessions for this book
-    local synced_count = 0
-    local failed_count = 0
-    
-    for _, session in ipairs(sessions) do
-        local start_progress = session.start_progress or 0
-        local end_progress = session.end_progress or 0
-        local progress_delta = session.progress_delta or (end_progress - start_progress)
-        local duration_formatted = self:_formatDuration(session.duration_seconds or 0)
-        
-        local success, message = self.api:submitSession({
-            bookId = session.book_id,
-            bookType = session.book_type,
-            startTime = session.start_time,
-            endTime = session.end_time,
-            durationSeconds = session.duration_seconds,
-            durationFormatted = duration_formatted,
-            startProgress = start_progress,
-            endProgress = end_progress,
-            progressDelta = progress_delta,
-            startLocation = session.start_location,
-            endLocation = session.end_location,
-        })
-        
-        if success then
-            self.db:markHistoricalSessionSynced(session.id)
-            synced_count = synced_count + 1
-        else
-            failed_count = failed_count + 1
-            self:logWarn("BookloreSync: Failed to sync session for book:", book.koreader_book_title, "Error:", message)
-        end
-    end
+    -- Sync sessions for this book using batch upload
+    local synced_count, failed_count, not_found_count = 
+        self:_uploadSessionsWithBatching(
+            sessions[1].book_id,
+            sessions[1].book_type,
+            sessions
+        )
     
     -- Update totals
     self.autosync_total_synced = self.autosync_total_synced + synced_count
     self.autosync_total_failed = self.autosync_total_failed + failed_count
+    self.autosync_total_not_found = (self.autosync_total_not_found or 0) + not_found_count
     
     self:logInfo("BookloreSync: Auto-synced", synced_count, "sessions for:", book.koreader_book_title,
-               "(", failed_count, "failed)")
+               "(", failed_count, "failed,", not_found_count, "not found)")
     
     -- Move to next book
     self.autosync_index = self.autosync_index + 1
@@ -2815,41 +2967,42 @@ end
 function BookloreSync:_syncHistoricalSessions(book, sessions, progress_text)
     -- Helper function to sync historical sessions for a matched book
     -- Used by both _saveMatchAndSync and auto-sync in _showNextBookMatch
-    local synced_count = 0
-    local failed_count = 0
     
+    if not sessions or #sessions == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No sessions found to sync"),
+            timeout = 2,
+        })
+        self.matching_index = self.matching_index + 1
+        self:_showNextBookMatch()
+        return
+    end
+    
+    -- Filter out already-synced sessions
+    local unsynced_sessions = {}
     for _, session in ipairs(sessions) do
         if not session.synced or session.synced == 0 then
-            local start_progress = session.start_progress or 0
-            local end_progress = session.end_progress or 0
-            local progress_delta = session.progress_delta or (end_progress - start_progress)
-            
-            -- Format duration
-            local duration_formatted = self:_formatDuration(session.duration_seconds or 0)
-            
-            -- Apply decimal rounding based on config
-            local success = self.api:submitSession({
-                bookId = session.book_id,
-                bookType = session.book_type,
-                startTime = session.start_time,
-                endTime = session.end_time,
-                durationSeconds = session.duration_seconds,
-                durationFormatted = duration_formatted,
-                startProgress = self:roundProgress(start_progress),
-                endProgress = self:roundProgress(end_progress),
-                progressDelta = self:roundProgress(progress_delta),
-                startLocation = session.start_location,
-                endLocation = session.end_location,
-            })
-            
-            if success then
-                self.db:markHistoricalSessionSynced(session.id)
-                synced_count = synced_count + 1
-            else
-                failed_count = failed_count + 1
-            end
+            table.insert(unsynced_sessions, session)
         end
     end
+    
+    if #unsynced_sessions == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("All sessions already synced"),
+            timeout = 2,
+        })
+        self.matching_index = self.matching_index + 1
+        self:_showNextBookMatch()
+        return
+    end
+    
+    -- Use batch upload helper
+    local synced_count, failed_count, not_found_count = 
+        self:_uploadSessionsWithBatching(
+            unsynced_sessions[1].book_id,
+            unsynced_sessions[1].book_type,
+            unsynced_sessions
+        )
     
     -- Show results
     local result_text = T(_("Synced %1 sessions for:\n%2"), synced_count, book.koreader_book_title)
@@ -2858,6 +3011,9 @@ function BookloreSync:_syncHistoricalSessions(book, sessions, progress_text)
     end
     if failed_count > 0 then
         result_text = result_text .. T(_("\n\n%1 sessions failed to sync"), failed_count)
+    end
+    if not_found_count > 0 then
+        result_text = result_text .. T(_("\n\n%1 sessions marked for re-matching (404)"), not_found_count)
     end
     
     UIManager:show(InfoMessage:new{
@@ -2942,76 +3098,62 @@ function BookloreSync:_performResyncHistoricalData()
         return
     end
     
-    self:logInfo("BookloreSync: Re-syncing", #sessions, "historical sessions")
+    -- Group sessions by book_id
+    local grouped = self:_groupSessionsByBook(sessions)
     
-    -- Show initial progress message
+    -- Count total books and sessions
+    local total_books = 0
+    local total_sessions = #sessions
+    for _ in pairs(grouped) do
+        total_books = total_books + 1
+    end
+    
+    self:logInfo("BookloreSync: Re-syncing", total_sessions, "sessions from", total_books, "books")
+    
+    -- Show initial progress
     local progress_msg = InfoMessage:new{
-        text = T(_("Re-syncing historical sessions...\n\n0 / %1 completed"), #sessions),
+        text = T(_("Re-syncing historical sessions...\n\n0 / %1 books (0 sessions)"), total_books),
     }
     UIManager:show(progress_msg)
     
-    local synced_count = 0
-    local failed_count = 0
-    local not_found_count = 0
+    local books_completed = 0
+    local total_synced = 0
+    local total_failed = 0
+    local total_not_found = 0
     
-    for i, session in ipairs(sessions) do
-        -- Update progress every 10 sessions or on last session
-        if i % 10 == 0 or i == #sessions then
-            UIManager:close(progress_msg)
-            progress_msg = InfoMessage:new{
-                text = T(_("Re-syncing historical sessions...\n\n%1 / %2 completed\n\nSynced: %3\nFailed: %4\n404 errors: %5"),
-                    i, #sessions, synced_count, failed_count, not_found_count),
-            }
-            UIManager:show(progress_msg)
-            UIManager:forceRePaint()
-        end
+    -- Upload each book's sessions as batch
+    for book_id, book_data in pairs(grouped) do
+        books_completed = books_completed + 1
         
-        local start_progress = session.start_progress or 0
-        local end_progress = session.end_progress or 0
-        local progress_delta = session.progress_delta or (end_progress - start_progress)
+        -- Batch upload sessions for this book
+        local synced, failed, not_found = 
+            self:_uploadSessionsWithBatching(book_id, book_data.book_type, book_data.sessions)
         
-        -- Format duration
-        local duration_formatted = self:_formatDuration(session.duration_seconds or 0)
+        total_synced = total_synced + synced
+        total_failed = total_failed + failed
+        total_not_found = total_not_found + not_found
         
-        -- Submit session with decimal rounding based on config
-        local success, message, code = self.api:submitSession({
-            bookId = session.book_id,
-            bookType = session.book_type,
-            startTime = session.start_time,
-            endTime = session.end_time,
-            durationSeconds = session.duration_seconds,
-            durationFormatted = duration_formatted,
-            startProgress = self:roundProgress(start_progress),
-            endProgress = self:roundProgress(end_progress),
-            progressDelta = self:roundProgress(progress_delta),
-            startLocation = session.start_location,
-            endLocation = session.end_location,
-        })
+        self:logInfo("BookloreSync: Book", book_id, "- synced:", synced, 
+                    "failed:", failed, "not found:", not_found)
         
-        if success then
-            synced_count = synced_count + 1
-            self:logInfo("BookloreSync: Re-synced session", i, "of", #sessions)
-        else
-            -- Check if it's a 404 (book not found)
-            if code == 404 then
-                self:logWarn("BookloreSync: Book ID", session.book_id, "not found (404), marking for re-matching")
-                self.db:markHistoricalSessionUnmatched(session.id)
-                not_found_count = not_found_count + 1
-            else
-                self:logWarn("BookloreSync: Failed to re-sync session", i, ":", message)
-                failed_count = failed_count + 1
-            end
-        end
+        -- Update progress after each book
+        UIManager:close(progress_msg)
+        progress_msg = InfoMessage:new{
+            text = T(_("Re-syncing historical sessions...\n\n%1 / %2 books (%3 sessions synced)\n\nSynced: %4\nFailed: %5\n404 errors: %6"),
+                books_completed, total_books, total_synced + total_failed + total_not_found,
+                total_synced, total_failed, total_not_found),
+        }
+        UIManager:show(progress_msg)
+        UIManager:forceRePaint()
     end
     
-    -- Close the progress message
+    -- Close progress, show results
     UIManager:close(progress_msg)
     
-    -- Show results
     local result_text = T(_("Re-sync complete!\n\nSuccessfully synced: %1\nFailed: %2\nMarked for re-matching (404): %3"), 
-        synced_count, failed_count, not_found_count)
+        total_synced, total_failed, total_not_found)
     
-    if not_found_count > 0 then
+    if total_not_found > 0 then
         result_text = result_text .. _("\n\nUse 'Match Historical Data' to re-match sessions with 404 errors.")
     end
     
@@ -3020,8 +3162,8 @@ function BookloreSync:_performResyncHistoricalData()
         timeout = 5,
     })
     
-    self:logInfo("BookloreSync: Re-sync complete - synced:", synced_count, 
-                "failed:", failed_count, "not found:", not_found_count)
+    self:logInfo("BookloreSync: Re-sync complete - synced:", total_synced, 
+                "failed:", total_failed, "not found:", total_not_found)
 end
 
 function BookloreSync:syncRematchedSessions()
@@ -3048,13 +3190,38 @@ function BookloreSync:syncRematchedSessions()
     
     self:logInfo("BookloreSync: Syncing", #sessions, "re-matched sessions")
     
-    -- Use the existing helper function to sync these sessions
-    self:_syncHistoricalSessions(sessions, function(synced_count)
-        UIManager:show(InfoMessage:new{
-            text = T(_("Successfully synced %1 re-matched session(s)"), synced_count),
-            timeout = 3,
-        })
-    end)
+    -- Group by book and batch upload
+    local grouped = self:_groupSessionsByBook(sessions)
+    
+    local total_synced = 0
+    local total_failed = 0
+    local total_not_found = 0
+    
+    for book_id, book_data in pairs(grouped) do
+        local synced, failed, not_found = 
+            self:_uploadSessionsWithBatching(book_id, book_data.book_type, book_data.sessions)
+        
+        total_synced = total_synced + synced
+        total_failed = total_failed + failed
+        total_not_found = total_not_found + not_found
+    end
+    
+    -- Show results
+    local result_text = T(_("Successfully synced %1 re-matched session(s)"), total_synced)
+    if total_failed > 0 then
+        result_text = result_text .. T(_("\n\n%1 sessions failed"), total_failed)
+    end
+    if total_not_found > 0 then
+        result_text = result_text .. T(_("\n\n%1 sessions marked for re-matching (404)"), total_not_found)
+    end
+    
+    UIManager:show(InfoMessage:new{
+        text = result_text,
+        timeout = 3,
+    })
+    
+    self:logInfo("BookloreSync: Re-matched sync complete - synced:", total_synced,
+                "failed:", total_failed, "not found:", total_not_found)
 end
 
 --[[--

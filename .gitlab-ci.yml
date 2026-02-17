@@ -23,6 +23,26 @@ stages:
   - publish
   - infra-prod
   - production
+
+# Lua linting and formatting
+lua-lint-and-format:
+  stage: test
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache luacheck lua5.3 lua5.3-dev git curl
+    - curl -L https://github.com/JohnnyMorganz/StyLua/releases/latest/download/stylua-linux-x86_64.zip -o stylua.zip
+    - unzip stylua.zip
+    - chmod +x stylua
+    - mv stylua /usr/local/bin/
+  script:
+    - echo "Running luacheck..."
+    - luacheck bookloresync.koplugin/ --std max --globals vim --no-unused-args
+    - echo "Running stylua format check..."
+    - stylua --check bookloresync.koplugin/
+  rules:
+    - if: "$CI_PIPELINE_SOURCE == 'merge_request_event'"
+    - if: "$CI_COMMIT_BRANCH"
+
 zip-koplugin-release:
   stage: publish
   image: registry.gitlab.com/gitlab-org/cli:latest

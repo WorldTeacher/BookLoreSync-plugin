@@ -12,3 +12,12 @@ repos:
       - id: stylua
         args: ["--check"]
         files: \.lua$
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: ["--strict", "--force-scope"]
+        env:
+          MAX_LINE_LENGTH: "80"

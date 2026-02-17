@@ -31,7 +31,7 @@ public class TaskCreateRequest {
     })
     private Object options;
 
-    public <T> T getOptions(Class<T> optionsClass) {
+    public <T> T getOptionsAs(Class<T> optionsClass) {
         if (options == null) {
             return null;
         }

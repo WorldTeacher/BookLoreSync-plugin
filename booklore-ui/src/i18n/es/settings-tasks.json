@@ -45,6 +45,8 @@
   "toast": {
     "taskQueued": "Tarea en cola",
     "taskQueuedDetail": "{{name}} se ha puesto en cola y se ejecutará en segundo plano.",
+    "dryRunQueued": "Ejecución de prueba en cola",
+    "dryRunQueuedDetail": "{{name}} ejecución de prueba se ha puesto en cola. Los resultados estarán disponibles en los registros sin realizar cambios en la base de datos.",
     "taskCompleted": "Tarea completada",
     "taskCompletedDetail": "{{name}} se ha completado correctamente.",
     "taskFailed": "Tarea fallida",

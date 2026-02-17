@@ -3400,24 +3400,57 @@ function BookloreSync:checkForUpdates(silent)
         
         local size_text = self.updater:formatBytes(result.release_info.size)
         
-        -- Show confirmation dialog
-        UIManager:show(ConfirmBox:new{
-            text = T(_([[Update available!
+        -- Build button list
+        local buttons = {
+            {
+                {
+                    text = _("Install"),
+                    callback = function()
+                        UIManager:close(self.update_dialog)
+                        self:installUpdate(result.release_info.download_url, result.latest_version)
+                    end,
+                },
+            },
+        }
+        -- Add changelog button if available (or if testing with local file)
+        if result.release_info.changelog_url then
+            table.insert(buttons, {
+                {
+                    text = _("View Changelog"),
+                    callback = function()
+                        UIManager:close(self.update_dialog)
+                        self:showChangelog(result.release_info.changelog_url, result.latest_version, result.release_info)
+                    end,
+                },
+            })
+        end
+        
+        
+        -- Add cancel button
+        table.insert(buttons, {
+            {
+                text = _("Cancel"),
+                callback = function()
+                    UIManager:close(self.update_dialog)
+                end,
+            },
+        })
+        
+        -- Show update dialog with buttons
+        self.update_dialog = ButtonDialog:new{
+            title = T(_([[Update available!
 
 Current version: %1
 Latest version: %2
 
-Download size: %3
-
-Install update now?]]),
+Download size: %3]]),
                 result.current_version,
                 result.latest_version,
                 size_text),
-            ok_text = _("Install"),
-            ok_callback = function()
-                self:installUpdate(result.release_info.download_url, result.latest_version)
-            end,
-        })
+            buttons = buttons,
+        }
+        
+        UIManager:show(self.update_dialog)
     else
         -- No update available
         self.update_available = false
@@ -3429,6 +3462,86 @@ Install update now?]]),
             })
         end
     end
+end
+
+--[[--
+Show changelog for the new version
+
+@param changelog_url URL to download changelog from
+@param version Version number
+@param release_info Full release info object for showing update dialog again
+--]]
+function BookloreSync:showChangelog(changelog_url, version, release_info)
+    local changelog_text, error_msg
+    
+    -- TESTING: Check if test changelog file is configured
+    if self.TEST_CHANGELOG_FILE then
+        logger.info("BookloreSync: Using test changelog file:", self.TEST_CHANGELOG_FILE)
+        
+        local file = io.open(self.TEST_CHANGELOG_FILE, "r")
+        if file then
+            changelog_text = file:read("*all")
+            file:close()
+            logger.info("BookloreSync: Loaded test changelog,", #changelog_text, "bytes")
+        else
+            error_msg = "Test changelog file not found: " .. self.TEST_CHANGELOG_FILE
+            logger.err("BookloreSync:", error_msg)
+        end
+    else
+        -- Show loading message
+        local loading_msg = InfoMessage:new{
+            text = _("Loading changelog..."),
+        }
+        UIManager:show(loading_msg)
+        
+        -- Fetch changelog content from URL
+        changelog_text, error_msg = self.updater:fetchChangelog(changelog_url)
+        
+        UIManager:close(loading_msg)
+    end
+    
+    if not changelog_text then
+        UIManager:show(InfoMessage:new{
+            text = T(_("Failed to load changelog:\n%1"), error_msg or "Unknown error"),
+            timeout = 3,
+        })
+        -- Show update dialog again after error
+        self:checkForUpdates(true)
+        return
+    end
+    
+    -- Show changelog in a scrollable text widget
+    local Screen = require("device").screen
+    local TextViewer = require("ui/widget/textviewer")
+    
+    local changelog_viewer
+    changelog_viewer = TextViewer:new{
+        title = T(_("Changelog - Version %1"), version),
+        text = changelog_text,
+        width = math.floor(Screen:getWidth() * 0.8),
+        height = math.floor(Screen:getHeight() * 0.7),
+        buttons_table = {
+            {
+                {
+                    text = _("Install Update"),
+                    callback = function()
+                        UIManager:close(changelog_viewer)
+                        self:installUpdate(release_info.download_url, version)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("Close"),
+                    callback = function()
+                        UIManager:close(changelog_viewer)
+                    end,
+                },
+            },
+        },
+    }
+    
+    UIManager:show(changelog_viewer)
 end
 
 --[[--

@@ -252,7 +252,7 @@ end
 --[[--
 Get latest release information from GitHub API
 
-@return table|nil Release info {version, download_url, changelog, published_at, size}
+@return table|nil Release info {version, download_url, changelog, changelog_url, published_at, size}
 @return string|nil Error message if failed
 --]]
 function Updater:getLatestRelease()
@@ -281,13 +281,16 @@ function Updater:getLatestRelease()
     -- Find the ZIP asset
     local download_url = nil
     local asset_size = 0
+    local changelog_url = nil
     
     if release_data.assets then
         for _, asset in ipairs(release_data.assets) do
             if asset.name == self.RELEASE_ASSET_NAME then
                 download_url = asset.browser_download_url
                 asset_size = asset.size or 0
-                break
+            elseif asset.name and asset.name:match("^changes_from_.*%.md$") then
+                -- Found a changelog file matching pattern changes_from_*.md
+                changelog_url = asset.browser_download_url
             end
         end
     end
@@ -300,9 +303,34 @@ function Updater:getLatestRelease()
         version = version,
         download_url = download_url,
         changelog = release_data.body or "",
+        changelog_url = changelog_url,
         published_at = release_data.published_at or "",
         size = asset_size
     }, nil
+end
+
+--[[--
+Fetch changelog file content from URL
+
+@param changelog_url URL to the changelog file
+@return string|nil Changelog text or nil if failed
+@return string|nil Error message if failed
+--]]
+function Updater:fetchChangelog(changelog_url)
+    if not changelog_url then
+        return nil, "No changelog URL provided"
+    end
+    
+    logger.info("BookloreSync Updater: Fetching changelog from", changelog_url)
+    
+    local success, response, code = self:_makeHttpRequest(changelog_url)
+    
+    if not success then
+        logger.err("BookloreSync Updater: Failed to fetch changelog:", response)
+        return nil, "Failed to fetch changelog: " .. tostring(response)
+    end
+    
+    return response, nil
 end
 
 --[[--

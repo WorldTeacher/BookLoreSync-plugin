@@ -3412,7 +3412,8 @@ function BookloreSync:checkForUpdates(silent)
                 },
             },
         }
-        -- Add changelog button if available (or if testing with local file)
+        
+        -- Add changelog button if available
         if result.release_info.changelog_url then
             table.insert(buttons, {
                 {
@@ -3424,7 +3425,6 @@ function BookloreSync:checkForUpdates(silent)
                 },
             })
         end
-        
         
         -- Add cancel button
         table.insert(buttons, {
@@ -3472,35 +3472,19 @@ Show changelog for the new version
 @param release_info Full release info object for showing update dialog again
 --]]
 function BookloreSync:showChangelog(changelog_url, version, release_info)
-    local changelog_text, error_msg
+    -- Show loading message
+    local loading_msg = InfoMessage:new{
+        text = _("Loading changelog..."),
+    }
+    UIManager:show(loading_msg)
     
-    -- TESTING: Check if test changelog file is configured
-    if self.TEST_CHANGELOG_FILE then
-        logger.info("BookloreSync: Using test changelog file:", self.TEST_CHANGELOG_FILE)
-        
-        local file = io.open(self.TEST_CHANGELOG_FILE, "r")
-        if file then
-            changelog_text = file:read("*all")
-            file:close()
-            logger.info("BookloreSync: Loaded test changelog,", #changelog_text, "bytes")
-        else
-            error_msg = "Test changelog file not found: " .. self.TEST_CHANGELOG_FILE
-            logger.err("BookloreSync:", error_msg)
-        end
-    else
-        -- Show loading message
-        local loading_msg = InfoMessage:new{
-            text = _("Loading changelog..."),
-        }
-        UIManager:show(loading_msg)
-        
-        -- Fetch changelog content from URL
-        changelog_text, error_msg = self.updater:fetchChangelog(changelog_url)
-        
-        UIManager:close(loading_msg)
-    end
+    -- Fetch full CHANGELOG.md content from URL
+    local full_changelog_content, error_msg = self.updater:fetchChangelog(changelog_url)
     
-    if not changelog_text then
+    UIManager:close(loading_msg)
+    
+    -- Check if we got the changelog file
+    if not full_changelog_content then
         UIManager:show(InfoMessage:new{
             text = T(_("Failed to load changelog:\n%1"), error_msg or "Unknown error"),
             timeout = 3,
@@ -3509,6 +3493,18 @@ function BookloreSync:showChangelog(changelog_url, version, release_info)
         self:checkForUpdates(true)
         return
     end
+    
+    -- Parse the CHANGELOG.md to extract just this version's section
+    local changelog_text = self.updater:parseChangelogForVersion(full_changelog_content, version)
+    
+    if not changelog_text or changelog_text == "" then
+        -- Fallback to showing the whole changelog if parsing failed
+        logger.warn("BookloreSync: Could not parse version-specific changelog, showing full file")
+        changelog_text = full_changelog_content
+    end
+    
+    -- Clean changelog by removing links and commit references
+    changelog_text = self.updater:cleanChangelog(changelog_text)
     
     -- Show changelog in a scrollable text widget
     local Screen = require("device").screen

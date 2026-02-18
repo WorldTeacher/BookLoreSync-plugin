@@ -1043,23 +1043,31 @@ function BookloreSync:getCurrentProgress()
     local location = "0"
     
     if self.ui.document.info and self.ui.document.info.has_pages then
-        -- PDF or image-based format
-        local current_page = self.ui.document:getCurrentPage()
+        -- PDF or image-based format (PDF, CBZ, CBR, DJVU)
+        -- For paged documents, use view.state.page for current page
+        local current_page = nil
+        if self.view and self.view.state and self.view.state.page then
+            current_page = self.view.state.page
+        elseif self.ui.paging then
+            current_page = self.ui.paging:getCurrentPage()
+        end
+        
         local total_pages = self.ui.document:getPageCount()
-        if total_pages > 0 then
+        
+        if current_page and total_pages and total_pages > 0 then
             -- Store raw percentage with maximum precision
             progress = (current_page / total_pages) * 100
+            location = tostring(current_page)
         end
-        location = tostring(current_page)
     elseif self.ui.rolling then
         -- EPUB or reflowable format
-        local cur_page = self.ui.document:getCurrentPage()
+        local cur_page = self.ui.rolling:getCurrentPage()
         local total_pages = self.ui.document:getPageCount()
-        if total_pages > 0 then
+        if cur_page and total_pages and total_pages > 0 then
             -- Store raw percentage with maximum precision
             progress = (cur_page / total_pages) * 100
+            location = tostring(cur_page)
         end
-        location = tostring(cur_page)
     end
     
     return progress, location
@@ -1081,10 +1089,8 @@ function BookloreSync:getBookType(file_path)
         ext = ext:upper()
         if ext == "PDF" then
             return "PDF"
-        elseif ext == "DJVU" then
-            return "DJVU"
         elseif ext == "CBZ" or ext == "CBR" then
-            return "COMIC"
+            return "CBX"
         end
     end
     

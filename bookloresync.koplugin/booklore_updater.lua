@@ -252,7 +252,7 @@ end
 --[[--
 Get latest release information from GitHub API
 
-@return table|nil Release info {version, download_url, changelog, published_at, size}
+@return table|nil Release info {version, download_url, changelog, changelog_url, published_at, size}
 @return string|nil Error message if failed
 --]]
 function Updater:getLatestRelease()
@@ -278,16 +278,20 @@ function Updater:getLatestRelease()
         return nil, "No tag_name in release data"
     end
     
-    -- Find the ZIP asset
+    -- Find the ZIP asset and CHANGELOG.md
     local download_url = nil
     local asset_size = 0
+    local changelog_url = nil
     
     if release_data.assets then
         for _, asset in ipairs(release_data.assets) do
             if asset.name == self.RELEASE_ASSET_NAME then
                 download_url = asset.browser_download_url
                 asset_size = asset.size or 0
-                break
+            elseif asset.name == "CHANGELOG.md" then
+                -- Found CHANGELOG.md file
+                changelog_url = asset.browser_download_url
+                logger.info("BookloreSync Updater: Found CHANGELOG.md in release assets")
             end
         end
     end
@@ -300,9 +304,138 @@ function Updater:getLatestRelease()
         version = version,
         download_url = download_url,
         changelog = release_data.body or "",
+        changelog_url = changelog_url,
         published_at = release_data.published_at or "",
         size = asset_size
     }, nil
+end
+
+--[[--
+Fetch changelog file content from URL
+
+@param changelog_url URL to the changelog file
+@return string|nil Changelog text or nil if failed
+@return string|nil Error message if failed
+--]]
+function Updater:fetchChangelog(changelog_url)
+    if not changelog_url then
+        return nil, "No changelog URL provided"
+    end
+    
+    logger.info("BookloreSync Updater: Fetching changelog from", changelog_url)
+    
+    local success, response, code = self:_makeHttpRequest(changelog_url)
+    
+    if not success then
+        logger.err("BookloreSync Updater: Failed to fetch changelog:", response)
+        return nil, "Failed to fetch changelog: " .. tostring(response)
+    end
+    
+    return response, nil
+end
+
+--[[--
+Parse CHANGELOG.md content to extract section for a specific version
+
+@param changelog_content Full CHANGELOG.md content
+@param version Version to extract (e.g., "3.2.0" or "v3.2.0")
+@return string|nil Extracted changelog section or nil if not found
+--]]
+function Updater:parseChangelogForVersion(changelog_content, version)
+    if not changelog_content or not version then
+        return nil
+    end
+    
+    -- Strip leading 'v' if present
+    local version_clean = version:gsub("^v", "")
+    
+    -- Split content into lines
+    local lines = {}
+    for line in changelog_content:gmatch("[^\r\n]+") do
+        table.insert(lines, line)
+    end
+    
+    -- Find the section for this version
+    local in_section = false
+    local section_lines = {}
+    
+    for _, line in ipairs(lines) do
+        -- Check if this is a version heading (e.g., "# [3.2.0]")
+        if line:match("^#%s+%[") then
+            -- Check if this is our version
+            if line:match("%[" .. version_clean:gsub("%.", "%%.") .. "%]") then
+                -- Start capturing
+                in_section = true
+                -- Don't include the heading itself
+            else
+                -- If we were in our section, stop now
+                if in_section then
+                    break
+                end
+            end
+        elseif in_section then
+            -- Capture all lines in our section
+            table.insert(section_lines, line)
+        end
+    end
+    
+    if #section_lines == 0 then
+        logger.warn("BookloreSync Updater: No changelog found for version", version_clean)
+        return nil
+    end
+    
+    -- Join the lines back together
+    local changelog_section = table.concat(section_lines, "\n")
+    
+    -- Trim leading/trailing whitespace
+    changelog_section = changelog_section:match("^%s*(.-)%s*$")
+    
+    logger.info("BookloreSync Updater: Extracted", #changelog_section, "bytes for version", version_clean)
+    return changelog_section
+end
+
+--[[--
+Clean changelog content by removing links and commit references
+
+@param changelog_text Changelog text with markdown links
+@return string Cleaned changelog text
+--]]
+function Updater:cleanChangelog(changelog_text)
+    if not changelog_text then
+        return ""
+    end
+    
+    local lines = {}
+    for line in changelog_text:gmatch("[^\r\n]+") do
+        table.insert(lines, line)
+    end
+    
+    local cleaned_lines = {}
+    
+    for _, line in ipairs(lines) do
+        local cleaned_line = line
+        
+        -- Remove markdown links [text](url) -> text
+        cleaned_line = cleaned_line:gsub("%[([^%]]+)%]%(([^%)]+)%)", "%1")
+        
+        -- Remove commit references like ([abc1234])
+        cleaned_line = cleaned_line:gsub("%s*%(%[?[a-f0-9]+%]?%)%s*", " ")
+        
+        -- Remove URLs that appear standalone
+        cleaned_line = cleaned_line:gsub("https?://[^%s]+", "")
+        
+        -- Clean up multiple spaces
+        cleaned_line = cleaned_line:gsub("%s+", " ")
+        
+        -- Trim trailing/leading whitespace
+        cleaned_line = cleaned_line:match("^%s*(.-)%s*$")
+        
+        if cleaned_line ~= "" then
+            table.insert(cleaned_lines, cleaned_line)
+        end
+    end
+    
+    return table.concat(cleaned_lines, "\n")
 end
 
 --[[--

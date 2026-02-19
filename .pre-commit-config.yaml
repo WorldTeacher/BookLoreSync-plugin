@@ -1,18 +1,4 @@
 repos:
-  - repo: https://github.com/lunarmodules/luacheck
-    rev: v1.1.2
-    hooks:
-      - id: luacheck
-        args: ["--std", "max", "--globals", "vim", "--no-unused-args"]
-        files: \.lua$
-
-  - repo: https://github.com/JohnnyMorganz/StyLua
-    rev: v0.20.0
-    hooks:
-      - id: stylua
-        args: ["--check"]
-        files: \.lua$
-
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v3.4.0
     hooks:

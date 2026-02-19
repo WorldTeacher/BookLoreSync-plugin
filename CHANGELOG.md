@@ -1,3 +1,10 @@
+# [3.3.0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/3.2.0...3.3.0) (2026-02-19)
+
+
+### Features
+
+* **sessions:** add support for pdf and archive-type formats ([a0599c4](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/a0599c485db664b8e545da0d23ede025dcd0274b))
+
 # [3.2.0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/3.1.0...3.2.0) (2026-02-16)
 
 

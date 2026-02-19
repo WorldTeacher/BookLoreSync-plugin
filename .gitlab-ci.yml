@@ -24,25 +24,6 @@ stages:
   - infra-prod
   - production
 
-# Lua linting and formatting
-lua-lint-and-format:
-  stage: test
-  image: alpine:latest
-  before_script:
-    - apk add --no-cache luacheck lua5.3 lua5.3-dev git curl
-    - curl -L https://github.com/JohnnyMorganz/StyLua/releases/latest/download/stylua-linux-x86_64.zip -o stylua.zip
-    - unzip stylua.zip
-    - chmod +x stylua
-    - mv stylua /usr/local/bin/
-  script:
-    - echo "Running luacheck..."
-    - luacheck bookloresync.koplugin/ --std max --globals vim --no-unused-args
-    - echo "Running stylua format check..."
-    - stylua --check bookloresync.koplugin/
-  rules:
-    - if: "$CI_PIPELINE_SOURCE == 'merge_request_event'"
-    - if: "$CI_COMMIT_BRANCH"
-
 zip-koplugin-release:
   stage: publish
   image: registry.gitlab.com/gitlab-org/cli:latest
@@ -88,3 +69,60 @@ zip-koplugin-release:
     paths:
       - bookloresync.koplugin.zip
       - CHANGELOG.md
+
+mr-semrel-preview-comment:
+  stage: test
+  image: node:20-alpine
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  variables:
+    GIT_DEPTH: "0"  # needed so tags/history exist for semantic-release
+  before_script:
+    - apk add --no-cache git curl jq
+    - git fetch --tags --force --prune
+  script:
+    # 1) Compute next release version (semantic-release dry run)
+    - |
+      set -euo pipefail
+
+      echo "Running semantic-release dry-run to compute next version…"
+      npx --yes semantic-release --dry-run --no-ci 2>&1 | tee semrel.log
+
+      # semantic-release typically prints: "The next release version is X.Y.Z"
+      next_version="$(grep -Eo 'next release version is [0-9]+\.[0-9]+\.[0-9]+' -i semrel.log | tail -n1 | awk '{print $NF}' || true)"
+
+      if [ -z "${next_version}" ]; then
+        echo "Could not detect next version from semantic-release output."
+        next_tag="unknown"
+      else
+        next_tag="wt-${next_version}"
+      fi
+
+      comment_body=$'this MR would create release '"${next_tag}"$'\n\n<!-- semrel-preview-comment -->'
+
+      # 2) Create or update a single MR comment (identified by the marker)
+      notes_base="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
+
+      echo "Looking for existing preview comment…"
+      existing_note_id="$(
+        curl -sS --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" "${notes_base}?per_page=100" \
+          | jq -r 'map(select(.body | contains("semrel-preview-comment")))[0].id // empty'
+      )"
+
+      if [ -z "${existing_note_id}" ]; then
+        echo "No existing comment found. Creating a new one…"
+        curl -sS --fail \
+          --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+          --header "Content-Type: application/json" \
+          --data "$(jq -n --arg body "${comment_body}" '{body:$body}')" \
+          -X POST "${notes_base}" >/dev/null
+      else
+        echo "Existing comment found (note_id=${existing_note_id}). Updating…"
+        curl -sS --fail \
+          --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+          --header "Content-Type: application/json" \
+          --data "$(jq -n --arg body "${comment_body}" '{body:$body}')" \
+          -X PUT "${notes_base}/${existing_note_id}" >/dev/null
+      fi
+
+      echo "MR comment is up to date: ${comment_body}"

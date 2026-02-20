@@ -156,6 +156,15 @@ function BookloreSync:init()
     self.booklore_username = self.settings:readSetting("booklore_username") or ""
     self.booklore_password = self.settings:readSetting("booklore_password") or ""
     
+    -- Extended sync settings
+    self.extended_sync_enabled         = self.settings:readSetting("extended_sync_enabled") or false
+    self.rating_sync_enabled           = self.settings:readSetting("rating_sync_enabled") or false
+    self.rating_sync_mode              = self.settings:readSetting("rating_sync_mode") or "koreader_scaled"
+    self.highlights_notes_sync_enabled = self.settings:readSetting("highlights_notes_sync_enabled") or false
+    self.notes_destination             = self.settings:readSetting("notes_destination") or "in_book"
+    self.upload_on_session             = self.settings:readSetting("upload_on_session") or false
+    self.upload_on_complete            = self.settings:readSetting("upload_on_complete") or false
+    
     -- Current reading session tracking
     self.current_session = nil
     
@@ -449,7 +458,9 @@ function BookloreSync:showCurrentBookMetadata()
     end
     
     local doc_path = self.ui.document.file
-    
+    -- [[ TEST Implementation of metadata extraction and display 
+    -- In real implementation, the metadata will be extracted and submitted to the real endpoints
+    -- ]]
     -- Extract all metadata
     local metadata = self.metadata_extractor:getAllMetadata(doc_path)
     
@@ -516,6 +527,234 @@ function BookloreSync:showCurrentBookMetadata()
         text = text,
         timeout = 10,
     })
+end
+
+--[[--
+Detect and store the KOReader sidecar (.sdr) path for the currently open book.
+
+Looks up or creates a book_cache entry, then upserts the sdr_path into book_metadata.
+Called from the "Detect book metadata location" menu item.
+--]]
+function BookloreSync:detectBookMetadataLocation()
+    if not self.ui or not self.ui.document or not self.ui.document.file then
+        UIManager:show(InfoMessage:new{
+            text = _("No book currently open"),
+            timeout = 2,
+        })
+        return
+    end
+
+    local doc_path = self.ui.document.file
+    self:logInfo("BookloreSync: Detecting metadata location for:", doc_path)
+
+    -- Verify the sidecar is accessible via the metadata extractor
+    local doc_settings = self.metadata_extractor:loadDocSettings(doc_path)
+    if not doc_settings then
+        UIManager:show(InfoMessage:new{
+            text = _("Could not find KOReader sidecar for this book.\nOpen the book in KOReader to create one."),
+            timeout = 4,
+        })
+        return
+    end
+
+    -- Derive the .sdr folder path.
+    -- DocSettings stores the sidecar in: <doc_dir>/<doc_filename>.sdr/
+    local sdr_path = doc_path .. ".sdr"
+
+    -- Ensure a book_cache entry exists for this file path
+    local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    if not book_cache_id then
+        -- No cache entry yet — create a minimal one using whatever we know
+        local file_hash = ""
+        if self.current_session and self.current_session.doc_path == doc_path then
+            file_hash = self.current_session.file_hash or ""
+        end
+        local stats = self.metadata_extractor:getStats(doc_path)
+        local title  = (stats and stats.title)   or ""
+        local author = (stats and stats.authors) or ""
+        self.db:saveBookCache(doc_path, file_hash, nil, title, author, nil, nil)
+        book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    end
+
+    if not book_cache_id then
+        UIManager:show(InfoMessage:new{
+            text = _("Failed to create book cache entry. Check logs."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local ok = self.db:upsertBookMetadata(book_cache_id, { sdr_path = sdr_path })
+    if ok then
+        self:logInfo("BookloreSync: Stored sdr_path:", sdr_path, "for book_cache_id:", book_cache_id)
+        UIManager:show(InfoMessage:new{
+            text = T(_("Metadata location stored:\n%1"), sdr_path),
+            timeout = 4,
+        })
+    else
+        self:logErr("BookloreSync: Failed to store sdr_path for book_cache_id:", book_cache_id)
+        UIManager:show(InfoMessage:new{
+            text = _("Failed to store metadata location. Check logs."),
+            timeout = 3,
+        })
+    end
+end
+
+--[[--
+Sync the KOReader star rating (1-5) to Booklore, scaled to 1-10 by multiplying by 2.
+
+Called silently at the end of a session when rating_sync_mode == "koreader_scaled".
+
+@param doc_path  string  Full path to the document
+@param book_id   number  Booklore book ID
+--]]
+function BookloreSync:syncKOReaderRating(doc_path, book_id)
+    if not doc_path or not book_id then
+        self:logWarn("BookloreSync: syncKOReaderRating called with missing arguments")
+        return
+    end
+    if self.booklore_username == "" or self.booklore_password == "" then
+        self:logWarn("BookloreSync: Rating sync skipped — Booklore credentials not configured")
+        return
+    end
+
+    -- Check whether this book's rating has already been synced
+    local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    if book_cache_id then
+        local meta = self.db:getBookMetadata(book_cache_id)
+        if meta and meta.rating_synced then
+            self:logInfo("BookloreSync: Rating already synced for book_cache_id:", book_cache_id, "— skipping")
+            return
+        end
+    end
+
+    local rating_1_5 = self.metadata_extractor:getRating(doc_path)
+    if not rating_1_5 then
+        self:logInfo("BookloreSync: No KOReader rating set for this book — skipping rating sync")
+        return
+    end
+
+    local rating_scaled = math.floor(rating_1_5) * 2  -- 1-5 → 2,4,6,8,10
+    -- Clamp to valid range just in case
+    rating_scaled = math.max(1, math.min(10, rating_scaled))
+
+    self:logInfo("BookloreSync: Syncing KOReader rating", rating_1_5, "-> scaled:", rating_scaled, "for book_id:", book_id)
+
+    local ok, err = self.api:submitRating(book_id, rating_scaled, self.booklore_username, self.booklore_password)
+
+    if ok then
+        -- Persist rating + mark synced
+        if not book_cache_id then
+            book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+        end
+        if book_cache_id then
+            self.db:upsertBookMetadata(book_cache_id, { rating = rating_scaled, rating_synced = true })
+        end
+        self:logInfo("BookloreSync: Rating synced successfully")
+    else
+        self:logWarn("BookloreSync: Failed to sync rating:", err)
+    end
+end
+
+--[[--
+Show a non-blocking 1-10 rating dialog after a book is completed.
+
+Called after endSession() when rating_sync_mode == "select_at_complete" and
+progress reached >= 99%.
+
+@param doc_path  string  Full path to the document
+@param book_id   number  Booklore book ID
+--]]
+function BookloreSync:showRatingDialog(doc_path, book_id)
+    if not doc_path or not book_id then
+        self:logWarn("BookloreSync: showRatingDialog called with missing arguments")
+        return
+    end
+
+    -- Don't show dialog if already rated and synced
+    local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    if book_cache_id then
+        local meta = self.db:getBookMetadata(book_cache_id)
+        if meta and meta.rating_synced then
+            self:logInfo("BookloreSync: Rating already synced — skipping dialog")
+            return
+        end
+    end
+
+    local rating_dialog
+    rating_dialog = InputDialog:new{
+        title = _("Rate this book (1-10)"),
+        input = "",
+        input_hint = "1-10",
+        input_type = "number",
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    callback = function()
+                        UIManager:close(rating_dialog)
+                    end,
+                },
+                {
+                    text = _("Submit"),
+                    is_enter_default = true,
+                    callback = function()
+                        local value = tonumber(rating_dialog:getInputText())
+                        if not value or value < 1 or value > 10 or value ~= math.floor(value) then
+                            UIManager:show(InfoMessage:new{
+                                text = _("Please enter a whole number between 1 and 10"),
+                                timeout = 2,
+                            })
+                            return
+                        end
+
+                        UIManager:close(rating_dialog)
+
+                        -- Store in DB
+                        local bcid = self.db:getBookCacheIdByFilePath(doc_path)
+                        if not bcid then
+                            -- Create minimal cache entry if missing
+                            self.db:saveBookCache(doc_path, "", nil, nil, nil, nil, nil)
+                            bcid = self.db:getBookCacheIdByFilePath(doc_path)
+                        end
+                        if bcid then
+                            self.db:storeRating(bcid, value)
+                        end
+
+                        -- Attempt to submit immediately if credentials are available
+                        if self.booklore_username ~= "" and self.booklore_password ~= "" then
+                            local ok, err = self.api:submitRating(
+                                book_id, value,
+                                self.booklore_username, self.booklore_password
+                            )
+                            if ok then
+                                if bcid then
+                                    self.db:markRatingSynced(bcid)
+                                end
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Rating %1/10 saved and synced"), value),
+                                    timeout = 2,
+                                })
+                            else
+                                self:logWarn("BookloreSync: Rating submit failed:", err)
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Rating %1/10 saved (will retry on next sync)"), value),
+                                    timeout = 2,
+                                })
+                            end
+                        else
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Rating %1/10 saved"), value),
+                                timeout = 2,
+                            })
+                        end
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(rating_dialog)
+    rating_dialog:onShowKeyboard()
 end
 
 function BookloreSync:addToMainMenu(menu_items)
@@ -716,6 +955,9 @@ function BookloreSync:addToMainMenu(menu_items)
         },
     })
     
+    -- Syncing submenu (extended sync features)
+    table.insert(base_menu, Settings:buildSyncingMenu(self))
+
     -- Manage Sessions submenu
     table.insert(base_menu, {
         text = _("Manage Sessions"),
@@ -1560,9 +1802,36 @@ function BookloreSync:onCloseDocument()
     if not self.is_enabled then
         return false
     end
-    
+
     self:logInfo("BookloreSync: Document closing")
+
+    -- Capture session state before endSession() clears it
+    local pre_file_path = self.current_session and self.current_session.file_path
+    local pre_book_id   = self.current_session and self.current_session.book_id
+    local pre_end_progress = nil
+    if self.current_session then
+        pre_end_progress = self:getCurrentProgress()
+    end
+
     self:endSession({ silent = false, force_queue = false })
+
+    -- Rating sync (only when extended sync and rating sync are enabled)
+    if self.extended_sync_enabled and self.rating_sync_enabled
+            and pre_file_path and pre_book_id then
+        local mode = self.rating_sync_mode or "koreader_scaled"
+        if mode == "koreader_scaled" then
+            -- Silent, immediate — sync whatever KOReader star rating is set
+            self:syncKOReaderRating(pre_file_path, pre_book_id)
+        elseif mode == "select_at_complete" then
+            -- Only prompt when the book is considered finished (>= 99 %)
+            if pre_end_progress and pre_end_progress >= 99 then
+                UIManager:scheduleIn(0.5, function()
+                    self:showRatingDialog(pre_file_path, pre_book_id)
+                end)
+            end
+        end
+    end
+
     return false
 end
 

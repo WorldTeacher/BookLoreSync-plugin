@@ -1938,4 +1938,99 @@ function Database:markRatingSynced(book_cache_id)
     return self:upsertBookMetadata(book_cache_id, { rating_synced = true })
 end
 
+-- Annotation / Highlight Sync Helpers
+
+--[[--
+Check whether a KOReader annotation has already been synced.
+
+Uniqueness key: (book_cache_id, koreader_datetime, annotation_type)
+
+@param book_cache_id  number  book_cache.id
+@param koreader_datetime  string  annotation datetime from sidecar (e.g. "2026-02-20 18:08:13")
+@param annotation_type   string  "highlight", "in_book_note", or "booklore_note"
+@return boolean  true if already synced
+--]]
+function Database:isAnnotationSynced(book_cache_id, koreader_datetime, annotation_type)
+    if not book_cache_id or not koreader_datetime or not annotation_type then
+        return false
+    end
+    book_cache_id = tonumber(book_cache_id)
+    if not book_cache_id then return false end
+
+    local stmt = self.conn:prepare([[
+        SELECT COUNT(*) FROM synced_annotations
+        WHERE book_cache_id = ? AND koreader_datetime = ? AND annotation_type = ?
+        LIMIT 1
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare isAnnotationSynced:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function()
+        stmt:bind(book_cache_id, tostring(koreader_datetime), tostring(annotation_type))
+    end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in isAnnotationSynced:", err)
+        stmt:close()
+        return false
+    end
+
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
+    stmt:close()
+    return count > 0
+end
+
+--[[--
+Record that a KOReader annotation has been synced to the server.
+
+@param book_cache_id     number  book_cache.id
+@param koreader_datetime string  annotation datetime from sidecar
+@param annotation_type   string  "highlight", "in_book_note", or "booklore_note"
+@param server_id         number|nil  ID returned by the server (optional)
+@return boolean success
+--]]
+function Database:markAnnotationSynced(book_cache_id, koreader_datetime, annotation_type, server_id)
+    if not book_cache_id or not koreader_datetime or not annotation_type then
+        logger.err("BookloreSync Database: markAnnotationSynced called with missing args")
+        return false
+    end
+    book_cache_id = tonumber(book_cache_id)
+    if not book_cache_id then return false end
+
+    local stmt = self.conn:prepare([[
+        INSERT OR IGNORE INTO synced_annotations
+            (book_cache_id, koreader_datetime, annotation_type, destination, server_id, synced_at)
+        VALUES (?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare markAnnotationSynced:", self.conn:errmsg())
+        return false
+    end
+
+    -- destination mirrors annotation_type for now
+    local ok, err = pcall(function()
+        stmt:bind(
+            book_cache_id,
+            tostring(koreader_datetime),
+            tostring(annotation_type),
+            tostring(annotation_type),
+            server_id and tonumber(server_id) or nil
+        )
+    end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in markAnnotationSynced:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
 return Database

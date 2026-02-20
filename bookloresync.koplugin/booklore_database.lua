@@ -11,7 +11,7 @@ local DataStorage = require("datastorage")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 8,  -- Current database schema version
+    VERSION = 9,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -218,6 +218,44 @@ Database.migrations = {
                 value TEXT NOT NULL,
                 cached_at INTEGER NOT NULL
             )
+        ]],
+    },
+
+    -- Migration 9: Extended sync tables (book metadata location, rating, annotations)
+    [9] = {
+        -- Store detected .sdr path and rating sync state per book
+        [[
+            CREATE TABLE IF NOT EXISTS book_metadata (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL,
+                sdr_path TEXT,
+                rating INTEGER,
+                rating_synced INTEGER DEFAULT 0,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(book_cache_id)
+            )
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_book_metadata_book_cache_id
+            ON book_metadata(book_cache_id)
+        ]],
+        -- Deduplication tracker for uploaded highlights and notes
+        [[
+            CREATE TABLE IF NOT EXISTS synced_annotations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL,
+                koreader_datetime TEXT NOT NULL,
+                annotation_type TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                server_id INTEGER,
+                synced_at INTEGER,
+                UNIQUE(book_cache_id, koreader_datetime, annotation_type)
+            )
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_synced_annotations_book
+            ON synced_annotations(book_cache_id)
         ]],
     },
 }
@@ -1703,6 +1741,201 @@ function Database:clearUpdaterCache()
     
     logger.info("BookloreSync Database: Cleared updater cache")
     return true
+end
+
+-- Book Metadata (Extended Sync) Functions
+
+--[[--
+Get the book_cache id for a given file path.
+
+@param file_path Full path to the document file
+@return number|nil The book_cache.id or nil if not found
+--]]
+function Database:getBookCacheIdByFilePath(file_path)
+    if not file_path then
+        return nil
+    end
+    file_path = tostring(file_path)
+
+    local stmt = self.conn:prepare([[
+        SELECT id FROM book_cache WHERE file_path = ? LIMIT 1
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getBookCacheIdByFilePath:", self.conn:errmsg())
+        return nil
+    end
+
+    local ok, err = pcall(function() stmt:bind(file_path) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in getBookCacheIdByFilePath:", err)
+        stmt:close()
+        return nil
+    end
+
+    local id = nil
+    for row in stmt:rows() do
+        id = tonumber(row[1])
+        break
+    end
+    stmt:close()
+    return id
+end
+
+--[[--
+Upsert a row in book_metadata for the given book_cache_id.
+
+@param book_cache_id The book_cache.id to link to
+@param fields Table with any of: sdr_path, rating, rating_synced
+@return boolean success
+--]]
+function Database:upsertBookMetadata(book_cache_id, fields)
+    if not book_cache_id then
+        logger.err("BookloreSync Database: upsertBookMetadata called without book_cache_id")
+        return false
+    end
+    book_cache_id = tonumber(book_cache_id)
+    if not book_cache_id then
+        logger.err("BookloreSync Database: Invalid book_cache_id in upsertBookMetadata")
+        return false
+    end
+
+    fields = fields or {}
+
+    -- Check whether a row already exists
+    local check_stmt = self.conn:prepare([[
+        SELECT id FROM book_metadata WHERE book_cache_id = ? LIMIT 1
+    ]])
+    if not check_stmt then
+        logger.err("BookloreSync Database: Failed to prepare check in upsertBookMetadata:", self.conn:errmsg())
+        return false
+    end
+    check_stmt:bind(book_cache_id)
+    local existing_id = nil
+    for row in check_stmt:rows() do
+        existing_id = tonumber(row[1])
+        break
+    end
+    check_stmt:close()
+
+    if existing_id then
+        -- Build a dynamic UPDATE
+        local sets = { "updated_at = CAST(strftime('%s', 'now') AS INTEGER)" }
+        local binds = {}
+        if fields.sdr_path ~= nil then
+            table.insert(sets, "sdr_path = ?")
+            table.insert(binds, tostring(fields.sdr_path))
+        end
+        if fields.rating ~= nil then
+            table.insert(sets, "rating = ?")
+            table.insert(binds, tonumber(fields.rating))
+        end
+        if fields.rating_synced ~= nil then
+            table.insert(sets, "rating_synced = ?")
+            table.insert(binds, fields.rating_synced and 1 or 0)
+        end
+        table.insert(binds, book_cache_id)
+
+        local sql = "UPDATE book_metadata SET " .. table.concat(sets, ", ") .. " WHERE book_cache_id = ?"
+        local stmt = self.conn:prepare(sql)
+        if not stmt then
+            logger.err("BookloreSync Database: Failed to prepare UPDATE in upsertBookMetadata:", self.conn:errmsg())
+            return false
+        end
+        local ok, err = pcall(function() stmt:bind(table.unpack(binds)) end)
+        if not ok then
+            logger.err("BookloreSync Database: Bind failed in upsertBookMetadata UPDATE:", err)
+            stmt:close()
+            return false
+        end
+        local result = stmt:step()
+        stmt:close()
+        return result == SQ3.DONE or result == SQ3.OK
+    else
+        -- INSERT
+        local stmt = self.conn:prepare([[
+            INSERT INTO book_metadata (book_cache_id, sdr_path, rating, rating_synced)
+            VALUES (?, ?, ?, ?)
+        ]])
+        if not stmt then
+            logger.err("BookloreSync Database: Failed to prepare INSERT in upsertBookMetadata:", self.conn:errmsg())
+            return false
+        end
+        local ok, err = pcall(function()
+            stmt:bind(
+                book_cache_id,
+                fields.sdr_path and tostring(fields.sdr_path) or nil,
+                fields.rating and tonumber(fields.rating) or nil,
+                (fields.rating_synced ~= nil) and (fields.rating_synced and 1 or 0) or 0
+            )
+        end)
+        if not ok then
+            logger.err("BookloreSync Database: Bind failed in upsertBookMetadata INSERT:", err)
+            stmt:close()
+            return false
+        end
+        local result = stmt:step()
+        stmt:close()
+        return result == SQ3.DONE or result == SQ3.OK
+    end
+end
+
+--[[--
+Get the book_metadata row for a given book_cache_id.
+
+@param book_cache_id The book_cache.id
+@return table|nil {id, book_cache_id, sdr_path, rating, rating_synced} or nil
+--]]
+function Database:getBookMetadata(book_cache_id)
+    if not book_cache_id then return nil end
+    book_cache_id = tonumber(book_cache_id)
+    if not book_cache_id then return nil end
+
+    local stmt = self.conn:prepare([[
+        SELECT id, book_cache_id, sdr_path, rating, rating_synced
+        FROM book_metadata
+        WHERE book_cache_id = ?
+        LIMIT 1
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getBookMetadata:", self.conn:errmsg())
+        return nil
+    end
+    stmt:bind(book_cache_id)
+
+    local meta = nil
+    for row in stmt:rows() do
+        meta = {
+            id            = tonumber(row[1]),
+            book_cache_id = tonumber(row[2]),
+            sdr_path      = row[3] and tostring(row[3]) or nil,
+            rating        = row[4] and tonumber(row[4]) or nil,
+            rating_synced = (tonumber(row[5]) or 0) == 1,
+        }
+        break
+    end
+    stmt:close()
+    return meta
+end
+
+--[[--
+Store a rating (1-10) for a book, clearing the synced flag.
+
+@param book_cache_id The book_cache.id
+@param rating integer 1-10
+@return boolean success
+--]]
+function Database:storeRating(book_cache_id, rating)
+    return self:upsertBookMetadata(book_cache_id, { rating = rating, rating_synced = false })
+end
+
+--[[--
+Mark the rating for a book as synced to the server.
+
+@param book_cache_id The book_cache.id
+@return boolean success
+--]]
+function Database:markRatingSynced(book_cache_id)
+    return self:upsertBookMetadata(book_cache_id, { rating_synced = true })
 end
 
 return Database

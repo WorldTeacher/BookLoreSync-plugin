@@ -22,6 +22,7 @@ local Database = require("booklore_database")
 local APIClient = require("booklore_api_client")
 local Updater = require("booklore_updater")
 local FileLogger = require("booklore_file_logger")
+local MetadataExtractor = require("booklore_metadata_extractor")
 local logger = require("logger")
 
 local _ = require("gettext")
@@ -231,34 +232,9 @@ function BookloreSync:init()
     self.api = APIClient:new()
     self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
     
-    -- Initialize updater
-    self.updater = Updater:new()
-    
-    -- Detect plugin directory from current file path
-    local source = debug.getinfo(1, "S").source
-    local plugin_dir = source:match("@(.*)/")
-    if not plugin_dir or not plugin_dir:match("bookloresync%.koplugin$") then
-        -- Fallback: use data directory
-        plugin_dir = DataStorage:getDataDir() .. "/bookloresync.koplugin"
-    end
-    
-    self.updater:init(plugin_dir, self.db)
-    
-    -- Auto-update check settings
-    self.auto_update_check = self.settings:readSetting("auto_update_check")
-    if self.auto_update_check == nil then
-        self.auto_update_check = true  -- Default enabled
-    end
-    
-    self.last_update_check = self.settings:readSetting("last_update_check") or 0
-    self.update_available = false  -- Flag for menu badge
-    
-    -- Schedule auto-check for updates (5-second delay, once per day)
-    if self.auto_update_check then
-        UIManager:scheduleIn(5, function()
-            self:autoCheckForUpdates()
-        end)
-    end
+    -- Initialize metadata extractor
+    self.metadata_extractor = MetadataExtractor:new({secure_logs = self.secure_logs})
+    self:logInfo("BookloreSync: Metadata extractor initialized")
     
     -- Initialize updater
     self.updater = Updater:new()
@@ -457,6 +433,88 @@ function BookloreSync:viewSessionDetails()
             "Pending sessions: %4"
         ), total, matched, unmatched, pending),
         timeout = 3,
+    })
+end
+
+--[[--
+Show KOReader metadata for currently open book
+--]]
+function BookloreSync:showCurrentBookMetadata()
+    if not self.ui or not self.ui.document or not self.ui.document.file then
+        UIManager:show(InfoMessage:new{
+            text = _("No book currently open"),
+            timeout = 2,
+        })
+        return
+    end
+    
+    local doc_path = self.ui.document.file
+    
+    -- Extract all metadata
+    local metadata = self.metadata_extractor:getAllMetadata(doc_path)
+    
+    -- Format for display
+    local lines = {}
+    table.insert(lines, "📖 KOReader Metadata\n")
+    
+    -- Rating
+    if metadata.rating then
+        local stars = string.rep("⭐", metadata.rating)
+        table.insert(lines, "Rating: " .. stars .. " (" .. metadata.rating .. "/5)")
+    else
+        table.insert(lines, "Rating: Not set")
+    end
+    
+    -- Status
+    if metadata.status then
+        local status_icons = {
+            complete = "✓",
+            reading = "📖",
+            on_hold = "⏸",
+            abandoned = "✗"
+        }
+        local icon = status_icons[metadata.status] or ""
+        table.insert(lines, "Status: " .. icon .. " " .. metadata.status)
+    end
+    
+    -- Progress
+    if metadata.progress then
+        local pct = math.floor(metadata.progress * 100)
+        table.insert(lines, "Progress: " .. pct .. "%")
+    end
+    
+    -- Counts
+    local counts = self.metadata_extractor:getCounts(doc_path)
+    table.insert(lines, "")
+    table.insert(lines, "Highlights: " .. counts.highlights)
+    table.insert(lines, "Notes: " .. counts.notes)
+    table.insert(lines, "Bookmarks: " .. counts.bookmarks)
+    
+    -- Stats from document
+    if metadata.stats then
+        table.insert(lines, "")
+        if metadata.stats.title then
+            table.insert(lines, "Title: " .. metadata.stats.title)
+        end
+        if metadata.stats.authors then
+            table.insert(lines, "Authors: " .. metadata.stats.authors)
+        end
+        if metadata.stats.pages then
+            table.insert(lines, "Pages: " .. metadata.stats.pages)
+        end
+    end
+    
+    -- Modified date
+    if metadata.modified then
+        table.insert(lines, "")
+        table.insert(lines, "Last Modified: " .. metadata.modified)
+    end
+    
+    local text = table.concat(lines, "\n")
+    
+    UIManager:show(InfoMessage:new{
+        text = text,
+        timeout = 10,
     })
 end
 
@@ -716,6 +774,16 @@ function BookloreSync:addToMainMenu(menu_items)
                             timeout = 2,
                         })
                     end
+                end,
+            },
+            {
+                text = _("Show Current Book Metadata"),
+                help_text = _("Display KOReader metadata for the currently open book (rating, highlights, notes, bookmarks, reading status)."),
+                enabled_func = function()
+                    return self.ui and self.ui.document and self.ui.document.file
+                end,
+                callback = function()
+                    self:showCurrentBookMetadata()
                 end,
             },
         },

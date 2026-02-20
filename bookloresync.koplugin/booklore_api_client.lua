@@ -843,4 +843,79 @@ function APIClient:_normalizeBookObject(book)
     return book
 end
 
+--[[--
+Submit a personal rating for a single book to Booklore.
+
+Uses Bearer token auth (same credentials as historical data import).
+
+Endpoint: PUT /api/v1/books/personal-rating
+Body: { "ids": [book_id], "rating": rating }
+
+@param book_id number  The Booklore book ID
+@param rating  number  Rating value (1-10)
+@param username string Booklore username for Bearer token
+@param password string Booklore password for Bearer token
+@return boolean success
+@return string|nil error message on failure
+--]]
+function APIClient:submitRating(book_id, rating, username, password)
+    book_id = tonumber(book_id)
+    rating  = tonumber(rating)
+
+    if not book_id then
+        return false, "Invalid book_id"
+    end
+    if not rating or rating < 1 or rating > 10 then
+        return false, "Rating must be between 1 and 10"
+    end
+    if not username or username == "" then
+        return false, "Booklore username required for rating sync"
+    end
+    if not password or password == "" then
+        return false, "Booklore password required for rating sync"
+    end
+
+    self:logInfo("BookloreSync API: Submitting rating", rating, "for book_id", book_id)
+
+    -- Get (or refresh) Bearer token
+    local token_ok, token = self:getOrRefreshBearerToken(username, password, false)
+    if not token_ok then
+        self:logErr("BookloreSync API: Could not obtain Bearer token for rating:", token)
+        return false, token or "Failed to obtain auth token"
+    end
+
+    local body = json.encode({ ids = { book_id }, rating = rating })
+
+    local headers = {
+        ["Authorization"] = "Bearer " .. token,
+        ["Content-Type"]  = "application/json",
+    }
+
+    local success, code, response = self:request("PUT", "/api/v1/books/personal-rating", body, headers)
+
+    -- If token rejected, delete cache, get a fresh token and retry once
+    if not success and (code == 401 or code == 403) then
+        self:logWarn("BookloreSync API: Token rejected (" .. tostring(code) .. ") for rating, refreshing and retrying")
+        if self.db then
+            self.db:deleteBearerToken(username)
+        end
+        local refresh_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if refresh_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("PUT", "/api/v1/books/personal-rating", body, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+
+    if success and (code == 200 or code == 204) then
+        self:logInfo("BookloreSync API: Rating submitted successfully for book_id", book_id)
+        return true, nil
+    else
+        local err_msg = (type(response) == "string" and response ~= "") and response or ("HTTP " .. tostring(code))
+        self:logWarn("BookloreSync API: Failed to submit rating:", err_msg)
+        return false, err_msg
+    end
+end
+
 return APIClient

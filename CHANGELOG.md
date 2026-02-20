@@ -1,3 +1,10 @@
+## [3.3.1](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/3.3.0...3.3.1) (2026-02-20)
+
+
+### Bug Fixes
+
+* **reading-session:** correct page retrieval method for EPUB format ([4daef0b](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/4daef0b87a9817cb2628d005409c7a72b9d12711))
+
 # [3.3.0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/3.2.0...3.3.0) (2026-02-19)
 
 

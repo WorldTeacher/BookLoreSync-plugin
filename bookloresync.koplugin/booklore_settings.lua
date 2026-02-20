@@ -329,6 +329,236 @@ function Settings:buildConnectionMenu(parent)
     }
 end
 
+function Settings:buildSyncingMenu(parent)
+    return {
+        text = _("Syncing"),
+        sub_item_table = {
+            -- Master toggle
+            {
+                text = _("Enable extended sync"),
+                help_text = _("Enable extended sync features: rating sync, metadata location detection, and highlights/notes upload."),
+                checked_func = function()
+                    return parent.extended_sync_enabled
+                end,
+                callback = function()
+                    parent.extended_sync_enabled = not parent.extended_sync_enabled
+                    parent.settings:saveSetting("extended_sync_enabled", parent.extended_sync_enabled)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = parent.extended_sync_enabled
+                            and _("Extended sync enabled")
+                            or  _("Extended sync disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+
+            -- ── Rating ──────────────────────────────────────────────────────
+            {
+                text = _("── Rating ──"),
+                enabled = false,
+            },
+            {
+                text = _("Enable rating sync"),
+                help_text = _("Sync the book rating to Booklore when a session ends."),
+                enabled_func = function()
+                    return parent.extended_sync_enabled
+                end,
+                checked_func = function()
+                    return parent.rating_sync_enabled
+                end,
+                callback = function()
+                    parent.rating_sync_enabled = not parent.rating_sync_enabled
+                    parent.settings:saveSetting("rating_sync_enabled", parent.rating_sync_enabled)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = parent.rating_sync_enabled
+                            and _("Rating sync enabled")
+                            or  _("Rating sync disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text = _("  KOReader rating (scaled ×2)"),
+                help_text = _("Use the KOReader star rating (1-5) scaled to Booklore's 1-10 scale by multiplying by 2."),
+                enabled_func = function()
+                    return parent.extended_sync_enabled and parent.rating_sync_enabled
+                end,
+                checked_func = function()
+                    return parent.rating_sync_mode == "koreader_scaled"
+                end,
+                callback = function()
+                    parent.rating_sync_mode = "koreader_scaled"
+                    parent.settings:saveSetting("rating_sync_mode", parent.rating_sync_mode)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = _("Rating mode: KOReader rating (scaled ×2)"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("  Select at complete"),
+                help_text = _("Show a 1-10 rating dialog when you finish reading a book (progress ≥ 99%)."),
+                enabled_func = function()
+                    return parent.extended_sync_enabled and parent.rating_sync_enabled
+                end,
+                checked_func = function()
+                    return parent.rating_sync_mode == "select_at_complete"
+                end,
+                callback = function()
+                    parent.rating_sync_mode = "select_at_complete"
+                    parent.settings:saveSetting("rating_sync_mode", parent.rating_sync_mode)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = _("Rating mode: Select at complete"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+
+            -- ── Metadata ────────────────────────────────────────────────────
+            {
+                text = _("── Metadata ──"),
+                enabled = false,
+            },
+            {
+                text = _("Detect book metadata location"),
+                help_text = _("Detect and store the KOReader sidecar (.sdr) path for the currently open book so the plugin knows where to read metadata from."),
+                enabled_func = function()
+                    return parent.extended_sync_enabled
+                        and parent.ui ~= nil
+                        and parent.ui.document ~= nil
+                        and parent.ui.document.file ~= nil
+                end,
+                callback = function()
+                    parent:detectBookMetadataLocation()
+                end,
+            },
+
+            -- ── Notes & Highlights ──────────────────────────────────────────
+            {
+                text = _("── Notes & Highlights ──"),
+                enabled = false,
+            },
+            {
+                text = _("Sync highlights and notes"),
+                help_text = _("Upload KOReader highlights and notes to Booklore."),
+                enabled_func = function()
+                    return parent.extended_sync_enabled
+                end,
+                checked_func = function()
+                    return parent.highlights_notes_sync_enabled
+                end,
+                callback = function()
+                    parent.highlights_notes_sync_enabled = not parent.highlights_notes_sync_enabled
+                    parent.settings:saveSetting("highlights_notes_sync_enabled", parent.highlights_notes_sync_enabled)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = parent.highlights_notes_sync_enabled
+                            and _("Highlights & notes sync enabled")
+                            or  _("Highlights & notes sync disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text = _("  Notes destination: In book"),
+                help_text = _("Send notes to the in-book reader view in Booklore (requires EPUB CFI position). Notes will appear attached to the highlighted passage."),
+                enabled_func = function()
+                    return parent.extended_sync_enabled and parent.highlights_notes_sync_enabled
+                end,
+                checked_func = function()
+                    return parent.notes_destination == "in_book"
+                end,
+                callback = function()
+                    parent.notes_destination = "in_book"
+                    parent.settings:saveSetting("notes_destination", parent.notes_destination)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = _("Notes destination: In book"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("  Notes destination: In Booklore"),
+                help_text = _("Send notes to the Booklore book page (visible in the web UI). The chapter title is used as the note title."),
+                enabled_func = function()
+                    return parent.extended_sync_enabled and parent.highlights_notes_sync_enabled
+                end,
+                checked_func = function()
+                    return parent.notes_destination == "in_booklore"
+                end,
+                callback = function()
+                    parent.notes_destination = "in_booklore"
+                    parent.settings:saveSetting("notes_destination", parent.notes_destination)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = _("Notes destination: In Booklore"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+
+            -- ── Upload Strategy ─────────────────────────────────────────────
+            {
+                text = _("── Upload Strategy ──"),
+                enabled = false,
+            },
+            {
+                text = _("  On session upload"),
+                help_text = _("Check for new highlights and notes each time a reading session is uploaded. Only annotations not yet on the server will be sent."),
+                enabled_func = function()
+                    return parent.extended_sync_enabled and parent.highlights_notes_sync_enabled
+                end,
+                checked_func = function()
+                    return parent.upload_on_session
+                end,
+                callback = function()
+                    parent.upload_on_session = not parent.upload_on_session
+                    parent.settings:saveSetting("upload_on_session", parent.upload_on_session)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = parent.upload_on_session
+                            and _("Upload on session: enabled")
+                            or  _("Upload on session: disabled"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("  On read complete"),
+                help_text = _("Upload all highlights and notes when progress reaches 100%. Runs once at the end of the final reading session."),
+                enabled_func = function()
+                    return parent.extended_sync_enabled and parent.highlights_notes_sync_enabled
+                end,
+                checked_func = function()
+                    return parent.upload_on_complete
+                end,
+                callback = function()
+                    parent.upload_on_complete = not parent.upload_on_complete
+                    parent.settings:saveSetting("upload_on_complete", parent.upload_on_complete)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = parent.upload_on_complete
+                            and _("Upload on complete: enabled")
+                            or  _("Upload on complete: disabled"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+        },
+    }
+end
+
 function Settings:buildPreferencesMenu(parent)
     return {
         text = _("Preferences"),

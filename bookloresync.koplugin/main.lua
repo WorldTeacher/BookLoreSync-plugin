@@ -1061,7 +1061,7 @@ function BookloreSync:getCurrentProgress()
         end
     elseif self.ui.rolling then
         -- EPUB or reflowable format
-        local cur_page = self.ui.rolling:getCurrentPage()
+        local cur_page = self.ui.document:getCurrentPage()
         local total_pages = self.ui.document:getPageCount()
         if cur_page and total_pages and total_pages > 0 then
             -- Store raw percentage with maximum precision

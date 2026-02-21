@@ -111,63 +111,50 @@ end
 -- Constants
 local BATCH_UPLOAD_SIZE = 100  -- Maximum number of sessions per batch upload
 
+--[[--
+DbSettings — a LuaSettings-compatible wrapper backed by the plugin_settings
+SQLite table.
+
+All existing call sites (readSetting / saveSetting / flush) work without any
+changes.  Writes are committed immediately to SQLite; flush() is a no-op.
+
+@param db  Database  An initialised Database instance
+--]]
+local DbSettings = {}
+DbSettings.__index = DbSettings
+
+function DbSettings:new(db)
+    local o = { _db = db }
+    setmetatable(o, self)
+    return o
+end
+
+function DbSettings:readSetting(key)
+    return self._db:getPluginSetting(key)
+end
+
+function DbSettings:saveSetting(key, value)
+    self._db:savePluginSetting(key, value)
+end
+
+-- No-op: SQLite writes are atomic and immediate, no flush needed.
+function DbSettings:flush()
+end
+
 function BookloreSync:init()
-    self.settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/booklore.lua")
-    
-    -- Server configuration
-    self.server_url = self.settings:readSetting("server_url") or ""
-    self.username = self.settings:readSetting("username") or ""
-    self.password = self.settings:readSetting("password") or ""
-    
-    -- General settings
-    self.is_enabled = self.settings:readSetting("is_enabled") or false
-    self.log_to_file = self.settings:readSetting("log_to_file") or false
-    self.silent_messages = self.settings:readSetting("silent_messages") or false
-    self.secure_logs = self.settings:readSetting("secure_logs") or false
-    
-    -- Session settings
-    self.min_duration = self.settings:readSetting("min_duration") or 30
-    self.min_pages = self.settings:readSetting("min_pages") or 5
-    self.session_detection_mode = self.settings:readSetting("session_detection_mode") or "duration" -- "duration" or "pages"
-    self.progress_decimal_places = self.settings:readSetting("progress_decimal_places") or 2
-    
-    -- Sync options
-    self.force_push_session_on_suspend = self.settings:readSetting("force_push_session_on_suspend") or false
-    self.connect_network_on_suspend = self.settings:readSetting("connect_network_on_suspend") or false
-    self.manual_sync_only = self.settings:readSetting("manual_sync_only") or false
-    self.sync_mode = self.settings:readSetting("sync_mode") -- "automatic", "manual", or "custom"
-    
-    -- Migrate old settings to new preset system if needed
-    if not self.sync_mode then
-        if self.manual_sync_only then
-            self.sync_mode = "manual"
-        elseif self.force_push_session_on_suspend and self.connect_network_on_suspend then
-            self.sync_mode = "automatic"
-        else
-            self.sync_mode = "custom"
-        end
-        self.settings:saveSetting("sync_mode", self.sync_mode)
-    end
-    
-    -- Historical data tracking
-    self.historical_sync_ack = self.settings:readSetting("historical_sync_ack") or false
-    
-    -- Booklore login credentials for historical data matching
-    self.booklore_username = self.settings:readSetting("booklore_username") or ""
-    self.booklore_password = self.settings:readSetting("booklore_password") or ""
-    
-    -- Extended sync settings
-    self.extended_sync_enabled         = self.settings:readSetting("extended_sync_enabled") or false
-    self.rating_sync_enabled           = self.settings:readSetting("rating_sync_enabled") or false
-    self.rating_sync_mode              = self.settings:readSetting("rating_sync_mode") or "koreader_scaled"
-    self.highlights_notes_sync_enabled = self.settings:readSetting("highlights_notes_sync_enabled") or false
-    self.notes_destination             = self.settings:readSetting("notes_destination") or "in_book"
-    self.upload_strategy               = self.settings:readSetting("upload_strategy") or "on_session"
-    
-    -- Current reading session tracking
-    self.current_session = nil
-    
-    -- Initialize file logger if enabled
+    -- Bootstrap phase: open the legacy LuaSettings file so that settings needed
+    -- before the database is ready (log_to_file, secure_logs) can be read.
+    -- Once the database has been initialised and migration 10 has run, self.settings
+    -- is replaced with a DbSettings wrapper so all subsequent reads and writes go
+    -- directly to SQLite.  The LuaSettings file is deleted by the migration hook.
+    local bootstrap_settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/booklore.lua")
+    self.settings = bootstrap_settings
+
+    -- Read the two settings required before the DB is ready
+    self.log_to_file  = self.settings:readSetting("log_to_file")  or false
+    self.secure_logs  = self.settings:readSetting("secure_logs")  or false
+
+    -- Initialize file logger if enabled (needs log_to_file / secure_logs)
     if self.log_to_file then
         self.file_logger = FileLogger:new()
         local logger_ok = self.file_logger:init()
@@ -178,35 +165,41 @@ function BookloreSync:init()
             self.file_logger = nil
         end
     end
-    
-    -- Initialize SQLite database
+
+    -- Initialize SQLite database (runs migrations, including migration 10 which
+    -- copies booklore.lua → plugin_settings and deletes the source file)
     self.db = Database:new()
     local db_initialized = self.db:init()
-    
+
     if not db_initialized then
         self:logErr("BookloreSync: Failed to initialize database")
         UIManager:show(InfoMessage:new{
             text = _("Failed to initialize Booklore database"),
             timeout = 3,
         })
+        -- Fall back to the bootstrap LuaSettings so the plugin remains functional
     else
+        -- Switch to the DB-backed settings wrapper.  All further readSetting /
+        -- saveSetting / flush calls go through SQLite without any call-site changes.
+        self.settings = DbSettings:new(self.db)
+
         -- Check if we need to migrate from old LuaSettings format
         local old_db_path = DataStorage:getSettingsDir() .. "/booklore_db.lua"
         local old_db_file = io.open(old_db_path, "r")
-        
+
         if old_db_file then
             old_db_file:close()
             self:logInfo("BookloreSync: Found old database, checking if migration needed")
-            
+
             -- Check if database is empty (needs migration)
             local stats = self.db:getBookCacheStats()
             if stats.total == 0 then
                 self:logInfo("BookloreSync: Database is empty, migrating from LuaSettings")
-                
+
                 local ok, err = pcall(function()
                     local local_db = LuaSettings:open(old_db_path)
                     local success = self.db:migrateFromLuaSettings(local_db)
-                    
+
                     if success then
                         UIManager:show(InfoMessage:new{
                             text = _("Migrated data to new database format"),
@@ -219,7 +212,7 @@ function BookloreSync:init()
                         })
                     end
                 end)
-                
+
                 if not ok then
                     self:logErr("BookloreSync: Migration failed:", err)
                     UIManager:show(InfoMessage:new{
@@ -230,6 +223,59 @@ function BookloreSync:init()
             end
         end
     end
+
+    -- Server configuration
+    self.server_url = self.settings:readSetting("server_url") or ""
+    self.username   = self.settings:readSetting("username")   or ""
+    self.password   = self.settings:readSetting("password")   or ""
+
+    -- General settings (re-read from DB after settings swap)
+    self.is_enabled      = self.settings:readSetting("is_enabled")      or false
+    self.log_to_file     = self.settings:readSetting("log_to_file")     or false
+    self.silent_messages = self.settings:readSetting("silent_messages") or false
+    self.secure_logs     = self.settings:readSetting("secure_logs")     or false
+
+    -- Session settings
+    self.min_duration             = self.settings:readSetting("min_duration")             or 30
+    self.min_pages                = self.settings:readSetting("min_pages")                or 5
+    self.session_detection_mode   = self.settings:readSetting("session_detection_mode")   or "duration" -- "duration" or "pages"
+    self.progress_decimal_places  = self.settings:readSetting("progress_decimal_places")  or 2
+
+    -- Sync options
+    self.force_push_session_on_suspend = self.settings:readSetting("force_push_session_on_suspend") or false
+    self.connect_network_on_suspend    = self.settings:readSetting("connect_network_on_suspend")    or false
+    self.manual_sync_only              = self.settings:readSetting("manual_sync_only")              or false
+    self.sync_mode                     = self.settings:readSetting("sync_mode") -- "automatic", "manual", or "custom"
+
+    -- Migrate old settings to new preset system if needed
+    if not self.sync_mode then
+        if self.manual_sync_only then
+            self.sync_mode = "manual"
+        elseif self.force_push_session_on_suspend and self.connect_network_on_suspend then
+            self.sync_mode = "automatic"
+        else
+            self.sync_mode = "custom"
+        end
+        self.settings:saveSetting("sync_mode", self.sync_mode)
+    end
+
+    -- Historical data tracking
+    self.historical_sync_ack = self.settings:readSetting("historical_sync_ack") or false
+
+    -- Booklore login credentials for historical data matching
+    self.booklore_username = self.settings:readSetting("booklore_username") or ""
+    self.booklore_password = self.settings:readSetting("booklore_password") or ""
+
+    -- Extended sync settings
+    self.extended_sync_enabled         = self.settings:readSetting("extended_sync_enabled")         or false
+    self.rating_sync_enabled           = self.settings:readSetting("rating_sync_enabled")           or false
+    self.rating_sync_mode              = self.settings:readSetting("rating_sync_mode")              or "koreader_scaled"
+    self.highlights_notes_sync_enabled = self.settings:readSetting("highlights_notes_sync_enabled") or false
+    self.notes_destination             = self.settings:readSetting("notes_destination")             or "in_book"
+    self.upload_strategy               = self.settings:readSetting("upload_strategy")               or "on_session"
+
+    -- Current reading session tracking
+    self.current_session = nil
     
     -- Clean up expired bearer tokens
     if self.db then

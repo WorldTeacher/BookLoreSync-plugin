@@ -36,7 +36,6 @@ function Settings:configureServerUrl(parent)
                         parent.settings:saveSetting("server_url", parent.server_url)
                         parent.settings:flush()
 
-                        -- Reinitialize API client with new URL
                         if parent.api then
                             parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
                         end
@@ -101,7 +100,6 @@ function Settings:configureConnection(parent)
                                             parent.settings:saveSetting("password", parent.password)
                                             parent.settings:flush()
 
-                                            -- Reinitialize API client with new credentials
                                             if parent.api then
                                                 parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
                                             end
@@ -327,7 +325,6 @@ function Settings:configureProgressDecimalPlaces(parent)
 end
 
 function Settings:showVersion(parent)
-    -- Load version information from _meta.lua and plugin_version.lua
     local version_info = require("plugin_version")
     local meta_info = require("_meta")
     
@@ -597,7 +594,6 @@ function Settings:buildPreferencesMenu(parent)
                     parent.settings:saveSetting("log_to_file", parent.log_to_file)
                     parent.settings:flush()
                     
-                    -- Initialize or close file logger based on new setting
                     if parent.log_to_file then
                         if not parent.file_logger then
                             local FileLogger = require("booklore_file_logger")

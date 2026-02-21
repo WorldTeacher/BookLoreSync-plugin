@@ -162,8 +162,7 @@ function BookloreSync:init()
     self.rating_sync_mode              = self.settings:readSetting("rating_sync_mode") or "koreader_scaled"
     self.highlights_notes_sync_enabled = self.settings:readSetting("highlights_notes_sync_enabled") or false
     self.notes_destination             = self.settings:readSetting("notes_destination") or "in_book"
-    self.upload_on_session             = self.settings:readSetting("upload_on_session") or false
-    self.upload_on_complete            = self.settings:readSetting("upload_on_complete") or false
+    self.upload_strategy               = self.settings:readSetting("upload_strategy") or "on_session"
     
     -- Current reading session tracking
     self.current_session = nil
@@ -755,6 +754,669 @@ function BookloreSync:showRatingDialog(doc_path, book_id)
     }
     UIManager:show(rating_dialog)
     rating_dialog:onShowKeyboard()
+end
+
+-- ── Highlights & Notes Sync ────────────────────────────────────────────────
+
+-- Map KOReader color names → Booklore's 5 supported highlight hex colors.
+-- Booklore supports: yellow (#FFC107), green (#4ADE80), cyan (#38BDF8),
+--                    pink (#F472B6), orange (#FB923C).
+-- Unsupported KOReader colors are mapped to the nearest hue:
+--   red → orange (warm), purple → pink (violet/magenta), blue → cyan (cool),
+--   gray → yellow (neutral fallback), white → yellow (neutral fallback)
+local KOREADER_COLOR_MAP = {
+    yellow  = "#FFC107",
+    green   = "#4ADE80",
+    cyan    = "#38BDF8",
+    pink    = "#F472B6",
+    orange  = "#FB923C",
+    red     = "#FB923C",   -- → orange (nearest warm hue)
+    purple  = "#F472B6",   -- → pink (nearest violet/magenta hue)
+    blue    = "#38BDF8",   -- → cyan (nearest cool hue)
+    gray    = "#FFC107",   -- → yellow (neutral fallback)
+    white   = "#FFC107",   -- → yellow (neutral fallback)
+}
+
+-- Map KOReader drawer names → Booklore style strings
+local KOREADER_STYLE_MAP = {
+    lighten    = "highlight",
+    underscore = "underline",
+    strikeout  = "strikethrough",
+    invert     = "highlight",     -- closest available
+}
+
+--[[--
+Convert a KOReader color name to a hex string.
+Falls back to yellow (#FFC107) for unknown names.
+
+@param color_name string  KOReader color name (e.g. "yellow")
+@return string hex color (e.g. "#FFC107")
+--]]
+function BookloreSync:colorToHex(color_name)
+    if not color_name then return "#FFC107" end
+    return KOREADER_COLOR_MAP[color_name:lower()] or "#FFC107"
+end
+
+--[[--
+Convert a KOReader drawer name to a Booklore style string.
+Falls back to "highlight" for unknown names.
+
+@param drawer string  KOReader drawer name (e.g. "lighten")
+@return string Booklore style
+--]]
+function BookloreSync:drawerToStyle(drawer)
+    if not drawer then return "highlight" end
+    return KOREADER_STYLE_MAP[drawer:lower()] or "highlight"
+end
+
+-- ── EPUB CFI conversion ────────────────────────────────────────────────────
+
+-- Void/self-closing HTML elements (never have children)
+local HTML_VOID_TAGS = {
+    area=true, base=true, br=true, col=true, embed=true, hr=true,
+    img=true, input=true, link=true, meta=true, param=true,
+    source=true, track=true, wbr=true,
+}
+
+--[[--
+Count the ordinal position (1-based, among ALL element siblings) of the Nth
+occurrence of `element_name` within `html_content`, and return the element's
+`id` attribute value if present.
+
+This performs a shallow scan (depth 0 only) of the direct children of the
+element whose raw innerHTML is `html_content`.  It correctly skips over
+nested markup by tracking nesting depth.
+
+@param html_content string  Raw inner-HTML of a parent element
+@param element_name string  Tag name to locate (case-insensitive)
+@param nth           number  1-based occurrence index among same-name siblings
+@return number|nil  1-based ordinal among ALL direct-child elements, or nil
+@return string|nil  value of the `id` attribute on that element, or nil
+--]]
+local function findNthElementOrdinal(html_content, element_name, nth)
+    element_name = element_name:lower()
+    local depth    = 0
+    local ordinal  = 0   -- total element children seen so far (at depth 0)
+    local found    = 0   -- occurrences of element_name seen at depth 0
+
+    local i = 1
+    local len = #html_content
+    while i <= len do
+        -- Find the next tag
+        local tag_start, tag_end, full_tag = html_content:find("(<[^>]+>)", i)
+        if not tag_start then break end
+
+        local is_closing      = full_tag:sub(1, 2) == "</"
+        local is_self_closing = full_tag:sub(-2) == "/>"
+        local tag_name = full_tag:match("^</?([%a][%w%-]*)")
+        if tag_name then
+            tag_name = tag_name:lower()
+        end
+
+        if is_closing then
+            depth = depth - 1
+        else
+            local void = HTML_VOID_TAGS[tag_name] or false
+            if depth == 0 then
+                ordinal = ordinal + 1
+                if tag_name == element_name then
+                    found = found + 1
+                    if found == nth then
+                        -- Extract id attribute if present
+                        local elem_id = full_tag:match('%sid=["\']([^"\']+)["\']')
+                        return ordinal, elem_id
+                    end
+                end
+            end
+            if not void and not is_self_closing then
+                depth = depth + 1
+            end
+        end
+
+        i = tag_end + 1
+    end
+    return nil, nil
+end
+
+--[[--
+Extract the inner HTML content of the Nth occurrence of `element_name`
+among the direct children of `html_content`.
+
+@param html_content string
+@param element_name string
+@param nth           number  1-based
+@return string|nil  inner HTML, or nil
+--]]
+local function extractNthElementContent(html_content, element_name, nth)
+    element_name = element_name:lower()
+    local depth   = 0
+    local found   = 0
+    local in_target      = false
+    local target_depth   = nil
+    local content_start  = nil
+
+    local i   = 1
+    local len = #html_content
+    while i <= len do
+        local tag_start, tag_end, full_tag = html_content:find("(<[^>]+>)", i)
+        if not tag_start then break end
+
+        local is_closing     = full_tag:sub(1, 2) == "</"
+        local is_self_closing = full_tag:sub(-2) == "/>"
+        local tag_name = full_tag:match("^</?([%a][%w%-]*)")
+        if tag_name then tag_name = tag_name:lower() end
+
+        local void = HTML_VOID_TAGS[tag_name] or false
+
+        if is_closing then
+            depth = depth - 1
+            if in_target and depth == target_depth then
+                -- End of the element we're extracting
+                return html_content:sub(content_start, tag_start - 1)
+            end
+        else
+            if depth == 0 and tag_name == element_name then
+                found = found + 1
+                if found == nth then
+                    in_target    = true
+                    target_depth = depth
+                    content_start = tag_end + 1
+                end
+            end
+            if not void and not is_self_closing then
+                depth = depth + 1
+            end
+        end
+
+        i = tag_end + 1
+    end
+    return nil
+end
+
+--[[--
+Build the EPUB CFI spine map for an open EPUB document.
+
+Reads META-INF/container.xml, then the OPF manifest/spine, via the
+CREngine `getDocumentFileContent` method available while the document
+is open.
+
+@param document  CreDocument instance (self.ui.document)
+@return table|nil  Array of href strings, 1-indexed = DocFragment index.
+                   Returns nil on any read/parse failure.
+--]]
+function BookloreSync:buildEpubSpineMap(document)
+    if not document or not document.getDocumentFileContent then
+        return nil
+    end
+
+    -- 1. Read container.xml to find OPF path
+    local container_xml = document:getDocumentFileContent("META-INF/container.xml")
+    if not container_xml then
+        self:logWarn("BookloreSync: Could not read META-INF/container.xml")
+        return nil
+    end
+
+    local opf_path = container_xml:match('full%-path=["\']([^"\']+)["\']')
+    if not opf_path then
+        self:logWarn("BookloreSync: Could not find OPF path in container.xml")
+        return nil
+    end
+
+    -- Determine the directory that contains the OPF (for resolving relative hrefs)
+    local opf_dir = opf_path:match("^(.*)/[^/]+$") or ""
+
+    -- 2. Read OPF
+    local opf = document:getDocumentFileContent(opf_path)
+    if not opf then
+        self:logWarn("BookloreSync: Could not read OPF:", opf_path)
+        return nil
+    end
+
+    -- 3. Parse manifest: id -> href
+    local manifest = {}
+    for attrs in opf:gmatch("<item%s+([^>]+)>") do
+        local id_  = attrs:match('%bid=["\']([^"\']+)["\']')
+        local href = attrs:match('%bhref=["\']([^"\']+)["\']')
+        if id_ and href then
+            -- Resolve relative to OPF directory
+            if opf_dir ~= "" then
+                manifest[id_] = opf_dir .. "/" .. href
+            else
+                manifest[id_] = href
+            end
+        end
+    end
+
+    -- 4. Build ordered spine list
+    local spine = {}
+    for idref in opf:gmatch('<itemref[^>]+idref=["\']([^"\']+)["\']') do
+        local href = manifest[idref]
+        table.insert(spine, href)  -- spine[1] = DocFragment[1]
+    end
+
+    if #spine == 0 then
+        self:logWarn("BookloreSync: Empty spine in OPF")
+        return nil
+    end
+
+    self:logInfo("BookloreSync: Built EPUB spine map with", #spine, "items")
+    return spine
+end
+
+--[[--
+Convert a single KOReader CREngine xpointer to a list of CFI step strings
+for the intra-document portion (after the `!`).
+
+KOReader xpointer text-node formats handled:
+  text().N      — first (only) text node, character offset N
+  text()[K].N   — Kth text node among mixed content, character offset N
+
+In CFI, text nodes are addressed as odd-numbered children:
+  text node K  →  /(2K-1):N
+  (first/only text node = /1:N)
+
+Element steps include an ID assertion when the element carries an `id`
+attribute, e.g. `/4[myid]`.
+
+@param xpointer       string      KOReader xpointer string
+@param spine          table       Spine href array from buildEpubSpineMap()
+@param document       CreDocument Open document instance
+@param html_cache     table       Mutable table used to cache spine HTML
+@return table|nil   Array of CFI step strings (each "/N", "/N[id]", or ":N"),
+                    plus metadata fields:
+                      .spine_step  number  (the /6/N part)
+                    Returns nil on any parse failure.
+--]]
+function BookloreSync:xpointerToCfiPath(xpointer, spine, document, html_cache)
+    if not xpointer or not spine or not document then return nil end
+    html_cache = html_cache or {}
+
+    -- Extract DocFragment index and the inner path after it
+    local frag_idx_s, inner_path = xpointer:match("^/body/DocFragment%[(%d+)%](.*)")
+    if not frag_idx_s then
+        self:logWarn("BookloreSync: xpointer does not match expected format:", xpointer)
+        return nil
+    end
+
+    local frag_idx   = tonumber(frag_idx_s)
+    local spine_step = frag_idx * 2
+
+    if frag_idx < 1 or frag_idx > #spine then
+        self:logWarn("BookloreSync: DocFragment index out of range:", frag_idx, "(spine size:", #spine, ")")
+        return nil
+    end
+
+    local href = spine[frag_idx]
+    if not href then
+        self:logWarn("BookloreSync: No href for DocFragment[" .. frag_idx .. "]")
+        return nil
+    end
+
+    local html = html_cache[href]
+    if not html then
+        html = document:getDocumentFileContent(href)
+        if not html then
+            self:logWarn("BookloreSync: Could not read spine item:", href)
+            return nil
+        end
+        html_cache[href] = html
+    end
+
+    -- Split inner_path into components, e.g.
+    --   /body/div/p[7]/text().0      → {"body","div","p[7]","text().0"}
+    --   /body/p[30]/text()[2].92     → {"body","p[30]","text()[2].92"}
+    local parts = {}
+    for part in inner_path:gmatch("[^/]+") do
+        table.insert(parts, part)
+    end
+
+    local steps = {}           -- CFI step strings, e.g. "/4", "/6[myid]", ":5"
+    local current_content = html
+
+    for idx, part in ipairs(parts) do
+        -- ── text node: text().N or text()[K].N ──────────────────────────────
+        -- text().N  → first text node → /1:N
+        local offset_s = part:match("^text%(%)%.(%d+)$")
+        if offset_s then
+            table.insert(steps, "/1")
+            table.insert(steps, ":" .. offset_s)
+            break
+        end
+
+        -- text()[K].N  → Kth text node → /(2K-1):N
+        local k_s, offset2_s = part:match("^text%(%)%[(%d+)%]%.(%d+)$")
+        if k_s then
+            local k = tonumber(k_s)
+            table.insert(steps, "/" .. (2 * k - 1))
+            table.insert(steps, ":" .. offset2_s)
+            break
+        end
+
+        -- ── element step: name[N] or name ───────────────────────────────────
+        local elem_name, elem_idx_s = part:match("^([%a][%w%-]*)%[(%d+)%]$")
+        if not elem_name then
+            elem_name  = part:match("^([%a][%w%-]*)$")
+            elem_idx_s = "1"
+        end
+        if not elem_name then
+            self:logWarn("BookloreSync: Unrecognised xpointer component:", part)
+            return nil
+        end
+        local elem_idx = tonumber(elem_idx_s)
+
+        -- Special case: "body" as the first inner component is always /4
+        if elem_name:lower() == "body" and idx == 1 then
+            table.insert(steps, "/4")
+            local body_content = current_content:match("<[Bb][Oo][Dd][Yy][^>]*>(.*)</%s*[Bb][Oo][Dd][Yy]%s*>")
+            current_content = body_content or ""
+        else
+            local ordinal, elem_id = findNthElementOrdinal(current_content, elem_name, elem_idx)
+            if not ordinal then
+                self:logWarn(string.format(
+                    "BookloreSync: Could not find %s[%d] in xpointer at step %d (%s)",
+                    elem_name, elem_idx, idx, xpointer))
+                return nil
+            end
+            local step = "/" .. (ordinal * 2)
+            if elem_id and elem_id ~= "" then
+                step = step .. "[" .. elem_id .. "]"
+            end
+            table.insert(steps, step)
+
+            local child_content = extractNthElementContent(current_content, elem_name, elem_idx)
+            current_content = child_content or ""
+        end
+    end
+
+    -- Attach metadata needed by buildCfi
+    steps.spine_step = spine_step
+    return steps
+end
+
+--[[--
+Build an EPUB CFI range string from two KOReader xpointers.
+
+Produces the correct three-part range form:
+  epubcfi(shared-path , start-relative , end-relative)
+
+where `shared-path` is the common element ancestor prefix (up to and
+including the last shared element step), and `start-relative` /
+`end-relative` are the diverging suffixes (text-node step + offset).
+
+@param pos0       string      KOReader start xpointer
+@param pos1       string      KOReader end xpointer
+@param spine      table|nil
+@param document   object|nil
+@param html_cache table|nil
+@return string|nil  e.g. "epubcfi(/6/22!/4/16[myid]/1:0,/1:112)"
+--]]
+function BookloreSync:buildCfi(pos0, pos1, spine, document, html_cache)
+    if not pos0 or not pos1 then return nil end
+    if not spine or not document then
+        self:logWarn("BookloreSync: buildCfi called without spine/document — skipping")
+        return nil
+    end
+
+    html_cache = html_cache or {}
+
+    local steps0 = self:xpointerToCfiPath(pos0, spine, document, html_cache)
+    local steps1 = self:xpointerToCfiPath(pos1, spine, document, html_cache)
+    if not steps0 or not steps1 then return nil end
+
+    -- Build full intra-doc path strings (e.g. "/4/2/28[id]/1:0")
+    -- steps are an array of strings like "/4", "/6[foo]", "/1", ":0"
+    -- The spine prefix is "/6/<spine_step>!"
+    local function stepsToPath(steps)
+        local spine_prefix = "/6/" .. steps.spine_step .. "!"
+        local inner = table.concat(steps)
+        return spine_prefix .. inner
+    end
+
+    local path0 = stepsToPath(steps0)
+    local path1 = stepsToPath(steps1)
+
+    -- Find the longest common prefix at step boundaries.
+    -- We compare element steps (entries starting with "/") until they diverge,
+    -- then the remainder of each becomes the relative start/end.
+    --
+    -- Strategy: walk both step arrays together. Stop at the first step that
+    -- differs (or when one array runs out). Everything before that is the
+    -- shared path; from that index onward is the relative suffix for each.
+
+    -- Normalise: include spine_step as the first logical step for comparison
+    local function buildStepList(steps)
+        local list = { "/6/" .. steps.spine_step .. "!" }
+        for _, s in ipairs(steps) do
+            table.insert(list, s)
+        end
+        return list
+    end
+
+    local list0 = buildStepList(steps0)
+    local list1 = buildStepList(steps1)
+
+    -- Find the split point: last index where both lists agree
+    local shared_len = 0
+    local min_len = math.min(#list0, #list1)
+    for i = 1, min_len do
+        if list0[i] == list1[i] then
+            shared_len = i
+        else
+            break
+        end
+    end
+
+    -- Offset steps (":N") and the text-node step immediately preceding them
+    -- must never be part of the shared path — they are always terminal and
+    -- belong to the relative start/end parts.
+    -- Case 1: the shared boundary itself is an offset step (":N")
+    if shared_len > 0 and list0[shared_len]:sub(1,1) == ":" then
+        shared_len = shared_len - 1
+    end
+    -- Case 2: the first diverging step is an offset (":N"), meaning the last
+    -- shared step is the paired text-node step ("/1", "/3", …) — pull it out.
+    local next_idx = shared_len + 1
+    if shared_len > 0
+        and list0[next_idx] and list0[next_idx]:sub(1,1) == ":"
+        and list1[next_idx] and list1[next_idx]:sub(1,1) == ":"
+    then
+        shared_len = shared_len - 1
+    end
+
+    -- Reconstruct shared path and relative suffixes
+    local shared_parts = {}
+    for i = 1, shared_len do
+        table.insert(shared_parts, list0[i])
+    end
+
+    local rel0_parts = {}
+    for i = shared_len + 1, #list0 do
+        table.insert(rel0_parts, list0[i])
+    end
+
+    local rel1_parts = {}
+    for i = shared_len + 1, #list1 do
+        table.insert(rel1_parts, list1[i])
+    end
+
+    local shared = table.concat(shared_parts)
+    local rel0   = table.concat(rel0_parts)
+    local rel1   = table.concat(rel1_parts)
+
+    -- If the relative parts are empty (identical xpointers), fall back to
+    -- a simple single-location CFI.
+    if rel0 == "" and rel1 == "" then
+        return "epubcfi(" .. path0 .. ")"
+    end
+
+    return "epubcfi(" .. shared .. "," .. rel0 .. "," .. rel1 .. ")"
+end
+
+--[[--
+Sync all highlights and notes for a document to Booklore.
+
+Reads the .sdr sidecar annotations array, skips already-synced entries
+(via synced_annotations DB table), and posts each new item to the
+appropriate API endpoint based on the notes_destination setting.
+
+Highlights (no note field) → POST /api/v1/annotations
+Notes with destination "in_book" → POST /api/v2/book-notes
+Notes with destination "in_booklore" → POST /api/v1/book-notes
+
+@param doc_path  string      Full path to the document file
+@param book_id   number      Booklore book ID
+@param document  CreDocument Open CREngine document (still available in onCloseDocument).
+                             Required for EPUB CFI generation; highlights/in-book notes
+                             are skipped if nil (Booklore-notes still work without it).
+--]]
+function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document)
+    if not doc_path or not book_id then
+        self:logWarn("BookloreSync: syncHighlightsAndNotes called with missing arguments")
+        return
+    end
+    if not self.extended_sync_enabled or not self.highlights_notes_sync_enabled then
+        return
+    end
+    if self.booklore_username == "" or self.booklore_password == "" then
+        self:logWarn("BookloreSync: Highlights/notes sync skipped — credentials not configured")
+        return
+    end
+
+    local annotations = self.metadata_extractor:getHighlights(doc_path)
+    if not annotations or #annotations == 0 then
+        self:logInfo("BookloreSync: No annotations found for:", doc_path)
+        return
+    end
+
+    self:logInfo("BookloreSync: Syncing", #annotations, "annotations for book_id:", book_id)
+
+    -- Build EPUB spine map (needed for CFI generation).
+    -- Only attempt this for EPUB files where the document is still open.
+    local spine = nil
+    local is_epub = doc_path:lower():match("%.epub$") ~= nil
+    if is_epub and document then
+        spine = self:buildEpubSpineMap(document)
+        if not spine then
+            self:logWarn("BookloreSync: Could not build EPUB spine map — highlights/in-book notes will be skipped")
+        end
+    end
+
+    -- Shared HTML cache for spine items (avoids re-reading the same file for each annotation)
+    local html_cache = {}
+
+    -- Ensure we have a book_cache_id (create minimal cache entry if needed)
+    local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    if not book_cache_id then
+        self.db:saveBookCache(doc_path, "", nil, nil, nil, nil, nil)
+        book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    end
+    if not book_cache_id then
+        self:logWarn("BookloreSync: Could not obtain book_cache_id for highlights sync")
+        return
+    end
+
+    local notes_dest    = self.notes_destination or "in_book"
+    local synced_count  = 0
+    local skipped_count = 0
+    local failed_count  = 0
+
+    for _, ann in ipairs(annotations) do
+        local datetime = ann.datetime or ""
+        if datetime == "" then
+            self:logWarn("BookloreSync: Skipping annotation with no datetime")
+            skipped_count = skipped_count + 1
+            goto continue
+        end
+
+        local has_note = ann.note and ann.note ~= ""
+
+        -- Determine type key for dedup tracking
+        local ann_type
+        if not has_note then
+            ann_type = "highlight"
+        elseif notes_dest == "in_book" then
+            ann_type = "in_book_note"
+        else
+            ann_type = "booklore_note"
+        end
+
+        -- Skip if already synced
+        if self.db:isAnnotationSynced(book_cache_id, datetime, ann_type) then
+            self:logInfo("BookloreSync: Annotation already synced, skipping:", datetime)
+            skipped_count = skipped_count + 1
+            goto continue
+        end
+
+        -- Wrap per-annotation processing in pcall so a malformed xpointer or
+        -- unexpected nil never crashes the close-document flow.
+        local ann_ok, ann_err = pcall(function()
+            local ok, server_id
+
+            if not has_note then
+                -- ── Pure highlight ──────────────────────────────────────────────
+                local cfi = self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
+                if not cfi then
+                    self:logWarn("BookloreSync: Could not build CFI for highlight at:", datetime)
+                    skipped_count = skipped_count + 1
+                    return
+                end
+                ok, server_id = self.api:submitHighlight(
+                    book_id, cfi, ann.text,
+                    {
+                        color         = self:colorToHex(ann.color),
+                        style         = self:drawerToStyle(ann.drawer),
+                        chapter_title = ann.chapter,
+                    },
+                    self.booklore_username, self.booklore_password
+                )
+
+            elseif notes_dest == "in_book" then
+                -- ── In-book note (v2) ────────────────────────────────────────────
+                local cfi = self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
+                if not cfi then
+                    self:logWarn("BookloreSync: Could not build CFI for in-book note at:", datetime)
+                    skipped_count = skipped_count + 1
+                    return
+                end
+                ok, server_id = self.api:submitInBookNote(
+                    book_id, cfi, ann.note,
+                    {
+                        selected_text = ann.text,
+                        color         = self:colorToHex(ann.color),
+                        chapter_title = ann.chapter,
+                    },
+                    self.booklore_username, self.booklore_password
+                )
+
+            else
+                -- ── Booklore (web-UI) note ───────────────────────────────────────
+                ok, server_id = self.api:submitBookloreNote(
+                    book_id, ann.note, ann.chapter,
+                    self.booklore_username, self.booklore_password
+                )
+            end
+
+            if ok then
+                self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, server_id)
+                synced_count = synced_count + 1
+            else
+                self:logWarn("BookloreSync: Failed to sync annotation at:", datetime, "-", server_id)
+                failed_count = failed_count + 1
+            end
+        end)
+
+        if not ann_ok then
+            self:logErr("BookloreSync: Unexpected error processing annotation at:", datetime, "-", ann_err)
+            failed_count = failed_count + 1
+        end
+
+        ::continue::
+    end
+
+    self:logInfo(string.format(
+        "BookloreSync: Highlights/notes sync done — synced:%d  skipped:%d  failed:%d",
+        synced_count, skipped_count, failed_count
+    ))
 end
 
 function BookloreSync:addToMainMenu(menu_items)
@@ -1829,6 +2491,22 @@ function BookloreSync:onCloseDocument()
                     self:showRatingDialog(pre_file_path, pre_book_id)
                 end)
             end
+        end
+    end
+
+    -- Highlights & notes sync
+    -- NOTE: self.ui.document is still open here (CloseDocument fires before closeDocument()).
+    -- We pass it to syncHighlightsAndNotes so it can read EPUB internals for CFI generation.
+    if self.extended_sync_enabled and self.highlights_notes_sync_enabled
+            and pre_file_path and pre_book_id then
+        local strategy = self.upload_strategy or "on_session"
+        local open_doc = self.ui and self.ui.document
+        -- "On session": fire on every close
+        if strategy == "on_session" then
+            self:syncHighlightsAndNotes(pre_file_path, pre_book_id, open_doc)
+        -- "On read complete": fire only when progress >= 99 %
+        elseif strategy == "on_complete" and pre_end_progress and pre_end_progress >= 99 then
+            self:syncHighlightsAndNotes(pre_file_path, pre_book_id, open_doc)
         end
     end
 

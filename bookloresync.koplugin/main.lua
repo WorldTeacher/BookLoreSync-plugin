@@ -838,7 +838,12 @@ function BookloreSync:showRatingDialog(doc_path, book_id)
         },
     }
     UIManager:show(rating_dialog)
-    rating_dialog:onShowKeyboard()
+    -- Do NOT call rating_dialog:onShowKeyboard() here.
+    -- Showing the software keyboard immediately after a document close event
+    -- (or during a document transition triggered by "open next book") causes a
+    -- Wayland EGL surface assertion crash on Linux desktop and can cause
+    -- similar instability on e-ink devices.  The user can tap the input field
+    -- to open the keyboard manually; the dialog itself is immediately visible.
 end
 
 -- ── Highlights & Notes Sync ────────────────────────────────────────────────
@@ -2589,7 +2594,7 @@ function BookloreSync:onCloseDocument()
             elseif mode == "select_at_complete" then
                 -- Only prompt when the book is considered finished (>= 99 %)
                 if pre_end_progress and pre_end_progress >= 99 then
-                    UIManager:scheduleIn(0.5, function()
+                    UIManager:scheduleIn(2, function()
                         self:showRatingDialog(pre_file_path, pre_book_id)
                     end)
                 end
@@ -2788,7 +2793,7 @@ function BookloreSync:syncPendingRatings(silent)
                 -- so it appears after any session-sync UI settles.
                 local file_path = row.file_path
                 local book_id   = row.book_id
-                UIManager:scheduleIn(0.5, function()
+                UIManager:scheduleIn(2, function()
                     self:showRatingDialog(file_path, book_id)
                 end)
             end

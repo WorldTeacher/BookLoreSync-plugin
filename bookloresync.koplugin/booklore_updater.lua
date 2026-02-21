@@ -360,8 +360,8 @@ function Updater:parseChangelogForVersion(changelog_content, version)
     local section_lines = {}
     
     for _, line in ipairs(lines) do
-        -- Check if this is a version heading (e.g., "# [3.2.0]")
-        if line:match("^#%s+%[") then
+        -- Check if this is a version heading (e.g., "# [3.2.0]" or "## [3.3.1]")
+        if line:match("^##?%s+%[") then
             -- Check if this is our version
             if line:match("%[" .. version_clean:gsub("%.", "%%.") .. "%]") then
                 -- Start capturing

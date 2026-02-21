@@ -2804,6 +2804,16 @@ function Database:clearPendingAnnotations()
     return result == SQ3.OK
 end
 
+--[[--
+Delete all rows from pending_ratings.
+
+@return boolean success
+--]]
+function Database:clearPendingRatings()
+    local result = self.conn:exec("DELETE FROM pending_ratings")
+    return result == SQ3.OK
+end
+
 -- Plugin Settings helpers
 
 --[[--

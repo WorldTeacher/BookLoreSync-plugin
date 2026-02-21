@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 10,  -- Current database schema version
+    VERSION = 12,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -290,6 +290,40 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_rating_sync_history_book
             ON rating_sync_history(book_cache_id)
+        ]],
+    },
+
+    -- Migration 11: Pending ratings queue
+    -- Stores ratings that failed to sync so they can be retried on the next
+    -- upload (session, note, or explicit sync trigger).
+    [11] = {
+        [[
+            CREATE TABLE IF NOT EXISTS pending_ratings (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL UNIQUE,
+                book_id       INTEGER NOT NULL,
+                rating        INTEGER NOT NULL,
+                retry_count   INTEGER DEFAULT 0,
+                last_retry_at INTEGER,
+                created_at    INTEGER DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY(book_cache_id) REFERENCES book_cache(id)
+            )
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_ratings_book_cache_id
+            ON pending_ratings(book_cache_id)
+        ]],
+    },
+
+    -- Migration 12: Deferred rating prompt flag on book_metadata
+    -- When a book is completed (>=99%) but no Booklore book_id is known yet
+    -- (server was offline at open time), we cannot show the rating dialog
+    -- immediately.  This column acts as a reminder: once a book_id is resolved
+    -- the next sync run will show the dialog (select_at_complete) or push the
+    -- KOReader rating (koreader_scaled) automatically.
+    [12] = {
+        [[
+            ALTER TABLE book_metadata ADD COLUMN pending_rating_prompt INTEGER DEFAULT 0
         ]],
     },
 }
@@ -1940,7 +1974,7 @@ end
 Upsert a row in book_metadata for the given book_cache_id.
 
 @param book_cache_id The book_cache.id to link to
-@param fields Table with any of: sdr_path, rating, rating_synced
+@param fields Table with any of: sdr_path, rating, rating_synced, pending_rating_prompt
 @return boolean success
 --]]
 function Database:upsertBookMetadata(book_cache_id, fields)
@@ -1988,6 +2022,10 @@ function Database:upsertBookMetadata(book_cache_id, fields)
             table.insert(sets, "rating_synced = ?")
             table.insert(binds, fields.rating_synced and 1 or 0)
         end
+        if fields.pending_rating_prompt ~= nil then
+            table.insert(sets, "pending_rating_prompt = ?")
+            table.insert(binds, fields.pending_rating_prompt and 1 or 0)
+        end
         table.insert(binds, book_cache_id)
 
         local sql = "UPDATE book_metadata SET " .. table.concat(sets, ", ") .. " WHERE book_cache_id = ?"
@@ -2008,8 +2046,8 @@ function Database:upsertBookMetadata(book_cache_id, fields)
     else
         -- INSERT
         local stmt = self.conn:prepare([[
-            INSERT INTO book_metadata (book_cache_id, sdr_path, rating, rating_synced)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO book_metadata (book_cache_id, sdr_path, rating, rating_synced, pending_rating_prompt)
+            VALUES (?, ?, ?, ?, ?)
         ]])
         if not stmt then
             logger.err("BookloreSync Database: Failed to prepare INSERT in upsertBookMetadata:", self.conn:errmsg())
@@ -2020,7 +2058,8 @@ function Database:upsertBookMetadata(book_cache_id, fields)
                 book_cache_id,
                 fields.sdr_path and tostring(fields.sdr_path) or nil,
                 fields.rating and tonumber(fields.rating) or nil,
-                (fields.rating_synced ~= nil) and (fields.rating_synced and 1 or 0) or 0
+                (fields.rating_synced ~= nil) and (fields.rating_synced and 1 or 0) or 0,
+                (fields.pending_rating_prompt ~= nil) and (fields.pending_rating_prompt and 1 or 0) or 0
             )
         end)
         if not ok then
@@ -2038,7 +2077,7 @@ end
 Get the book_metadata row for a given book_cache_id.
 
 @param book_cache_id The book_cache.id
-@return table|nil {id, book_cache_id, sdr_path, rating, rating_synced} or nil
+@return table|nil {id, book_cache_id, sdr_path, rating, rating_synced, pending_rating_prompt} or nil
 --]]
 function Database:getBookMetadata(book_cache_id)
     if not book_cache_id then return nil end
@@ -2046,7 +2085,7 @@ function Database:getBookMetadata(book_cache_id)
     if not book_cache_id then return nil end
 
     local stmt = self.conn:prepare([[
-        SELECT id, book_cache_id, sdr_path, rating, rating_synced
+        SELECT id, book_cache_id, sdr_path, rating, rating_synced, pending_rating_prompt
         FROM book_metadata
         WHERE book_cache_id = ?
         LIMIT 1
@@ -2060,11 +2099,12 @@ function Database:getBookMetadata(book_cache_id)
     local meta = nil
     for row in stmt:rows() do
         meta = {
-            id            = tonumber(row[1]),
-            book_cache_id = tonumber(row[2]),
-            sdr_path      = row[3] and tostring(row[3]) or nil,
-            rating        = row[4] and tonumber(row[4]) or nil,
-            rating_synced = (tonumber(row[5]) or 0) == 1,
+            id                    = tonumber(row[1]),
+            book_cache_id         = tonumber(row[2]),
+            sdr_path              = row[3] and tostring(row[3]) or nil,
+            rating                = row[4] and tonumber(row[4]) or nil,
+            rating_synced         = (tonumber(row[5]) or 0) == 1,
+            pending_rating_prompt = (tonumber(row[6]) or 0) == 1,
         }
         break
     end
@@ -2091,6 +2131,231 @@ Mark the rating for a book as synced to the server.
 --]]
 function Database:markRatingSynced(book_cache_id)
     return self:upsertBookMetadata(book_cache_id, { rating_synced = true })
+end
+
+--[[--
+Mark a book as needing a deferred rating prompt.
+
+Called when a book is completed (>=99%) but no Booklore book_id is known
+yet (server was offline at open time).  The next sync run will check for
+this flag and show the dialog / push the KOReader rating once a book_id
+has been resolved.
+
+@param book_cache_id integer  book_cache.id
+@return boolean success
+--]]
+function Database:setPendingRatingPrompt(book_cache_id, value)
+    return self:upsertBookMetadata(book_cache_id, { pending_rating_prompt = (value ~= false) })
+end
+
+--[[--
+Return all book_cache rows that have a pending_rating_prompt set and a
+known book_id so that the caller can act on them.
+
+@return table  Array of {book_cache_id, book_id, file_path}
+--]]
+function Database:getBooksPendingRatingPrompt()
+    local stmt = self.conn:prepare([[
+        SELECT bm.book_cache_id, bc.book_id, bc.file_path
+        FROM book_metadata bm
+        JOIN book_cache bc ON bc.id = bm.book_cache_id
+        WHERE bm.pending_rating_prompt = 1
+          AND bc.book_id IS NOT NULL
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getBooksPendingRatingPrompt:", self.conn:errmsg())
+        return {}
+    end
+
+    local rows = {}
+    for row in stmt:rows() do
+        table.insert(rows, {
+            book_cache_id = tonumber(row[1]),
+            book_id       = tonumber(row[2]),
+            file_path     = row[3] and tostring(row[3]) or nil,
+        })
+    end
+    stmt:close()
+    return rows
+end
+
+-- Pending Ratings Queue
+
+--[[--
+Add a rating to the pending_ratings queue.
+
+Called when a rating sync attempt fails so it can be retried on the next
+upload trigger (session, note, or explicit sync).
+
+Upserts by book_cache_id so duplicate failures don't grow the table —
+only the latest rating value is kept pending.
+
+@param book_cache_id integer  book_cache.id
+@param book_id       integer  Booklore book ID
+@param rating        integer  1-10 rating value
+@return boolean success
+--]]
+function Database:addPendingRating(book_cache_id, book_id, rating)
+    if not book_cache_id or not book_id or not rating then
+        logger.err("BookloreSync Database: addPendingRating called with missing args")
+        return false
+    end
+    book_cache_id = tonumber(book_cache_id)
+    book_id       = tonumber(book_id)
+    rating        = tonumber(rating)
+    if not book_cache_id or not book_id or not rating then
+        logger.err("BookloreSync Database: addPendingRating: non-numeric argument")
+        return false
+    end
+
+    -- Upsert: if a pending rating already exists for this book, update the
+    -- value and reset the retry counter so the latest rating wins.
+    local stmt = self.conn:prepare([[
+        INSERT INTO pending_ratings (book_cache_id, book_id, rating, retry_count, created_at)
+        VALUES (?, ?, ?, 0, CAST(strftime('%s', 'now') AS INTEGER))
+        ON CONFLICT(book_cache_id) DO UPDATE SET
+            book_id       = excluded.book_id,
+            rating        = excluded.rating,
+            retry_count   = 0,
+            last_retry_at = NULL
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare addPendingRating:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function()
+        stmt:bind(book_cache_id, book_id, rating)
+    end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in addPendingRating:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    if result ~= SQ3.DONE and result ~= SQ3.OK then
+        logger.err("BookloreSync Database: addPendingRating step failed:", self.conn:errmsg())
+        return false
+    end
+    return true
+end
+
+--[[--
+Return all rows from the pending_ratings queue.
+
+@return table  Array of {id, book_cache_id, book_id, rating, retry_count}
+--]]
+function Database:getPendingRatings()
+    local stmt = self.conn:prepare([[
+        SELECT id, book_cache_id, book_id, rating, retry_count
+        FROM pending_ratings
+        ORDER BY created_at ASC
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getPendingRatings:", self.conn:errmsg())
+        return {}
+    end
+
+    local rows = {}
+    for row in stmt:rows() do
+        table.insert(rows, {
+            id            = tonumber(row[1]),
+            book_cache_id = tonumber(row[2]),
+            book_id       = tonumber(row[3]),
+            rating        = tonumber(row[4]),
+            retry_count   = tonumber(row[5]) or 0,
+        })
+    end
+    stmt:close()
+    return rows
+end
+
+--[[--
+Return the number of ratings currently in the pending queue.
+
+@return integer
+--]]
+function Database:getPendingRatingCount()
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_ratings")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getPendingRatingCount:", self.conn:errmsg())
+        return 0
+    end
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
+    stmt:close()
+    return count
+end
+
+--[[--
+Remove a successfully-synced rating from the pending queue.
+
+@param id integer  pending_ratings.id
+@return boolean success
+--]]
+function Database:deletePendingRating(id)
+    if not id then
+        logger.err("BookloreSync Database: deletePendingRating called without id")
+        return false
+    end
+    id = tonumber(id)
+    if not id then return false end
+
+    local stmt = self.conn:prepare("DELETE FROM pending_ratings WHERE id = ?")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare deletePendingRating:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function() stmt:bind(id) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in deletePendingRating:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
+--[[--
+Increment the retry counter for a pending rating.
+
+@param id integer  pending_ratings.id
+@return boolean success
+--]]
+function Database:incrementPendingRatingRetryCount(id)
+    if not id then return false end
+    id = tonumber(id)
+    if not id then return false end
+
+    local stmt = self.conn:prepare([[
+        UPDATE pending_ratings
+        SET retry_count = retry_count + 1,
+            last_retry_at = CAST(strftime('%s', 'now') AS INTEGER)
+        WHERE id = ?
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare incrementPendingRatingRetryCount:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function() stmt:bind(id) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in incrementPendingRatingRetryCount:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
 end
 
 -- Annotation / Highlight Sync Helpers

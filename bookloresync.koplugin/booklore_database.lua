@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 12,  -- Current database schema version
+    VERSION = 13,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -324,6 +324,38 @@ Database.migrations = {
     [12] = {
         [[
             ALTER TABLE book_metadata ADD COLUMN pending_rating_prompt INTEGER DEFAULT 0
+        ]],
+    },
+
+    -- Migration 13: Pending annotations queue
+    -- Stores annotation upload attempts that failed so they can be retried on
+    -- the next sync trigger (session end, explicit "Sync Pending Now", etc.).
+    -- Each row represents one annotation that needs to be (re-)submitted.
+    -- The payload is stored as a JSON blob so no schema change is needed when
+    -- annotation fields evolve.
+    [13] = {
+        [[
+            CREATE TABLE IF NOT EXISTS pending_annotations (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL,
+                book_id       INTEGER NOT NULL,
+                ann_type      TEXT    NOT NULL,
+                datetime      TEXT    NOT NULL,
+                payload       TEXT    NOT NULL,
+                retry_count   INTEGER DEFAULT 0,
+                last_retry_at INTEGER,
+                created_at    INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(book_cache_id, datetime, ann_type),
+                FOREIGN KEY(book_cache_id) REFERENCES book_cache(id)
+            )
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_annotations_book_cache_id
+            ON pending_annotations(book_cache_id)
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_annotations_created_at
+            ON pending_annotations(created_at)
         ]],
     },
 }
@@ -2451,6 +2483,198 @@ function Database:markAnnotationSynced(book_cache_id, koreader_datetime, annotat
     local result = stmt:step()
     stmt:close()
     return result == SQ3.DONE or result == SQ3.OK
+end
+
+-- Pending Annotations Queue
+
+--[[--
+Add an annotation to the pending_annotations queue.
+
+Called when an annotation upload fails so it can be retried on the next
+sync trigger.  The full annotation payload is stored as a JSON string so
+the retry path can re-submit without re-reading the sidecar.
+
+Uniqueness: (book_cache_id, datetime, ann_type).  If the same annotation
+fails again it is upserted — retry_count resets and the payload is refreshed.
+
+@param book_cache_id integer  book_cache.id
+@param book_id       integer  Booklore book ID
+@param ann_type      string   "highlight", "in_book_note", or "booklore_note"
+@param datetime      string   KOReader annotation datetime (unique per annotation)
+@param payload       string   JSON-encoded annotation payload for re-submission
+@return boolean success
+--]]
+function Database:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, payload)
+    if not book_cache_id or not book_id or not ann_type or not datetime or not payload then
+        logger.err("BookloreSync Database: addPendingAnnotation called with missing args")
+        return false
+    end
+    book_cache_id = tonumber(book_cache_id)
+    book_id       = tonumber(book_id)
+    if not book_cache_id or not book_id then
+        logger.err("BookloreSync Database: addPendingAnnotation: non-numeric id argument")
+        return false
+    end
+
+    local stmt = self.conn:prepare([[
+        INSERT INTO pending_annotations
+            (book_cache_id, book_id, ann_type, datetime, payload, retry_count, created_at)
+        VALUES (?, ?, ?, ?, ?, 0, CAST(strftime('%s', 'now') AS INTEGER))
+        ON CONFLICT(book_cache_id, datetime, ann_type) DO UPDATE SET
+            book_id       = excluded.book_id,
+            payload       = excluded.payload,
+            retry_count   = 0,
+            last_retry_at = NULL
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare addPendingAnnotation:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function()
+        stmt:bind(book_cache_id, book_id, tostring(ann_type), tostring(datetime), tostring(payload))
+    end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in addPendingAnnotation:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    if result ~= SQ3.DONE and result ~= SQ3.OK then
+        logger.err("BookloreSync Database: addPendingAnnotation step failed:", self.conn:errmsg())
+        return false
+    end
+    return true
+end
+
+--[[--
+Return all rows from the pending_annotations queue, oldest first.
+
+@return table  Array of {id, book_cache_id, book_id, ann_type, datetime, payload, retry_count}
+--]]
+function Database:getPendingAnnotations()
+    local stmt = self.conn:prepare([[
+        SELECT id, book_cache_id, book_id, ann_type, datetime, payload, retry_count
+        FROM pending_annotations
+        ORDER BY created_at ASC
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getPendingAnnotations:", self.conn:errmsg())
+        return {}
+    end
+
+    local rows = {}
+    for row in stmt:rows() do
+        table.insert(rows, {
+            id            = tonumber(row[1]),
+            book_cache_id = tonumber(row[2]),
+            book_id       = tonumber(row[3]),
+            ann_type      = row[4],
+            datetime      = row[5],
+            payload       = row[6],
+            retry_count   = tonumber(row[7]) or 0,
+        })
+    end
+    stmt:close()
+    return rows
+end
+
+--[[--
+Return the number of annotations currently in the pending queue.
+
+@return integer
+--]]
+function Database:getPendingAnnotationCount()
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_annotations")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getPendingAnnotationCount:", self.conn:errmsg())
+        return 0
+    end
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
+    stmt:close()
+    return count
+end
+
+--[[--
+Remove a successfully-synced annotation from the pending queue.
+
+@param id integer  pending_annotations.id
+@return boolean success
+--]]
+function Database:deletePendingAnnotation(id)
+    if not id then
+        logger.err("BookloreSync Database: deletePendingAnnotation called without id")
+        return false
+    end
+    id = tonumber(id)
+    if not id then return false end
+
+    local stmt = self.conn:prepare("DELETE FROM pending_annotations WHERE id = ?")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare deletePendingAnnotation:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function() stmt:bind(id) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in deletePendingAnnotation:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
+--[[--
+Increment the retry counter for a pending annotation.
+
+@param id integer  pending_annotations.id
+@return boolean success
+--]]
+function Database:incrementPendingAnnotationRetryCount(id)
+    if not id then return false end
+    id = tonumber(id)
+    if not id then return false end
+
+    local stmt = self.conn:prepare([[
+        UPDATE pending_annotations
+        SET retry_count   = retry_count + 1,
+            last_retry_at = CAST(strftime('%s', 'now') AS INTEGER)
+        WHERE id = ?
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare incrementPendingAnnotationRetryCount:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function() stmt:bind(id) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in incrementPendingAnnotationRetryCount:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
+--[[--
+Delete all rows from the pending_annotations queue.
+
+@return boolean success
+--]]
+function Database:clearPendingAnnotations()
+    local result = self.conn:exec("DELETE FROM pending_annotations")
+    return result == SQ3.OK
 end
 
 -- Plugin Settings helpers

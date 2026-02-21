@@ -8,10 +8,11 @@ Provides SQLite database management with migration support for the Booklore plug
 
 local SQ3 = require("lua-ljsqlite3/init")
 local DataStorage = require("datastorage")
+local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 9,  -- Current database schema version
+    VERSION = 10,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -258,6 +259,146 @@ Database.migrations = {
             ON synced_annotations(book_cache_id)
         ]],
     },
+
+    -- Migration 10: Persist plugin settings in SQLite and add rating sync history
+    [10] = {
+        -- Key-value store that replaces the booklore.lua LuaSettings file.
+        -- All plugin configuration (server URL, credentials, sync options, …) is
+        -- stored here so that a single SQLite file contains the complete plugin state.
+        [[
+            CREATE TABLE IF NOT EXISTS plugin_settings (
+                key        TEXT PRIMARY KEY,
+                value      TEXT,
+                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        ]],
+
+        -- Per-book audit trail of every rating that was successfully pushed to the
+        -- Booklore server.  Complements the book_metadata.rating_synced flag with
+        -- full history (value synced, timestamp, outcome).
+        [[
+            CREATE TABLE IF NOT EXISTS rating_sync_history (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL,
+                rating        INTEGER NOT NULL,
+                synced_at     INTEGER DEFAULT (strftime('%s', 'now')),
+                status        TEXT    NOT NULL DEFAULT 'success',
+                error_message TEXT,
+                FOREIGN KEY(book_cache_id) REFERENCES book_cache(id)
+            )
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_rating_sync_history_book
+            ON rating_sync_history(book_cache_id)
+        ]],
+    },
+}
+
+-- Post-migration hooks (Lua functions run AFTER the SQL transaction commits).
+-- Each hook receives the Database instance as its only argument.
+-- Return true on success, false on failure (failure is logged but non-fatal
+-- so that the schema version is still recorded and the migration is not retried).
+Database.migration_hooks = {
+    -- Migration 10: copy all settings from booklore.lua into plugin_settings,
+    -- then delete the LuaSettings file so it is no longer used.
+    [10] = function(db)
+        local settings_path = DataStorage:getSettingsDir() .. "/booklore.lua"
+        local f = io.open(settings_path, "r")
+        if not f then
+            logger.info("BookloreSync Database: Migration 10 hook: booklore.lua not found, skipping import")
+            return true
+        end
+        f:close()
+
+        logger.info("BookloreSync Database: Migration 10 hook: importing settings from booklore.lua")
+
+        local ok, lua_settings = pcall(function()
+            return LuaSettings:open(settings_path)
+        end)
+        if not ok or not lua_settings then
+            logger.err("BookloreSync Database: Migration 10 hook: failed to open booklore.lua:", lua_settings)
+            return false
+        end
+
+        -- All known settings keys with their storage types.
+        -- "bool" values are stored as "true"/"false" strings; numbers as their
+        -- decimal string representation; everything else as plain strings.
+        local keys = {
+            "server_url", "username", "password",
+            "is_enabled", "log_to_file", "silent_messages", "secure_logs",
+            "min_duration", "min_pages", "session_detection_mode",
+            "progress_decimal_places",
+            "force_push_session_on_suspend", "connect_network_on_suspend",
+            "manual_sync_only", "sync_mode",
+            "historical_sync_ack",
+            "booklore_username", "booklore_password",
+            "extended_sync_enabled", "rating_sync_enabled", "rating_sync_mode",
+            "highlights_notes_sync_enabled", "notes_destination", "upload_strategy",
+            "auto_update_check", "last_update_check",
+        }
+
+        local imported = 0
+        local stmt = db.conn:prepare([[
+            INSERT OR REPLACE INTO plugin_settings (key, value, updated_at)
+            VALUES (?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+        ]])
+        if not stmt then
+            logger.err("BookloreSync Database: Migration 10 hook: failed to prepare INSERT:", db.conn:errmsg())
+            return false
+        end
+
+        for _, key in ipairs(keys) do
+            local raw = lua_settings:readSetting(key)
+            if raw ~= nil then
+                -- Serialise to string: booleans become "true"/"false", numbers
+                -- become their decimal string, everything else stays as-is.
+                local value_str
+                local t = type(raw)
+                if t == "boolean" then
+                    value_str = raw and "true" or "false"
+                elseif t == "number" then
+                    value_str = tostring(raw)
+                elseif t == "string" then
+                    value_str = raw
+                else
+                    -- Skip unsupported types (tables, etc.)
+                    logger.warn("BookloreSync Database: Migration 10 hook: skipping key", key, "with unsupported type", t)
+                    goto continue
+                end
+
+                local bind_ok, bind_err = pcall(function()
+                    stmt:bind(key, value_str)
+                end)
+                if bind_ok then
+                    local step_result = stmt:step()
+                    stmt:reset()
+                    if step_result == SQ3.DONE or step_result == SQ3.OK then
+                        imported = imported + 1
+                    else
+                        logger.warn("BookloreSync Database: Migration 10 hook: failed to insert key", key)
+                    end
+                else
+                    logger.warn("BookloreSync Database: Migration 10 hook: bind failed for key", key, ":", bind_err)
+                end
+                ::continue::
+            end
+        end
+        stmt:close()
+
+        logger.info("BookloreSync Database: Migration 10 hook: imported", imported, "settings")
+
+        -- Delete the original LuaSettings file now that settings live in the DB
+        local remove_ok, remove_err = os.remove(settings_path)
+        if remove_ok then
+            logger.info("BookloreSync Database: Migration 10 hook: deleted booklore.lua")
+        else
+            -- Non-fatal: the file may have been removed already, or permissions
+            -- may prevent deletion on some e-reader configurations.
+            logger.warn("BookloreSync Database: Migration 10 hook: could not delete booklore.lua:", remove_err)
+        end
+
+        return true
+    end,
 }
 
 function Database:new(o)
@@ -454,6 +595,20 @@ function Database:runMigrations()
             -- Commit transaction
             self.conn:exec("COMMIT")
             logger.info("BookloreSync Database: Migration", version, "applied successfully")
+
+            -- Run optional post-migration Lua hook (non-fatal on failure)
+            local hook = self.migration_hooks and self.migration_hooks[version]
+            if hook then
+                logger.info("BookloreSync Database: Running post-migration hook for version", version)
+                local hook_ok, hook_err = pcall(hook, self)
+                if not hook_ok then
+                    logger.err("BookloreSync Database: Post-migration hook", version, "threw an error:", hook_err)
+                elseif hook_err == false then
+                    logger.warn("BookloreSync Database: Post-migration hook", version, "reported failure (non-fatal)")
+                else
+                    logger.info("BookloreSync Database: Post-migration hook", version, "completed successfully")
+                end
+            end
         else
             -- Rollback transaction
             self.conn:exec("ROLLBACK")
@@ -2031,6 +2186,241 @@ function Database:markAnnotationSynced(book_cache_id, koreader_datetime, annotat
     local result = stmt:step()
     stmt:close()
     return result == SQ3.DONE or result == SQ3.OK
+end
+
+-- Plugin Settings helpers
+
+--[[--
+Read a single plugin setting from the plugin_settings table.
+
+Values are stored as TEXT.  Boolean strings ("true"/"false") and numeric
+strings are returned as their native Lua types so that callers can use
+the result exactly as they would a LuaSettings:readSetting() value.
+
+@param key string  Setting key
+@return string|number|boolean|nil  Typed value, or nil if not present
+--]]
+function Database:getPluginSetting(key)
+    if not key then return nil end
+    key = tostring(key)
+
+    local stmt = self.conn:prepare([[
+        SELECT value FROM plugin_settings WHERE key = ? LIMIT 1
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getPluginSetting:", self.conn:errmsg())
+        return nil
+    end
+
+    local ok, err = pcall(function() stmt:bind(key) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in getPluginSetting:", err)
+        stmt:close()
+        return nil
+    end
+
+    local raw = nil
+    for row in stmt:rows() do
+        raw = row[1]  -- may be nil if the column value is NULL
+        break
+    end
+    stmt:close()
+
+    if raw == nil then return nil end
+
+    -- Deserialise: booleans stored as "true"/"false", numbers as decimal strings
+    if raw == "true"  then return true  end
+    if raw == "false" then return false end
+    local n = tonumber(raw)
+    if n ~= nil then return n end
+    return raw  -- plain string
+end
+
+--[[--
+Write (insert-or-replace) a single plugin setting to the plugin_settings table.
+
+Booleans are serialised as "true"/"false", numbers as their decimal string
+representation.  nil values are stored as a SQL NULL.
+
+@param key   string  Setting key
+@param value string|number|boolean|nil  Value to store
+@return boolean success
+--]]
+function Database:savePluginSetting(key, value)
+    if not key then
+        logger.err("BookloreSync Database: savePluginSetting called without key")
+        return false
+    end
+    key = tostring(key)
+
+    local value_str
+    if value == nil then
+        value_str = nil
+    else
+        local t = type(value)
+        if t == "boolean" then
+            value_str = value and "true" or "false"
+        elseif t == "number" then
+            value_str = tostring(value)
+        elseif t == "string" then
+            value_str = value
+        else
+            logger.err("BookloreSync Database: savePluginSetting: unsupported type", t, "for key", key)
+            return false
+        end
+    end
+
+    local stmt = self.conn:prepare([[
+        INSERT OR REPLACE INTO plugin_settings (key, value, updated_at)
+        VALUES (?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare savePluginSetting:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function() stmt:bind(key, value_str) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in savePluginSetting:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
+--[[--
+Return all plugin settings as a key→value Lua table.
+
+Values are deserialised to their native Lua types (boolean, number, or string)
+using the same rules as getPluginSetting().
+
+@return table  { key = value, ... }
+--]]
+function Database:getAllPluginSettings()
+    local settings = {}
+    local stmt = self.conn:prepare("SELECT key, value FROM plugin_settings")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getAllPluginSettings:", self.conn:errmsg())
+        return settings
+    end
+
+    for row in stmt:rows() do
+        local k = row[1] and tostring(row[1]) or nil
+        local raw = row[2]
+        if k then
+            if raw == nil then
+                settings[k] = nil
+            elseif raw == "true" then
+                settings[k] = true
+            elseif raw == "false" then
+                settings[k] = false
+            else
+                local n = tonumber(raw)
+                settings[k] = (n ~= nil) and n or tostring(raw)
+            end
+        end
+    end
+    stmt:close()
+    return settings
+end
+
+-- Rating Sync History helpers
+
+--[[--
+Record a rating sync attempt in rating_sync_history.
+
+@param book_cache_id  number   book_cache.id
+@param rating         number   Rating value that was synced (1-10)
+@param status         string   "success" or "error"  (default "success")
+@param error_message  string|nil  Error detail when status is "error"
+@return boolean success
+--]]
+function Database:recordRatingSyncHistory(book_cache_id, rating, status, error_message)
+    if not book_cache_id or not rating then
+        logger.err("BookloreSync Database: recordRatingSyncHistory called with missing args")
+        return false
+    end
+    book_cache_id = tonumber(book_cache_id)
+    rating        = tonumber(rating)
+    if not book_cache_id or not rating then
+        logger.err("BookloreSync Database: recordRatingSyncHistory: invalid book_cache_id or rating")
+        return false
+    end
+    status = status or "success"
+
+    local stmt = self.conn:prepare([[
+        INSERT INTO rating_sync_history (book_cache_id, rating, status, error_message)
+        VALUES (?, ?, ?, ?)
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare recordRatingSyncHistory:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function()
+        stmt:bind(
+            book_cache_id,
+            rating,
+            tostring(status),
+            error_message and tostring(error_message) or nil
+        )
+    end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in recordRatingSyncHistory:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
+--[[--
+Retrieve the rating sync history for a given book.
+
+@param book_cache_id  number  book_cache.id
+@return table  Array of { id, book_cache_id, rating, synced_at, status, error_message }
+--]]
+function Database:getRatingSyncHistory(book_cache_id)
+    local rows = {}
+    if not book_cache_id then return rows end
+    book_cache_id = tonumber(book_cache_id)
+    if not book_cache_id then return rows end
+
+    local stmt = self.conn:prepare([[
+        SELECT id, book_cache_id, rating, synced_at, status, error_message
+        FROM rating_sync_history
+        WHERE book_cache_id = ?
+        ORDER BY synced_at DESC
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getRatingSyncHistory:", self.conn:errmsg())
+        return rows
+    end
+
+    local ok, err = pcall(function() stmt:bind(book_cache_id) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in getRatingSyncHistory:", err)
+        stmt:close()
+        return rows
+    end
+
+    for row in stmt:rows() do
+        table.insert(rows, {
+            id            = tonumber(row[1]),
+            book_cache_id = tonumber(row[2]),
+            rating        = tonumber(row[3]),
+            synced_at     = tonumber(row[4]),
+            status        = row[5] and tostring(row[5]) or "success",
+            error_message = row[6] and tostring(row[6]) or nil,
+        })
+    end
+    stmt:close()
+    return rows
 end
 
 return Database

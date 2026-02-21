@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 13,  -- Current database schema version
+    VERSION = 15,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -333,12 +333,15 @@ Database.migrations = {
     -- Each row represents one annotation that needs to be (re-)submitted.
     -- The payload is stored as a JSON blob so no schema change is needed when
     -- annotation fields evolve.
+    -- NOTE: book_id is nullable — annotations can be queued before the Booklore
+    -- book_id is known (e.g. server offline at close time).  syncPendingAnnotations
+    -- resolves the book_id from book_cache at retry time.
     [13] = {
         [[
             CREATE TABLE IF NOT EXISTS pending_annotations (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 book_cache_id INTEGER NOT NULL,
-                book_id       INTEGER NOT NULL,
+                book_id       INTEGER,
                 ann_type      TEXT    NOT NULL,
                 datetime      TEXT    NOT NULL,
                 payload       TEXT    NOT NULL,
@@ -356,6 +359,85 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_pending_annotations_created_at
             ON pending_annotations(created_at)
+        ]],
+    },
+
+    -- Migration 14: Relax pending_annotations.book_id NOT NULL constraint.
+    -- book_id must be nullable so annotations can be queued while the server
+    -- is offline and the Booklore book_id is not yet known.
+    -- SQLite does not support ALTER COLUMN, so recreate the table.
+    [14] = {
+        [[
+            CREATE TABLE IF NOT EXISTS pending_annotations_new (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL,
+                book_id       INTEGER,
+                ann_type      TEXT    NOT NULL,
+                datetime      TEXT    NOT NULL,
+                payload       TEXT    NOT NULL,
+                retry_count   INTEGER DEFAULT 0,
+                last_retry_at INTEGER,
+                created_at    INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(book_cache_id, datetime, ann_type),
+                FOREIGN KEY(book_cache_id) REFERENCES book_cache(id)
+            )
+        ]],
+        [[
+            INSERT OR IGNORE INTO pending_annotations_new
+                (id, book_cache_id, book_id, ann_type, datetime, payload,
+                 retry_count, last_retry_at, created_at)
+            SELECT id, book_cache_id, book_id, ann_type, datetime, payload,
+                   retry_count, last_retry_at, created_at
+            FROM pending_annotations
+        ]],
+        [[
+            DROP TABLE pending_annotations
+        ]],
+        [[
+            ALTER TABLE pending_annotations_new RENAME TO pending_annotations
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_annotations_book_cache_id
+            ON pending_annotations(book_cache_id)
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_annotations_created_at
+            ON pending_annotations(created_at)
+        ]],
+    },
+
+    -- Migration 15: Relax pending_ratings.book_id NOT NULL constraint.
+    -- book_id must be nullable so ratings can be queued while the server
+    -- is offline and the Booklore book_id is not yet known.
+    -- SQLite does not support ALTER COLUMN, so recreate the table.
+    [15] = {
+        [[
+            CREATE TABLE IF NOT EXISTS pending_ratings_new (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL UNIQUE,
+                book_id       INTEGER,
+                rating        INTEGER NOT NULL,
+                retry_count   INTEGER DEFAULT 0,
+                last_retry_at INTEGER,
+                created_at    INTEGER DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY(book_cache_id) REFERENCES book_cache(id)
+            )
+        ]],
+        [[
+            INSERT OR IGNORE INTO pending_ratings_new
+                (id, book_cache_id, book_id, rating, retry_count, last_retry_at, created_at)
+            SELECT id, book_cache_id, book_id, rating, retry_count, last_retry_at, created_at
+            FROM pending_ratings
+        ]],
+        [[
+            DROP TABLE pending_ratings
+        ]],
+        [[
+            ALTER TABLE pending_ratings_new RENAME TO pending_ratings
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_ratings_book_cache_id
+            ON pending_ratings(book_cache_id)
         ]],
     },
 }
@@ -1967,6 +2049,49 @@ end
 -- Book Metadata (Extended Sync) Functions
 
 --[[--
+Get a book_cache row by its primary key.
+
+@param id  book_cache.id (integer)
+@return table|nil  {id, file_path, file_hash, book_id, title, author} or nil
+--]]
+function Database:getBookCacheById(id)
+    if not id then
+        return nil
+    end
+
+    local stmt = self.conn:prepare([[
+        SELECT id, file_path, file_hash, book_id, title, author
+        FROM book_cache WHERE id = ? LIMIT 1
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getBookCacheById:", self.conn:errmsg())
+        return nil
+    end
+
+    local ok, err = pcall(function() stmt:bind(tonumber(id)) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in getBookCacheById:", err)
+        stmt:close()
+        return nil
+    end
+
+    local result = nil
+    for row in stmt:rows() do
+        result = {
+            id        = tonumber(row[1]),
+            file_path = row[2],
+            file_hash = row[3],
+            book_id   = row[4] and tonumber(row[4]) or nil,
+            title     = row[5],
+            author    = row[6],
+        }
+        break
+    end
+    stmt:close()
+    return result
+end
+
+--[[--
 Get the book_cache id for a given file path.
 
 @param file_path Full path to the document file
@@ -2228,14 +2353,15 @@ only the latest rating value is kept pending.
 @return boolean success
 --]]
 function Database:addPendingRating(book_cache_id, book_id, rating)
-    if not book_cache_id or not book_id or not rating then
+    -- book_id may be nil when the server was offline at book-close time.
+    if not book_cache_id or not rating then
         logger.err("BookloreSync Database: addPendingRating called with missing args")
         return false
     end
     book_cache_id = tonumber(book_cache_id)
-    book_id       = tonumber(book_id)
+    if book_id ~= nil then book_id = tonumber(book_id) end
     rating        = tonumber(rating)
-    if not book_cache_id or not book_id or not rating then
+    if not book_cache_id or not rating then
         logger.err("BookloreSync Database: addPendingRating: non-numeric argument")
         return false
     end
@@ -2505,14 +2631,15 @@ fails again it is upserted — retry_count resets and the payload is refreshed.
 @return boolean success
 --]]
 function Database:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, payload)
-    if not book_cache_id or not book_id or not ann_type or not datetime or not payload then
+    if not book_cache_id or not ann_type or not datetime or not payload then
         logger.err("BookloreSync Database: addPendingAnnotation called with missing args")
         return false
     end
     book_cache_id = tonumber(book_cache_id)
-    book_id       = tonumber(book_id)
-    if not book_cache_id or not book_id then
-        logger.err("BookloreSync Database: addPendingAnnotation: non-numeric id argument")
+    -- book_id is nullable: nil means the Booklore ID is not yet known
+    book_id = book_id and tonumber(book_id) or nil
+    if not book_cache_id then
+        logger.err("BookloreSync Database: addPendingAnnotation: non-numeric book_cache_id")
         return false
     end
 

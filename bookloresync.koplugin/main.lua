@@ -17,6 +17,7 @@ local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
 local ButtonDialog = require("ui/widget/buttondialog")
+local json = require("json")
 local Settings = require("booklore_settings")
 local Database = require("booklore_database")
 local APIClient = require("booklore_api_client")
@@ -469,108 +470,26 @@ function BookloreSync:viewSessionDetails()
         })
         return
     end
-    
-    local stats = self.db:getBookCacheStats()
-    local pending_count = self.db:getPendingSessionCount()
-    
-    -- Convert cdata to Lua numbers
-    local total = tonumber(stats.total) or 0
-    local matched = tonumber(stats.matched) or 0
+
+    local stats       = self.db:getBookCacheStats()
+    local sessions    = tonumber(self.db:getPendingSessionCount())    or 0
+    local annotations = tonumber(self.db:getPendingAnnotationCount()) or 0
+    local ratings     = tonumber(self.db:getPendingRatingCount())     or 0
+
+    local total     = tonumber(stats.total)     or 0
+    local matched   = tonumber(stats.matched)   or 0
     local unmatched = tonumber(stats.unmatched) or 0
-    local pending = tonumber(pending_count) or 0
-    
+
     UIManager:show(InfoMessage:new{
         text = T(_(
-            "Total books: %1\n" ..
-            "Matched: %2\n" ..
-            "Unmatched: %3\n" ..
-            "Pending sessions: %4"
-        ), total, matched, unmatched, pending),
-        timeout = 3,
-    })
-end
-
---[[--
-Show KOReader metadata for currently open book
---]]
-function BookloreSync:showCurrentBookMetadata()
-    if not self.ui or not self.ui.document or not self.ui.document.file then
-        UIManager:show(InfoMessage:new{
-            text = _("No book currently open"),
-            timeout = 2,
-        })
-        return
-    end
-    
-    local doc_path = self.ui.document.file
-    -- [[ TEST Implementation of metadata extraction and display 
-    -- In real implementation, the metadata will be extracted and submitted to the real endpoints
-    -- ]]
-    -- Extract all metadata
-    local metadata = self.metadata_extractor:getAllMetadata(doc_path)
-    
-    -- Format for display
-    local lines = {}
-    table.insert(lines, "📖 KOReader Metadata\n")
-    
-    -- Rating
-    if metadata.rating then
-        local stars = string.rep("⭐", metadata.rating)
-        table.insert(lines, "Rating: " .. stars .. " (" .. metadata.rating .. "/5)")
-    else
-        table.insert(lines, "Rating: Not set")
-    end
-    
-    -- Status
-    if metadata.status then
-        local status_icons = {
-            complete = "✓",
-            reading = "📖",
-            on_hold = "⏸",
-            abandoned = "✗"
-        }
-        local icon = status_icons[metadata.status] or ""
-        table.insert(lines, "Status: " .. icon .. " " .. metadata.status)
-    end
-    
-    -- Progress
-    if metadata.progress then
-        local pct = math.floor(metadata.progress * 100)
-        table.insert(lines, "Progress: " .. pct .. "%")
-    end
-    
-    -- Counts
-    local counts = self.metadata_extractor:getCounts(doc_path)
-    table.insert(lines, "")
-    table.insert(lines, "Highlights: " .. counts.highlights)
-    table.insert(lines, "Notes: " .. counts.notes)
-    table.insert(lines, "Bookmarks: " .. counts.bookmarks)
-    
-    -- Stats from document
-    if metadata.stats then
-        table.insert(lines, "")
-        if metadata.stats.title then
-            table.insert(lines, "Title: " .. metadata.stats.title)
-        end
-        if metadata.stats.authors then
-            table.insert(lines, "Authors: " .. metadata.stats.authors)
-        end
-        if metadata.stats.pages then
-            table.insert(lines, "Pages: " .. metadata.stats.pages)
-        end
-    end
-    
-    -- Modified date
-    if metadata.modified then
-        table.insert(lines, "")
-        table.insert(lines, "Last Modified: " .. metadata.modified)
-    end
-    
-    local text = table.concat(lines, "\n")
-    
-    UIManager:show(InfoMessage:new{
-        text = text,
-        timeout = 10,
+            "Book cache\n" ..
+            "  Total: %1  Matched: %2  Unmatched: %3\n" ..
+            "\n" ..
+            "Pending uploads\n" ..
+            "  Sessions: %4\n" ..
+            "  Annotations: %5\n" ..
+            "  Ratings: %6"
+        ), total, matched, unmatched, sessions, annotations, ratings),
     })
 end
 
@@ -578,14 +497,10 @@ end
 Detect and store the KOReader sidecar (.sdr) path for the currently open book.
 
 Looks up or creates a book_cache entry, then upserts the sdr_path into book_metadata.
-Called from the "Detect book metadata location" menu item.
+Called silently from onReaderReady whenever a book is opened.
 --]]
 function BookloreSync:detectBookMetadataLocation()
     if not self.ui or not self.ui.document or not self.ui.document.file then
-        UIManager:show(InfoMessage:new{
-            text = _("No book currently open"),
-            timeout = 2,
-        })
         return
     end
 
@@ -595,10 +510,7 @@ function BookloreSync:detectBookMetadataLocation()
     -- Verify the sidecar is accessible via the metadata extractor
     local doc_settings = self.metadata_extractor:loadDocSettings(doc_path)
     if not doc_settings then
-        UIManager:show(InfoMessage:new{
-            text = _("Could not find KOReader sidecar for this book.\nOpen the book in KOReader to create one."),
-            timeout = 4,
-        })
+        self:logInfo("BookloreSync: No KOReader sidecar found for:", doc_path)
         return
     end
 
@@ -622,26 +534,15 @@ function BookloreSync:detectBookMetadataLocation()
     end
 
     if not book_cache_id then
-        UIManager:show(InfoMessage:new{
-            text = _("Failed to create book cache entry. Check logs."),
-            timeout = 3,
-        })
+        self:logErr("BookloreSync: Failed to create book cache entry for metadata location")
         return
     end
 
     local ok = self.db:upsertBookMetadata(book_cache_id, { sdr_path = sdr_path })
     if ok then
         self:logInfo("BookloreSync: Stored sdr_path:", sdr_path, "for book_cache_id:", book_cache_id)
-        UIManager:show(InfoMessage:new{
-            text = T(_("Metadata location stored:\n%1"), sdr_path),
-            timeout = 4,
-        })
     else
         self:logErr("BookloreSync: Failed to store sdr_path for book_cache_id:", book_cache_id)
-        UIManager:show(InfoMessage:new{
-            text = _("Failed to store metadata location. Check logs."),
-            timeout = 3,
-        })
     end
 end
 
@@ -739,10 +640,15 @@ progress reached >= 99%.
 @param book_id   number  Booklore book ID
 --]]
 function BookloreSync:showRatingDialog(doc_path, book_id)
-    if not doc_path or not book_id then
-        self:logWarn("BookloreSync: showRatingDialog called with missing arguments")
+    if not doc_path then
+        self:logWarn("BookloreSync: showRatingDialog called without doc_path")
         return
     end
+    -- book_id may be nil when the server was offline at book-close time.
+    -- In that case we still show the dialog so the user can record their rating
+    -- now; the value is stored locally and the pending_rating_prompt flag
+    -- (set by the caller) ensures the upload happens on the next sync once
+    -- the book_id has been resolved.
 
     -- Don't show dialog if already rated and synced
     local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
@@ -794,8 +700,19 @@ function BookloreSync:showRatingDialog(doc_path, book_id)
                             self.db:storeRating(bcid, value)
                         end
 
+                        if not book_id then
+                            -- book_id not yet known — store rating locally and queue
+                            -- it in pending_ratings (with nil book_id) so it is
+                            -- uploaded once the book is matched on the next sync.
+                            if bcid then
+                                self.db:addPendingRating(bcid, nil, value)
+                            end
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Rating %1/10 saved (will sync once book is matched)"), value),
+                                timeout = 2,
+                            })
                         -- Attempt to submit immediately if credentials are available
-                        if self.booklore_username ~= "" and self.booklore_password ~= "" then
+                        elseif self.booklore_username ~= "" and self.booklore_password ~= "" then
                             local ok, err = self.api:submitRating(
                                 book_id, value,
                                 self.booklore_username, self.booklore_password
@@ -1360,8 +1277,8 @@ Notes with destination "in_booklore" → POST /api/v1/book-notes
                              are skipped if nil (Booklore-notes still work without it).
 --]]
 function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document)
-    if not doc_path or not book_id then
-        self:logWarn("BookloreSync: syncHighlightsAndNotes called with missing arguments")
+    if not doc_path then
+        self:logWarn("BookloreSync: syncHighlightsAndNotes called without doc_path")
         return
     end
     if not self.extended_sync_enabled or not self.highlights_notes_sync_enabled then
@@ -1371,6 +1288,12 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document)
         self:logWarn("BookloreSync: Highlights/notes sync skipped — credentials not configured")
         return
     end
+
+    -- book_id may be nil when the server was offline at open time.
+    -- In that case we skip API calls but still compute CFIs (while the doc is
+    -- open) and queue every annotation into pending_annotations so they are
+    -- submitted on the next sync once the book_id has been resolved.
+    local queue_only = (book_id == nil)
 
     local annotations = self.metadata_extractor:getHighlights(doc_path)
     if not annotations or #annotations == 0 then
@@ -1441,63 +1364,122 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document)
         -- unexpected nil never crashes the close-document flow.
         local ann_ok, ann_err = pcall(function()
             local ok, server_id
+            local cfi  -- computed below and reused in payload
 
             if not has_note then
                 -- ── Pure highlight ──────────────────────────────────────────────
-                local cfi = self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
+                cfi = self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
                 if not cfi then
                     self:logWarn("BookloreSync: Could not build CFI for highlight at:", datetime)
                     skipped_count = skipped_count + 1
                     return
                 end
-                ok, server_id = self.api:submitHighlight(
-                    book_id, cfi, ann.text,
-                    {
-                        color         = self:colorToHex(ann.color),
-                        style         = self:drawerToStyle(ann.drawer),
-                        chapter_title = ann.chapter,
-                    },
-                    self.booklore_username, self.booklore_password
-                )
+                if not queue_only then
+                    ok, server_id = self.api:submitHighlight(
+                        book_id, cfi, ann.text,
+                        {
+                            color         = self:colorToHex(ann.color),
+                            style         = self:drawerToStyle(ann.drawer),
+                            chapter_title = ann.chapter,
+                        },
+                        self.booklore_username, self.booklore_password
+                    )
+                end
 
             elseif notes_dest == "in_book" then
                 -- ── In-book note (v2) ────────────────────────────────────────────
-                local cfi = self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
+                cfi = self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
                 if not cfi then
                     self:logWarn("BookloreSync: Could not build CFI for in-book note at:", datetime)
                     skipped_count = skipped_count + 1
                     return
                 end
-                ok, server_id = self.api:submitInBookNote(
-                    book_id, cfi, ann.note,
-                    {
-                        selected_text = ann.text,
-                        color         = self:colorToHex(ann.color),
-                        chapter_title = ann.chapter,
-                    },
-                    self.booklore_username, self.booklore_password
-                )
+                if not queue_only then
+                    ok, server_id = self.api:submitInBookNote(
+                        book_id, cfi, ann.note,
+                        {
+                            selected_text = ann.text,
+                            color         = self:colorToHex(ann.color),
+                            chapter_title = ann.chapter,
+                        },
+                        self.booklore_username, self.booklore_password
+                    )
+                end
 
             else
                 -- ── Booklore (web-UI) note ───────────────────────────────────────
-                ok, server_id = self.api:submitBookloreNote(
-                    book_id, ann.note, ann.chapter,
-                    self.booklore_username, self.booklore_password
-                )
+                if not queue_only then
+                    ok, server_id = self.api:submitBookloreNote(
+                        book_id, ann.note, ann.chapter,
+                        self.booklore_username, self.booklore_password
+                    )
+                end
             end
 
-            if ok then
+            if queue_only then
+                -- No book_id yet — queue for retry with full CFI cached in payload.
+                local pending_payload = json.encode({
+                    ann_type   = ann_type,
+                    datetime   = datetime,
+                    text       = ann.text,
+                    note       = ann.note,
+                    chapter    = ann.chapter,
+                    color      = self:colorToHex(ann.color),
+                    style      = self:drawerToStyle(ann.drawer),
+                    cfi        = cfi,
+                    pos0       = ann.pos0,
+                    pos1       = ann.pos1,
+                    notes_dest = notes_dest,
+                })
+                self.db:addPendingAnnotation(book_cache_id, nil, ann_type, datetime, pending_payload)
+                failed_count = failed_count + 1
+            elseif ok then
                 self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, server_id)
                 synced_count = synced_count + 1
             else
                 self:logWarn("BookloreSync: Failed to sync annotation at:", datetime, "-", server_id)
                 failed_count = failed_count + 1
+                -- Queue for retry so it is not silently dropped.
+                -- Cache the already-computed CFI in the payload so the retry
+                -- path does not need a live document.
+                local pending_payload = json.encode({
+                    ann_type   = ann_type,
+                    datetime   = datetime,
+                    text       = ann.text,
+                    note       = ann.note,
+                    chapter    = ann.chapter,
+                    color      = self:colorToHex(ann.color),
+                    style      = self:drawerToStyle(ann.drawer),
+                    cfi        = cfi,
+                    pos0       = ann.pos0,
+                    pos1       = ann.pos1,
+                    notes_dest = notes_dest,
+                })
+                self.db:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, pending_payload)
             end
         end)
 
         if not ann_ok then
             self:logErr("BookloreSync: Unexpected error processing annotation at:", datetime, "-", ann_err)
             failed_count = failed_count + 1
+            -- Queue for retry even when the pcall itself fails, so the
+            -- annotation is not lost.  Use a minimal payload (no CFI) — the
+            -- retry path will skip annotations it cannot re-submit.
+            local ok_enc, pending_payload = pcall(json.encode, {
+                ann_type   = ann_type,
+                datetime   = datetime,
+                text       = ann.text,
+                note       = ann.note,
+                chapter    = ann.chapter,
+                color      = self:colorToHex(ann.color),
+                style      = self:drawerToStyle(ann.drawer),
+                pos0       = ann.pos0,
+                pos1       = ann.pos1,
+                notes_dest = notes_dest,
+            })
+            if ok_enc and pending_payload then
+                self.db:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, pending_payload)
+            end
         end
 
         ::continue::
@@ -1531,89 +1513,101 @@ function BookloreSync:addToMainMenu(menu_items)
     })
     
     -- Setup & Connection submenu
-    table.insert(base_menu, Settings:buildConnectionMenu(self))
+    table.insert(base_menu, Settings:buildAuthMenu(self))
     
-    -- Session Settings submenu
+    -- Sync Settings submenu
     table.insert(base_menu, {
-        text = _("Session Settings"),
+        text = _("Sync Settings"),
         sub_item_table = {
+            -- Session Settings submenu
             {
-                text = _("Detection Mode"),
-                help_text = _("Choose how sessions are validated: Duration-based (minimum seconds) or Pages-based (minimum pages read). Default is duration-based."),
+                text = _("Session Settings"),
+                help_text = _("Configure how reading sessions are detected and recorded."),
                 sub_item_table = {
                     {
-                        text = _("Duration-based"),
-                        help_text = _("Sessions must last a minimum number of seconds. Good for general reading tracking."),
-                        checked_func = function()
-                            return self.session_detection_mode == "duration"
-                        end,
-                        callback = function()
-                            self.session_detection_mode = "duration"
-                            self.settings:saveSetting("session_detection_mode", self.session_detection_mode)
-                            self.settings:flush()
-                            UIManager:show(InfoMessage:new{
-                                text = _("Session detection set to duration-based"),
-                                timeout = 2,
-                            })
-                        end,
-                        keep_menu_open = true,
+                        text = _("Detection Mode"),
+                        help_text = _("Choose how sessions are validated: Duration-based (minimum seconds) or Pages-based (minimum pages read). Default is duration-based."),
+                        sub_item_table = {
+                            {
+                                text = _("Duration-based"),
+                                help_text = _("Sessions must last a minimum number of seconds. Good for general reading tracking."),
+                                checked_func = function()
+                                    return self.session_detection_mode == "duration"
+                                end,
+                                callback = function()
+                                    self.session_detection_mode = "duration"
+                                    self.settings:saveSetting("session_detection_mode", self.session_detection_mode)
+                                    self.settings:flush()
+                                    UIManager:show(InfoMessage:new{
+                                        text = _("Session detection set to duration-based"),
+                                        timeout = 2,
+                                    })
+                                end,
+                                keep_menu_open = true,
+                            },
+                            {
+                                text = _("Pages-based"),
+                                help_text = _("Sessions must include a minimum number of pages read. Better for avoiding accidental sessions."),
+                                checked_func = function()
+                                    return self.session_detection_mode == "pages"
+                                end,
+                                callback = function()
+                                    self.session_detection_mode = "pages"
+                                    self.settings:saveSetting("session_detection_mode", self.session_detection_mode)
+                                    self.settings:flush()
+                                    UIManager:show(InfoMessage:new{
+                                        text = _("Session detection set to pages-based"),
+                                        timeout = 2,
+                                    })
+                                end,
+                                keep_menu_open = true,
+                            },
+                        },
                     },
                     {
-                        text = _("Pages-based"),
-                        help_text = _("Sessions must include a minimum number of pages read. Better for avoiding accidental sessions."),
-                        checked_func = function()
-                            return self.session_detection_mode == "pages"
-                        end,
-                        callback = function()
-                            self.session_detection_mode = "pages"
-                            self.settings:saveSetting("session_detection_mode", self.session_detection_mode)
-                            self.settings:flush()
-                            UIManager:show(InfoMessage:new{
-                                text = _("Session detection set to pages-based"),
-                                timeout = 2,
-                            })
+                        text = _("Minimum Duration (seconds)"),
+                        help_text = _("Set the minimum number of seconds a reading session must last to be synced. Sessions shorter than this will be discarded. Default is 30 seconds. Only applies when using duration-based detection."),
+                        enabled_func = function()
+                            return self.session_detection_mode == "duration"
                         end,
                         keep_menu_open = true,
+                        callback = function()
+                            Settings:configureMinDuration(self)
+                        end,
+                    },
+                    {
+                        text = _("Minimum Pages Read"),
+                        help_text = _("Set the minimum number of pages that must be read in a session for it to be synced. Default is 1 page. Only applies when using pages-based detection."),
+                        enabled_func = function()
+                            return self.session_detection_mode == "pages"
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            Settings:configureMinPages(self)
+                        end,
+                    },
+                    {
+                        text = _("Progress Decimal Places"),
+                        help_text = _("Set the number of decimal places to use when reporting reading progress percentage (0-5). Higher precision may be useful for large books. Default is 2."),
+                        keep_menu_open = true,
+                        callback = function()
+                            Settings:configureProgressDecimalPlaces(self)
+                        end,
                     },
                 },
             },
+
+            -- Rating submenu
+            Settings:buildRatingMenu(self),
+
+            -- Annotations submenu
+            Settings:buildAnnotationsMenu(self),
+
+            -- ── Sync Triggers ────────────────────────────────────────────────
             {
-                text = _("Minimum Duration (seconds)"),
-                help_text = _("Set the minimum number of seconds a reading session must last to be synced. Sessions shorter than this will be discarded. Default is 30 seconds. Only applies when using duration-based detection."),
-                enabled_func = function()
-                    return self.session_detection_mode == "duration"
-                end,
-                keep_menu_open = true,
-                callback = function()
-                    Settings:configureMinDuration(self)
-                end,
+                text = _("── Sync Triggers ──"),
+                enabled = false,
             },
-            {
-                text = _("Minimum Pages Read"),
-                help_text = _("Set the minimum number of pages that must be read in a session for it to be synced. Default is 1 page. Only applies when using pages-based detection."),
-                enabled_func = function()
-                    return self.session_detection_mode == "pages"
-                end,
-                keep_menu_open = true,
-                callback = function()
-                    Settings:configureMinPages(self)
-                end,
-            },
-            {
-                text = _("Progress Decimal Places"),
-                help_text = _("Set the number of decimal places to use when reporting reading progress percentage (0-5). Higher precision may be useful for large books. Default is 2."),
-                keep_menu_open = true,
-                callback = function()
-                    Settings:configureProgressDecimalPlaces(self)
-                end,
-            },
-        },
-    })
-    
-    -- Sync Behavior submenu (NEW)
-    table.insert(base_menu, {
-        text = _("Sync Behavior"),
-        sub_item_table = {
             {
                 text = _("Automatic (sync on suspend + WiFi)"),
                 help_text = _("Automatically sync sessions when device suspends. Enables WiFi and attempts connection before syncing."),
@@ -1706,9 +1700,6 @@ function BookloreSync:addToMainMenu(menu_items)
             },
         },
     })
-    
-    -- Syncing submenu (extended sync features)
-    table.insert(base_menu, Settings:buildSyncingMenu(self))
 
     -- Manage Sessions submenu
     table.insert(base_menu, {
@@ -1716,12 +1707,27 @@ function BookloreSync:addToMainMenu(menu_items)
         sub_item_table = {
             {
                 text_func = function()
-                    local count = self.db and self.db:getPendingSessionCount() or 0
-                    return T(_("Sync Pending Now (%1 sessions)"), tonumber(count) or 0)
+                    if not self.db then return _("Sync Pending Now") end
+                    local sessions     = tonumber(self.db:getPendingSessionCount())     or 0
+                    local annotations  = tonumber(self.db:getPendingAnnotationCount())  or 0
+                    local ratings      = tonumber(self.db:getPendingRatingCount())      or 0
+                    local total = sessions + annotations + ratings
+                    if total == 0 then
+                        return _("Sync Pending Now")
+                    end
+                    local parts = {}
+                    if sessions    > 0 then table.insert(parts, T(_("%1 S"),  sessions))    end
+                    if annotations > 0 then table.insert(parts, T(_("%1 A"),  annotations)) end
+                    if ratings     > 0 then table.insert(parts, T(_("%1 R"),  ratings))     end
+                    return T(_("Sync Pending Now (%1)"), table.concat(parts, ", "))
                 end,
-                help_text = _("Manually sync all sessions that failed to upload previously. Sessions are cached locally when the network is unavailable."),
+                help_text = _("Manually upload all pending items that failed to sync previously — reading sessions, annotations (highlights and notes), and ratings. Items are cached locally when the network is unavailable."),
                 enabled_func = function()
-                    return self.db and self.db:getPendingSessionCount() > 0
+                    if not self.db then return false end
+                    local sessions     = tonumber(self.db:getPendingSessionCount())     or 0
+                    local annotations  = tonumber(self.db:getPendingAnnotationCount())  or 0
+                    local ratings      = tonumber(self.db:getPendingRatingCount())      or 0
+                    return (sessions + annotations + ratings) > 0
                 end,
                 callback = function()
                     self:syncPendingSessions()
@@ -1730,6 +1736,7 @@ function BookloreSync:addToMainMenu(menu_items)
             {
                 text = _("View Details"),
                 help_text = _("Display statistics about the local cache: number of book hashes cached, file paths cached, and pending sessions."),
+                keep_menu_open = true,
                 callback = function()
                     self:viewSessionDetails()
                 end,
@@ -1770,30 +1777,13 @@ function BookloreSync:addToMainMenu(menu_items)
                     end
                 end,
             },
-            {
-                text = _("Show Current Book Metadata"),
-                help_text = _("Display KOReader metadata for the currently open book (rating, highlights, notes, bookmarks, reading status)."),
-                enabled_func = function()
-                    return self.ui and self.ui.document and self.ui.document.file
-                end,
-                callback = function()
-                    self:showCurrentBookMetadata()
-                end,
-            },
         },
     })
-    
-    -- Import Reading History submenu (renamed from Historical Data)
+
+    -- Import Reading History submenu
     table.insert(base_menu, {
         text = _("Import Reading History"),
         sub_item_table = {
-            {
-                text = _("Configure Booklore Account"),
-                help_text = _("Configure Booklore username and password for accessing the books/search endpoint."),
-                callback = function()
-                    self:configureBookloreLogin()
-                end,
-            },
             {
                 text = _("Extract Sessions from KOReader"),
                 help_text = _("One-time extraction of reading sessions from KOReader's statistics database. This reads page statistics and groups them into sessions. Run this first before matching."),
@@ -2544,6 +2534,7 @@ Handler for when a document is opened and ready
 function BookloreSync:onReaderReady()
     self:logInfo("BookloreSync: Reader ready")
     self:startSession()
+    self:detectBookMetadataLocation()
     return false -- Allow other plugins to process this event
 end
 
@@ -2613,14 +2604,26 @@ function BookloreSync:onCloseDocument()
                 self.db:setPendingRatingPrompt(book_cache_id, true)
                 self:logInfo("BookloreSync: Book completed but no book_id yet — deferred rating prompt stored")
             end
+            -- For select_at_complete: show the dialog immediately so the user
+            -- can record their rating now.  The rating is stored locally and the
+            -- pending_rating_prompt flag ensures it is pushed on the next sync
+            -- once the book_id has been resolved.
+            if mode == "select_at_complete" then
+                local path_copy = pre_file_path
+                UIManager:scheduleIn(2, function()
+                    self:showRatingDialog(path_copy, nil)
+                end)
+            end
         end
     end
 
     -- Highlights & notes sync
     -- NOTE: self.ui.document is still open here (CloseDocument fires before closeDocument()).
     -- We pass it to syncHighlightsAndNotes so it can read EPUB internals for CFI generation.
-    if self.extended_sync_enabled and self.highlights_notes_sync_enabled
-            and pre_file_path and pre_book_id then
+    -- pre_book_id may be nil (server offline at open time); syncHighlightsAndNotes will
+    -- still queue all annotations into pending_annotations so they are retried once the
+    -- book_id is resolved.
+    if self.extended_sync_enabled and self.highlights_notes_sync_enabled and pre_file_path then
         local strategy = self.upload_strategy or "on_session"
         local open_doc = self.ui and self.ui.document
         -- "On session": fire on every close
@@ -2809,17 +2812,29 @@ function BookloreSync:syncPendingRatings(silent)
                     -- Leave flag set; will retry on the next sync once credentials are added.
                 end
             elseif mode == "select_at_complete" then
-                -- Show the interactive dialog; schedule slightly in the future
-                -- so it appears after any session-sync UI settles.
-                -- Clear the flag before scheduling so the dialog is not re-shown
-                -- on subsequent syncs (showRatingDialog guards against re-rating via
-                -- the rating_synced check).
-                local file_path = row.file_path
-                local book_id   = row.book_id
-                self.db:setPendingRatingPrompt(row.book_cache_id, false)
-                UIManager:scheduleIn(2, function()
-                    self:showRatingDialog(file_path, book_id)
-                end)
+                -- If the user already submitted a rating via the immediate dialog
+                -- (shown at book-close time), it is now sitting in pending_ratings
+                -- with a nil book_id.  Now that we have the real book_id, update
+                -- the pending row so Phase 2 can upload it without re-prompting.
+                local meta = self.db:getBookMetadata(row.book_cache_id)
+                if meta and meta.rating then
+                    -- Rating already captured — just stamp the resolved book_id
+                    -- onto the pending_ratings row and clear the deferred flag.
+                    self.db:addPendingRating(row.book_cache_id, row.book_id, meta.rating)
+                    self.db:setPendingRatingPrompt(row.book_cache_id, false)
+                    self:logInfo("BookloreSync: Stamped book_id", row.book_id,
+                                 "onto pending rating for book_cache_id:", row.book_cache_id)
+                else
+                    -- No rating stored yet — show the dialog now that we have a book_id.
+                    -- Clear the flag before scheduling so the dialog is not re-shown
+                    -- on subsequent syncs.
+                    local file_path = row.file_path
+                    local book_id   = row.book_id
+                    self.db:setPendingRatingPrompt(row.book_cache_id, false)
+                    UIManager:scheduleIn(2, function()
+                        self:showRatingDialog(file_path, book_id)
+                    end)
+                end
             end
         end
     end
@@ -2843,8 +2858,20 @@ function BookloreSync:syncPendingRatings(silent)
         self:logInfo("BookloreSync: Submitting pending rating — book_id:", row.book_id,
                      "rating:", row.rating, "(retry #" .. (row.retry_count + 1) .. ")")
 
+        -- Resolve book_id if it was nil when the rating was first queued.
+        local book_id = row.book_id
+        if not book_id then
+            local bc = self.db:getBookCacheById(row.book_cache_id)
+            book_id = bc and bc.book_id or nil
+            if not book_id then
+                self:logInfo("BookloreSync: book_id still unknown for pending rating id:", row.id, "— will retry later")
+                goto continue_rating
+            end
+            self:logInfo("BookloreSync: Resolved book_id", book_id, "for pending rating id:", row.id)
+        end
+
         local ok, err = self.api:submitRating(
-            row.book_id, row.rating,
+            book_id, row.rating,
             self.booklore_username, self.booklore_password
         )
 
@@ -2862,9 +2889,158 @@ function BookloreSync:syncPendingRatings(silent)
             self.db:recordRatingSyncHistory(row.book_cache_id, row.rating, "error", err)
             self.db:incrementPendingRatingRetryCount(row.id)
         end
+
+        ::continue_rating::
     end
 
     self:logInfo("BookloreSync: Pending ratings sync complete — synced:", synced_count, "failed:", failed_count)
+    return synced_count, failed_count
+end
+
+--[[--
+Retry all annotations that previously failed to upload.
+
+Reads every row from `pending_annotations`, attempts to re-submit each one
+using the stored JSON payload, and removes successfully-uploaded rows.
+Rows that fail again have their retry_count incremented and remain queued.
+
+This is called automatically at the start of every syncPendingSessions() run
+and can also be triggered directly (e.g. from a manual sync button).
+
+Note: CFI-dependent annotations (highlights and in-book notes) require a
+CFI string in the payload.  If the stored payload contains pos0/pos1 fields
+but no pre-computed CFI, this path cannot rebuild the CFI because the EPUB
+document is no longer open.  Those rows will remain pending until the book is
+opened again and syncHighlightsAndNotes() succeeds.
+
+@param silent boolean  If true, do not show UI messages
+@return integer synced_count
+@return integer failed_count
+--]]
+function BookloreSync:syncPendingAnnotations(silent)
+    silent = silent or false
+
+    if not self.db then
+        self:logErr("BookloreSync: syncPendingAnnotations — database not initialised")
+        return 0, 0
+    end
+
+    if not self.highlights_notes_sync_enabled then
+        self:logInfo("BookloreSync: Annotation sync disabled — skipping pending annotations")
+        return 0, 0
+    end
+
+    if self.booklore_username == "" or self.booklore_password == "" then
+        self:logInfo("BookloreSync: Pending annotations skipped — Booklore credentials not configured")
+        return 0, 0
+    end
+
+    local pending = self.db:getPendingAnnotations()
+    if #pending == 0 then
+        self:logInfo("BookloreSync: No pending annotations to sync")
+        return 0, 0
+    end
+
+    self:logInfo("BookloreSync: Retrying", #pending, "pending annotation(s)")
+
+    -- Ensure the API client has up-to-date credentials
+    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+
+    local synced_count = 0
+    local failed_count = 0
+
+    for _, row in ipairs(pending) do
+        self:logInfo("BookloreSync: Retrying pending annotation — id:", row.id,
+                     "type:", row.ann_type, "datetime:", row.datetime,
+                     "(retry #" .. (row.retry_count + 1) .. ")")
+
+        -- Decode the stored payload
+        local ok_dec, payload = pcall(json.decode, row.payload)
+        if not ok_dec or type(payload) ~= "table" then
+            self:logErr("BookloreSync: Failed to decode pending annotation payload (id:", row.id, ") — removing")
+            self.db:deletePendingAnnotation(row.id)
+            goto continue_ann
+        end
+
+        -- Resolve book_id: use cached value from the row, or look up from
+        -- book_cache now (it may have been populated since the annotation was queued).
+        local book_id = row.book_id
+        if not book_id then
+            local bc = self.db:getBookCacheById(row.book_cache_id)
+            book_id = bc and bc.book_id or nil
+            if not book_id then
+                self:logInfo("BookloreSync: book_id still unknown for pending annotation id:", row.id, "— will retry later")
+                goto continue_ann
+            end
+            self:logInfo("BookloreSync: Resolved book_id", book_id, "for pending annotation id:", row.id)
+        end
+
+        local ok, server_id
+
+        if row.ann_type == "highlight" then
+            -- Highlights require a CFI.  Without an open document we cannot
+            -- recompute it from pos0/pos1, so skip if the payload has no cfi.
+            -- (When the book is opened next time syncHighlightsAndNotes will
+            -- pick it up fresh and the pending row will be superseded.)
+            local cfi = payload.cfi
+            if not cfi or cfi == "" then
+                self:logInfo("BookloreSync: Skipping pending highlight (no CFI available) — id:", row.id)
+                goto continue_ann
+            end
+            ok, server_id = self.api:submitHighlight(
+                book_id, cfi, payload.text,
+                {
+                    color         = payload.color,
+                    style         = payload.style,
+                    chapter_title = payload.chapter,
+                },
+                self.booklore_username, self.booklore_password
+            )
+
+        elseif row.ann_type == "in_book_note" then
+            local cfi = payload.cfi
+            if not cfi or cfi == "" then
+                self:logInfo("BookloreSync: Skipping pending in-book note (no CFI available) — id:", row.id)
+                goto continue_ann
+            end
+            ok, server_id = self.api:submitInBookNote(
+                book_id, cfi, payload.note,
+                {
+                    selected_text = payload.text,
+                    color         = payload.color,
+                    chapter_title = payload.chapter,
+                },
+                self.booklore_username, self.booklore_password
+            )
+
+        elseif row.ann_type == "booklore_note" then
+            ok, server_id = self.api:submitBookloreNote(
+                book_id, payload.note, payload.chapter,
+                self.booklore_username, self.booklore_password
+            )
+
+        else
+            self:logWarn("BookloreSync: Unknown ann_type in pending_annotations (id:", row.id, "):", row.ann_type, "— removing")
+            self.db:deletePendingAnnotation(row.id)
+            goto continue_ann
+        end
+
+        if ok then
+            synced_count = synced_count + 1
+            -- Record as synced so syncHighlightsAndNotes skips it in future
+            self.db:markAnnotationSynced(row.book_cache_id, row.datetime, row.ann_type, server_id)
+            self.db:deletePendingAnnotation(row.id)
+            self:logInfo("BookloreSync: Pending annotation synced (id:", row.id, ")")
+        else
+            failed_count = failed_count + 1
+            self:logWarn("BookloreSync: Pending annotation retry failed (id:", row.id, "):", server_id)
+            self.db:incrementPendingAnnotationRetryCount(row.id)
+        end
+
+        ::continue_ann::
+    end
+
+    self:logInfo("BookloreSync: Pending annotations sync complete — synced:", synced_count, "failed:", failed_count)
     return synced_count, failed_count
 end
 
@@ -2884,7 +3060,14 @@ function BookloreSync:syncPendingSessions(silent)
 
     -- Always attempt to flush any ratings that failed previously, regardless
     -- of whether there are sessions queued.
-    self:syncPendingRatings(true)
+    local ratings_synced, ratings_failed = self:syncPendingRatings(true)
+    ratings_synced = tonumber(ratings_synced) or 0
+    ratings_failed = tonumber(ratings_failed) or 0
+
+    -- Always attempt to flush any annotations that failed previously.
+    local ann_synced, ann_failed = self:syncPendingAnnotations(true)
+    ann_synced = tonumber(ann_synced) or 0
+    ann_failed = tonumber(ann_failed) or 0
 
     local pending_count = self.db:getPendingSessionCount()
     pending_count = tonumber(pending_count) or 0
@@ -2892,8 +3075,27 @@ function BookloreSync:syncPendingSessions(silent)
     if pending_count == 0 then
         self:logInfo("BookloreSync: No pending sessions to sync")
         if not silent then
+            local parts = {}
+            if ratings_synced + ratings_failed > 0 then
+                parts[#parts + 1] = T(_("R: %1 synced"), ratings_synced)
+                if ratings_failed > 0 then
+                    parts[#parts + 1] = T(_("%1 failed"), ratings_failed)
+                end
+            end
+            if ann_synced + ann_failed > 0 then
+                parts[#parts + 1] = T(_("A: %1 synced"), ann_synced)
+                if ann_failed > 0 then
+                    parts[#parts + 1] = T(_("%1 failed"), ann_failed)
+                end
+            end
+            local msg
+            if #parts > 0 then
+                msg = table.concat(parts, "\n") .. "\n" .. _("S: none pending.")
+            else
+                msg = _("No pending items to sync")
+            end
             UIManager:show(InfoMessage:new{
-                text = _("No pending sessions to sync"),
+                text = msg,
                 timeout = 2,
             })
         end
@@ -2902,9 +3104,9 @@ function BookloreSync:syncPendingSessions(silent)
     
     self:logInfo("BookloreSync: Starting sync of", pending_count, "pending sessions")
     
-    if not silent and not self.silent_messages then
+    if not silent then
         UIManager:show(InfoMessage:new{
-            text = T(_("Syncing %1 pending sessions..."), pending_count),
+            text = T(_("Syncing %1 pending S..."), pending_count),
             timeout = 2,
         })
     end
@@ -3015,18 +3217,31 @@ function BookloreSync:syncPendingSessions(silent)
     self:logInfo("BookloreSync: Sync complete - synced:", synced_count, 
                 "failed:", failed_count, "resolved:", resolved_count)
     
-    if not silent and not self.silent_messages then
-        local message
+    if not silent then
+        local parts = {}
         if synced_count > 0 and failed_count > 0 then
-            message = T(_("Synced %1 sessions, %2 failed"), synced_count, failed_count)
+            parts[#parts + 1] = T(_("S: %1 synced, %2 failed"), synced_count, failed_count)
         elseif synced_count > 0 then
-            message = T(_("All %1 sessions synced successfully!"), synced_count)
+            parts[#parts + 1] = T(_("S: %1 synced"), synced_count)
         else
-            message = _("All sync attempts failed - check connection")
+            parts[#parts + 1] = _("S: all failed — check connection")
         end
-        
+        if ratings_synced + ratings_failed > 0 then
+            if ratings_failed > 0 then
+                parts[#parts + 1] = T(_("R: %1 synced, %2 failed"), ratings_synced, ratings_failed)
+            else
+                parts[#parts + 1] = T(_("R: %1 synced"), ratings_synced)
+            end
+        end
+        if ann_synced + ann_failed > 0 then
+            if ann_failed > 0 then
+                parts[#parts + 1] = T(_("A: %1 synced, %2 failed"), ann_synced, ann_failed)
+            else
+                parts[#parts + 1] = T(_("A: %1 synced"), ann_synced)
+            end
+        end
         UIManager:show(InfoMessage:new{
-            text = message,
+            text = table.concat(parts, "\n"),
             timeout = 3,
         })
     end

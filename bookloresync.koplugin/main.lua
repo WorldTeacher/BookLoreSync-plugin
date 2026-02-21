@@ -650,10 +650,15 @@ Sync the KOReader star rating (1-5) to Booklore, scaled to 1-10 by multiplying b
 
 Called silently at the end of a session when rating_sync_mode == "koreader_scaled".
 
-@param doc_path  string  Full path to the document
-@param book_id   number  Booklore book ID
+@param doc_path      string       Full path to the document
+@param book_id       number       Booklore book ID
+@param live_rating   number|nil   Pre-read in-memory rating (1-5).  When provided,
+                                  this value is used directly and the on-disk sidecar
+                                  is NOT read.  Pass this when calling from
+                                  onCloseDocument, where the sidecar has not yet been
+                                  flushed by KOReader.
 --]]
-function BookloreSync:syncKOReaderRating(doc_path, book_id)
+function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
     if not doc_path or not book_id then
         self:logWarn("BookloreSync: syncKOReaderRating called with missing arguments")
         return
@@ -673,7 +678,17 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id)
         end
     end
 
-    local rating_1_5 = self.metadata_extractor:getRating(doc_path)
+    -- Use the pre-read live rating when available (avoids the stale-sidecar timing
+    -- issue at onCloseDocument time).  Fall back to the on-disk read for all other
+    -- call sites (e.g. syncPendingRatings deferred path, where the sidecar is fine).
+    local rating_1_5
+    if live_rating ~= nil then
+        rating_1_5 = tonumber(live_rating)
+        self:logInfo("BookloreSync: Using live in-memory rating:", rating_1_5)
+    else
+        rating_1_5 = self.metadata_extractor:getRating(doc_path)
+    end
+
     if not rating_1_5 then
         self:logInfo("BookloreSync: No KOReader rating set for this book — skipping rating sync")
         return
@@ -694,10 +709,23 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id)
         end
         if book_cache_id then
             self.db:upsertBookMetadata(book_cache_id, { rating = rating_scaled, rating_synced = true })
+            self.db:recordRatingSyncHistory(book_cache_id, rating_scaled, "success")
         end
         self:logInfo("BookloreSync: Rating synced successfully")
     else
         self:logWarn("BookloreSync: Failed to sync rating:", err)
+        -- Ensure we have a book_cache_id to queue against
+        if not book_cache_id then
+            book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+        end
+        if book_cache_id then
+            -- Store rating value and clear synced flag so it shows as pending
+            self.db:upsertBookMetadata(book_cache_id, { rating = rating_scaled, rating_synced = false })
+            -- Add to the pending_ratings queue for retry on the next upload
+            self.db:addPendingRating(book_cache_id, book_id, rating_scaled)
+            self.db:recordRatingSyncHistory(book_cache_id, rating_scaled, "error", err)
+            self:logInfo("BookloreSync: Rating queued for retry (book_cache_id:", book_cache_id, ")")
+        end
     end
 end
 
@@ -775,6 +803,7 @@ function BookloreSync:showRatingDialog(doc_path, book_id)
                             if ok then
                                 if bcid then
                                     self.db:markRatingSynced(bcid)
+                                    self.db:recordRatingSyncHistory(bcid, value, "success")
                                 end
                                 UIManager:show(InfoMessage:new{
                                     text = T(_("Rating %1/10 saved and synced"), value),
@@ -782,14 +811,24 @@ function BookloreSync:showRatingDialog(doc_path, book_id)
                                 })
                             else
                                 self:logWarn("BookloreSync: Rating submit failed:", err)
+                                -- Queue for retry on the next upload trigger
+                                if bcid then
+                                    self.db:addPendingRating(bcid, book_id, value)
+                                    self.db:recordRatingSyncHistory(bcid, value, "error", err)
+                                end
                                 UIManager:show(InfoMessage:new{
                                     text = T(_("Rating %1/10 saved (will retry on next sync)"), value),
                                     timeout = 2,
                                 })
                             end
                         else
+                            -- No credentials yet — the rating is stored locally;
+                            -- queue it so it is sent once credentials are configured.
+                            if bcid then
+                                self.db:addPendingRating(bcid, book_id, value)
+                            end
                             UIManager:show(InfoMessage:new{
-                                text = T(_("Rating %1/10 saved"), value),
+                                text = T(_("Rating %1/10 saved (will retry on next sync)"), value),
                                 timeout = 2,
                             })
                         end
@@ -2521,21 +2560,53 @@ function BookloreSync:onCloseDocument()
         pre_end_progress = self:getCurrentProgress()
     end
 
+    -- Read the live in-memory KOReader star rating NOW, while the document is
+    -- still open and self.ui.doc_settings is valid.  KOReader flushes doc_settings
+    -- to the .sdr sidecar AFTER this event fires, so reading from disk here would
+    -- always return a stale (or absent) value.
+    local pre_live_rating = nil
+    if self.ui and self.ui.doc_settings then
+        local ok_r, summary = pcall(function()
+            return self.ui.doc_settings:readSetting("summary")
+        end)
+        if ok_r and summary and summary.rating then
+            pre_live_rating = tonumber(summary.rating)
+            self:logInfo("BookloreSync: Captured live in-memory rating:", pre_live_rating)
+        end
+    end
+
     self:endSession({ silent = false, force_queue = false })
 
     -- Rating sync (only when extended sync and rating sync are enabled)
-    if self.extended_sync_enabled and self.rating_sync_enabled
-            and pre_file_path and pre_book_id then
+    if self.extended_sync_enabled and self.rating_sync_enabled and pre_file_path then
         local mode = self.rating_sync_mode or "koreader_scaled"
-        if mode == "koreader_scaled" then
-            -- Silent, immediate — sync whatever KOReader star rating is set
-            self:syncKOReaderRating(pre_file_path, pre_book_id)
-        elseif mode == "select_at_complete" then
-            -- Only prompt when the book is considered finished (>= 99 %)
-            if pre_end_progress and pre_end_progress >= 99 then
-                UIManager:scheduleIn(0.5, function()
-                    self:showRatingDialog(pre_file_path, pre_book_id)
-                end)
+        if pre_book_id then
+            -- Normal path: Booklore book ID is known, act immediately.
+            if mode == "koreader_scaled" then
+                -- Silent, immediate — pass the live in-memory rating so the stale
+                -- on-disk sidecar is never consulted during this close event.
+                self:syncKOReaderRating(pre_file_path, pre_book_id, pre_live_rating)
+            elseif mode == "select_at_complete" then
+                -- Only prompt when the book is considered finished (>= 99 %)
+                if pre_end_progress and pre_end_progress >= 99 then
+                    UIManager:scheduleIn(0.5, function()
+                        self:showRatingDialog(pre_file_path, pre_book_id)
+                    end)
+                end
+            end
+        elseif pre_end_progress and pre_end_progress >= 99 then
+            -- book_id not yet known (server was offline at open time).
+            -- Store a deferred flag so the next sync run handles it once the
+            -- book ID has been resolved.
+            local book_cache_id = self.db:getBookCacheIdByFilePath(pre_file_path)
+            if not book_cache_id then
+                -- Create a minimal cache entry so we have somewhere to hang the flag
+                self.db:saveBookCache(pre_file_path, "", nil, nil, nil, nil, nil)
+                book_cache_id = self.db:getBookCacheIdByFilePath(pre_file_path)
+            end
+            if book_cache_id then
+                self.db:setPendingRatingPrompt(book_cache_id, true)
+                self:logInfo("BookloreSync: Book completed but no book_id yet — deferred rating prompt stored")
             end
         end
     end
@@ -2679,9 +2750,100 @@ function BookloreSync:onResume()
     return false
 end
 
+--[[--
+Retry all ratings that are sitting in the pending_ratings queue, and
+process any deferred rating prompts whose book_id has now been resolved.
+
+Called automatically at the start of every syncPendingSessions() run so
+that a failed or deferred rating is uploaded on the very next successful
+connection, regardless of whether the trigger was a session, a note, or
+an explicit sync.
+
+@param silent boolean  Suppress UI feedback (default false)
+@return integer synced_count, integer failed_count
+--]]
+function BookloreSync:syncPendingRatings(silent)
+    silent = silent or false
+
+    if not self.db then
+        self:logErr("BookloreSync: syncPendingRatings — database not initialised")
+        return 0, 0
+    end
+
+    -- ── Phase 1: deferred rating prompts ─────────────────────────────────
+    -- These are books that were completed while the book_id was unknown.
+    -- Now that the cache may have been updated, check if a book_id exists.
+    local deferred = self.db:getBooksPendingRatingPrompt()
+    if #deferred > 0 then
+        self:logInfo("BookloreSync: Processing", #deferred, "deferred rating prompt(s)")
+        local mode = self.rating_sync_mode or "koreader_scaled"
+        for _, row in ipairs(deferred) do
+            self:logInfo("BookloreSync: Deferred rating prompt — book_id:", row.book_id,
+                         "file:", row.file_path)
+            if mode == "koreader_scaled" then
+                -- Push the KOReader star rating silently now that we have a book_id
+                self:syncKOReaderRating(row.file_path, row.book_id)
+            elseif mode == "select_at_complete" then
+                -- Show the interactive dialog; schedule slightly in the future
+                -- so it appears after any session-sync UI settles.
+                local file_path = row.file_path
+                local book_id   = row.book_id
+                UIManager:scheduleIn(0.5, function()
+                    self:showRatingDialog(file_path, book_id)
+                end)
+            end
+            -- Clear the deferred flag regardless of mode so it is not repeated
+            self.db:setPendingRatingPrompt(row.book_cache_id, false)
+        end
+    end
+
+    -- ── Phase 2: retry previously-failed rating submissions ──────────────
+    local pending = self.db:getPendingRatings()
+    if #pending == 0 then
+        self:logInfo("BookloreSync: No pending ratings to sync")
+        return 0, 0
+    end
+
+    self:logInfo("BookloreSync: Retrying", #pending, "pending rating(s)")
+
+    -- Ensure the API client has up-to-date credentials
+    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+
+    local synced_count = 0
+    local failed_count = 0
+
+    for _, row in ipairs(pending) do
+        self:logInfo("BookloreSync: Submitting pending rating — book_id:", row.book_id,
+                     "rating:", row.rating, "(retry #" .. (row.retry_count + 1) .. ")")
+
+        local ok, err = self.api:submitRating(
+            row.book_id, row.rating,
+            self.booklore_username, self.booklore_password
+        )
+
+        if ok then
+            synced_count = synced_count + 1
+            -- Mark rating as synced in book_metadata and record the outcome
+            self.db:upsertBookMetadata(row.book_cache_id, { rating = row.rating, rating_synced = true })
+            self.db:recordRatingSyncHistory(row.book_cache_id, row.rating, "success")
+            -- Remove from the pending queue
+            self.db:deletePendingRating(row.id)
+            self:logInfo("BookloreSync: Pending rating synced successfully (id:", row.id, ")")
+        else
+            failed_count = failed_count + 1
+            self:logWarn("BookloreSync: Pending rating sync failed (id:", row.id, "):", err)
+            self.db:recordRatingSyncHistory(row.book_cache_id, row.rating, "error", err)
+            self.db:incrementPendingRatingRetryCount(row.id)
+        end
+    end
+
+    self:logInfo("BookloreSync: Pending ratings sync complete — synced:", synced_count, "failed:", failed_count)
+    return synced_count, failed_count
+end
+
 function BookloreSync:syncPendingSessions(silent)
     silent = silent or false
-    
+
     if not self.db then
         self:logErr("BookloreSync: Database not initialized")
         if not silent then
@@ -2692,10 +2854,14 @@ function BookloreSync:syncPendingSessions(silent)
         end
         return
     end
-    
+
+    -- Always attempt to flush any ratings that failed previously, regardless
+    -- of whether there are sessions queued.
+    self:syncPendingRatings(true)
+
     local pending_count = self.db:getPendingSessionCount()
     pending_count = tonumber(pending_count) or 0
-    
+
     if pending_count == 0 then
         self:logInfo("BookloreSync: No pending sessions to sync")
         if not silent then

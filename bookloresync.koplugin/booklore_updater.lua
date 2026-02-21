@@ -55,8 +55,8 @@ function Updater:init(plugin_dir, db)
     -- Set up backup directory
     self.backup_dir = DataStorage:getDataDir() .. "/booklore-backups"
     
-    -- Set up temp directory
-    self.temp_dir = "/tmp/booklore-update-" .. tostring(os.time())
+    -- Set up temp directory inside KOReader data dir (writable on all platforms including Android)
+    self.temp_dir = DataStorage:getDataDir() .. "/booklore-temp-" .. tostring(os.time())
     
     logger.info("BookloreSync Updater: Initialized")
     logger.info("BookloreSync Updater: Plugin dir:", self.plugin_dir)

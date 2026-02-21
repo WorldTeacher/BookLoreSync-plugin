@@ -1742,19 +1742,73 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("Clear Pending Sessions"),
-                help_text = _("Delete all locally cached sessions that are waiting to be synced. Use this if you want to discard pending sessions instead of uploading them."),
+                text_func = function()
+                    if not self.db then return _("Match Unmatched Books") end
+                    local stats = self.db:getBookCacheStats()
+                    local n = stats and stats.unmatched or 0
+                    if n == 0 then return _("Match Unmatched Books") end
+                    return T(_("Match Unmatched Books (%1)"), n)
+                end,
+                help_text = _("Query the Booklore server to resolve book IDs for any cached books that were opened while the server was offline. Requires a network connection."),
+                keep_menu_open = true,
                 enabled_func = function()
-                    return self.db and self.db:getPendingSessionCount() > 0
+                    if not self.db then return false end
+                    local stats = self.db:getBookCacheStats()
+                    return stats and stats.unmatched > 0
                 end,
                 callback = function()
-                    if self.db then
-                        self.db:clearPendingSessions()
+                    if not NetworkMgr:isConnected() then
                         UIManager:show(InfoMessage:new{
-                            text = _("Pending sessions cleared"),
+                            text = _("No network connection"),
                             timeout = 2,
                         })
+                        return
                     end
+                    local resolved = self:resolveUnmatchedBooks(false)
+                    if not resolved or resolved == 0 then
+                        local stats = self.db:getBookCacheStats()
+                        local remaining = stats and stats.unmatched or 0
+                        if remaining > 0 then
+                            UIManager:show(ConfirmBox:new{
+                                text = T(_("No new matches found (%1 still unmatched).\n\nDo you want to manually match the books?"), remaining),
+                                ok_text = _("Yes"),
+                                cancel_text = _("No"),
+                                ok_callback = function()
+                                    self:_startBookCacheMatching()
+                                end,
+                            })
+                        else
+                            UIManager:show(InfoMessage:new{
+                                text = _("All books matched"),
+                                timeout = 2,
+                            })
+                        end
+                    end
+                end,
+            },
+            {
+                text_func = function()
+                    if not self.db then return _("Clear Pending...") end
+                    local s = tonumber(self.db:getPendingSessionCount())    or 0
+                    local a = tonumber(self.db:getPendingAnnotationCount()) or 0
+                    local r = tonumber(self.db:getPendingRatingCount())     or 0
+                    if (s + a + r) == 0 then return _("Clear Pending...") end
+                    local parts = {}
+                    if s > 0 then table.insert(parts, T(_("%1 S"), s)) end
+                    if a > 0 then table.insert(parts, T(_("%1 A"), a)) end
+                    if r > 0 then table.insert(parts, T(_("%1 R"), r)) end
+                    return T(_("Clear Pending... (%1)"), table.concat(parts, ", "))
+                end,
+                help_text = _("Choose which types of pending items to delete from the local queue: sessions, annotations (highlights/notes), and/or ratings."),
+                enabled_func = function()
+                    if not self.db then return false end
+                    local s = tonumber(self.db:getPendingSessionCount())    or 0
+                    local a = tonumber(self.db:getPendingAnnotationCount()) or 0
+                    local r = tonumber(self.db:getPendingRatingCount())     or 0
+                    return (s + a + r) > 0
+                end,
+                callback = function()
+                    self:showClearPendingDialog()
                 end,
             },
             {
@@ -3044,6 +3098,110 @@ function BookloreSync:syncPendingAnnotations(silent)
     return synced_count, failed_count
 end
 
+--[[--
+Show a toggle-selection dialog for clearing pending items.
+
+Presents three toggleable rows (Sessions, Annotations, Ratings), each
+showing its current queue count.  After the user confirms, all selected
+types are deleted from the database and a summary InfoMessage is shown.
+--]]
+function BookloreSync:showClearPendingDialog()
+    if not self.db then return end
+
+    -- Mutable toggle state (all ON by default for types that have items)
+    local s_count = tonumber(self.db:getPendingSessionCount())    or 0
+    local a_count = tonumber(self.db:getPendingAnnotationCount()) or 0
+    local r_count = tonumber(self.db:getPendingRatingCount())     or 0
+
+    local sel = {
+        sessions    = s_count > 0,
+        annotations = a_count > 0,
+        ratings     = r_count > 0,
+    }
+
+    local dialog
+    local function buildDialog()
+        local function toggle_label(active, label, count)
+            local check = active and "[x]" or "[ ]"
+            return T(_("%1 %2 (%3)"), check, label, count)
+        end
+
+        local any_selected = sel.sessions or sel.annotations or sel.ratings
+
+        local buttons = {}
+
+        if s_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.sessions, _("Sessions"), s_count),
+                callback = function()
+                    sel.sessions = not sel.sessions
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if a_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.annotations, _("Annotations"), a_count),
+                callback = function()
+                    sel.annotations = not sel.annotations
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if r_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.ratings, _("Ratings"), r_count),
+                callback = function()
+                    sel.ratings = not sel.ratings
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        table.insert(buttons, {
+            {
+                text = _("Clear Selected"),
+                enabled = any_selected,
+                callback = function()
+                    UIManager:close(dialog)
+                    local cleared = {}
+                    if sel.sessions    then self.db:clearPendingSessions();    table.insert(cleared, _("Sessions"))    end
+                    if sel.annotations then self.db:clearPendingAnnotations(); table.insert(cleared, _("Annotations")) end
+                    if sel.ratings     then self.db:clearPendingRatings();     table.insert(cleared, _("Ratings"))     end
+                    if #cleared > 0 then
+                        UIManager:show(InfoMessage:new{
+                            text = T(_("Cleared: %1"), table.concat(cleared, ", ")),
+                            timeout = 2,
+                        })
+                    end
+                end,
+            },
+            {
+                text = _("Cancel"),
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+        })
+
+        return ButtonDialog:new{
+            title = _("Clear Pending Items"),
+            buttons = buttons,
+        }
+    end
+
+    dialog = buildDialog()
+    UIManager:show(dialog)
+end
+
 function BookloreSync:syncPendingSessions(silent)
     silent = silent or false
 
@@ -3250,6 +3408,194 @@ function BookloreSync:syncPendingSessions(silent)
 end
 
 --[[--
+Manual matching flow for book_cache entries with no book_id.
+
+Iterates over every unmatched book_cache row and, for each one, tries:
+  1. Title search on the server → user picks from results
+  2. User can skip a book
+
+On a confirmed match the book_id is written back into book_cache so that
+subsequent syncPendingAnnotations / syncPendingRatings / syncPendingSessions
+runs can resolve and upload the queued items automatically.
+--]]
+
+function BookloreSync:_startBookCacheMatching()
+    if not self.db then return end
+    local unmatched = self.db:getAllUnmatchedBooks()
+    if not unmatched or #unmatched == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("All books are already matched"),
+            timeout = 2,
+        })
+        return
+    end
+    self:logInfo("BookloreSync: Starting manual book-cache matching for", #unmatched, "books")
+    self.bk_matching_index = 1
+    self.bk_unmatched_books = unmatched
+    self:_showNextBookCacheMatch()
+end
+
+function BookloreSync:_showNextBookCacheMatch()
+    if not self.bk_unmatched_books or
+       self.bk_matching_index > #self.bk_unmatched_books then
+        UIManager:show(InfoMessage:new{
+            text = _("Matching complete!"),
+            timeout = 2,
+        })
+        self.bk_unmatched_books = nil
+        self.bk_matching_index  = nil
+        return
+    end
+
+    local book        = self.bk_unmatched_books[self.bk_matching_index]
+    local progress    = T(_("Book %1 of %2"),
+                          self.bk_matching_index, #self.bk_unmatched_books)
+    local search_term = book.title and book.title ~= "" and book.title
+                        or book.file_path:match("([^/]+)$") or ""
+
+    UIManager:show(InfoMessage:new{
+        text = T(_("Searching for: %1\n\n%2"), search_term, progress),
+        timeout = 1,
+    })
+
+    local success, results = self.api:searchBooksWithAuth(
+        search_term, self.booklore_username, self.booklore_password
+    )
+
+    if not success then
+        local err = type(results) == "string" and results or _("Unknown error")
+        UIManager:show(ConfirmBox:new{
+            text = T(_("Search failed for:\n%1\n\nError: %2\n\nSkip this book?"),
+                     search_term, err),
+            ok_text     = _("Skip"),
+            cancel_text = _("Retry"),
+            ok_callback = function()
+                self.bk_matching_index = self.bk_matching_index + 1
+                self:_showNextBookCacheMatch()
+            end,
+            cancel_callback = function()
+                self:_showNextBookCacheMatch()
+            end,
+        })
+        return
+    end
+
+    if not results or #results == 0 then
+        UIManager:show(ConfirmBox:new{
+            text = T(_("No matches found for:\n%1\n\n%2\n\nSkip this book?"),
+                     search_term, progress),
+            ok_text = _("Skip"),
+            ok_callback = function()
+                self.bk_matching_index = self.bk_matching_index + 1
+                self:_showNextBookCacheMatch()
+            end,
+            cancel_callback = function()
+                self:_showNextBookCacheMatch()
+            end,
+        })
+        return
+    end
+
+    -- Show selection dialog
+    local top_results = {}
+    for i = 1, math.min(5, #results) do
+        top_results[i] = results[i]
+    end
+
+    local buttons = {}
+    for i, result in ipairs(top_results) do
+        local score = result.matchScore
+            and string.format(" (%.0f%%)", result.matchScore * 100)
+            or ""
+        local label = result.title .. score
+        if result.author and result.author ~= "" then
+            label = label .. "\n" .. result.author
+        end
+        table.insert(buttons, {{
+            text = label,
+            callback = function()
+                UIManager:close(self.bk_match_dialog)
+                self:_saveBookCacheMatch(book, result)
+            end,
+        }})
+    end
+    table.insert(buttons, {{
+        text = _("Skip this book"),
+        callback = function()
+            UIManager:close(self.bk_match_dialog)
+            self.bk_matching_index = self.bk_matching_index + 1
+            self:_showNextBookCacheMatch()
+        end,
+    }})
+    table.insert(buttons, {{
+        text = _("Cancel matching"),
+        callback = function()
+            UIManager:close(self.bk_match_dialog)
+            self.bk_unmatched_books = nil
+            self.bk_matching_index  = nil
+        end,
+    }})
+
+    self.bk_match_dialog = ButtonDialog:new{
+        title = T(_("Select match for:\n%1\n\n%2"), search_term, progress),
+        buttons = buttons,
+    }
+    UIManager:show(self.bk_match_dialog)
+end
+
+--[[--
+Save a manually confirmed book_cache match and trigger a pending-items sync.
+
+Writes the resolved book_id (and ISBNs) back into book_cache, then kicks off
+syncPendingSessions so that any annotations / ratings / sessions that were
+queued while the book was unmatched are uploaded immediately.
+--]]
+function BookloreSync:_saveBookCacheMatch(book, selected_result)
+    local book_id    = type(selected_result) == "table"
+                       and tonumber(selected_result.id) or tonumber(selected_result)
+    local book_title = type(selected_result) == "table" and selected_result.title or nil
+    local isbn10     = type(selected_result) == "table" and selected_result.isbn10 or nil
+    local isbn13     = type(selected_result) == "table" and selected_result.isbn13 or nil
+
+    if not book_id then
+        UIManager:show(InfoMessage:new{
+            text = _("Invalid book ID — match not saved"),
+            timeout = 2,
+        })
+        return
+    end
+
+    -- Stamp book_id (and optional ISBNs) into book_cache
+    local ok = self.db:saveBookCache(
+        book.file_path, book.file_hash or "",
+        book_id, book_title or book.title, book.author,
+        isbn10, isbn13
+    )
+
+    if not ok then
+        UIManager:show(InfoMessage:new{
+            text = _("Failed to save match to database"),
+            timeout = 2,
+        })
+        return
+    end
+
+    self:logInfo("BookloreSync: Saved manual match — file:", book.file_path,
+                 "book_id:", book_id)
+
+    -- Advance to the next unmatched book
+    self.bk_matching_index = self.bk_matching_index + 1
+
+    -- Kick off a sync so pending annotations/ratings/sessions for this book
+    -- are uploaded right away.  Run silently so the UI just shows the next
+    -- book-match dialog without interruption.
+    self:syncPendingSessions(true)
+
+    -- Show the next match
+    self:_showNextBookCacheMatch()
+end
+
+--[[--
 Resolve book IDs for cached books that don't have them yet
 Queries the server for books cached while offline
 @param silent boolean Don't show UI messages if true
@@ -3309,7 +3655,7 @@ function BookloreSync:resolveUnmatchedBooks(silent)
     
     self:logInfo("BookloreSync: Resolved", resolved_count, "of", #unmatched_books, "books")
     
-    if not silent and resolved_count > 0 and not self.silent_messages then
+    if not silent and resolved_count > 0 then
         UIManager:show(InfoMessage:new{
             text = T(_("Resolved %1 books from server"), resolved_count),
             timeout = 2,
@@ -4258,8 +4604,6 @@ end
 function BookloreSync:_confirmHashMatch(book, server_book)
     local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
     
-    local ButtonDialog = require("ui/widget/buttondialog")
-    
     self.hash_match_dialog = ButtonDialog:new{
         title = T(_("Found by hash:\n\n%1\n\n%2"), server_book.title or "Unknown", progress_text),
         buttons = {
@@ -4299,8 +4643,6 @@ end
 
 function BookloreSync:_confirmIsbnMatch(book, server_book, matched_isbn_type)
     local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
-    
-    local ButtonDialog = require("ui/widget/buttondialog")
     
     -- Show which ISBN type matched (ISBN-10 or ISBN-13)
     local isbn_indicator = matched_isbn_type == "isbn13" and "📚 ISBN-13" or "📖 ISBN-10"

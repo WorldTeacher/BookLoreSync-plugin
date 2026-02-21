@@ -2775,6 +2775,13 @@ function BookloreSync:syncPendingRatings(silent)
         return 0, 0
     end
 
+    -- Respect the user's rating-sync toggle: if they disabled rating sync
+    -- after queueing ratings, do not submit anything.
+    if not self.extended_sync_enabled or not self.rating_sync_enabled then
+        self:logInfo("BookloreSync: Rating sync disabled — skipping pending ratings")
+        return 0, 0
+    end
+
     -- ── Phase 1: deferred rating prompts ─────────────────────────────────
     -- These are books that were completed while the book_id was unknown.
     -- Now that the cache may have been updated, check if a book_id exists.
@@ -2786,19 +2793,34 @@ function BookloreSync:syncPendingRatings(silent)
             self:logInfo("BookloreSync: Deferred rating prompt — book_id:", row.book_id,
                          "file:", row.file_path)
             if mode == "koreader_scaled" then
-                -- Push the KOReader star rating silently now that we have a book_id
-                self:syncKOReaderRating(row.file_path, row.book_id)
+                -- Push the KOReader star rating silently now that we have a book_id.
+                -- syncKOReaderRating will either sync successfully, queue the rating
+                -- in pending_ratings on failure, or return early (no rating set /
+                -- already synced / no credentials).  Only clear the deferred flag
+                -- if we actually had credentials to attempt the call — otherwise
+                -- leave the flag so the next sync retries.
+                if self.booklore_username ~= "" and self.booklore_password ~= "" then
+                    self:syncKOReaderRating(row.file_path, row.book_id)
+                    -- Flag cleared below: rating was either sent or queued for retry
+                    -- in pending_ratings, so the deferred-prompt entry is no longer needed.
+                    self.db:setPendingRatingPrompt(row.book_cache_id, false)
+                else
+                    self:logWarn("BookloreSync: Deferred rating skipped — Booklore credentials not configured")
+                    -- Leave flag set; will retry on the next sync once credentials are added.
+                end
             elseif mode == "select_at_complete" then
                 -- Show the interactive dialog; schedule slightly in the future
                 -- so it appears after any session-sync UI settles.
+                -- Clear the flag before scheduling so the dialog is not re-shown
+                -- on subsequent syncs (showRatingDialog guards against re-rating via
+                -- the rating_synced check).
                 local file_path = row.file_path
                 local book_id   = row.book_id
+                self.db:setPendingRatingPrompt(row.book_cache_id, false)
                 UIManager:scheduleIn(2, function()
                     self:showRatingDialog(file_path, book_id)
                 end)
             end
-            -- Clear the deferred flag regardless of mode so it is not repeated
-            self.db:setPendingRatingPrompt(row.book_cache_id, false)
         end
     end
 

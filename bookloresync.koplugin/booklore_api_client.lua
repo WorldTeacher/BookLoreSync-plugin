@@ -843,4 +843,275 @@ function APIClient:_normalizeBookObject(book)
     return book
 end
 
+--[[--
+Submit a personal rating for a single book to Booklore.
+
+Uses Bearer token auth (same credentials as historical data import).
+
+Endpoint: PUT /api/v1/books/personal-rating
+Body: { "ids": [book_id], "rating": rating }
+
+@param book_id number  The Booklore book ID
+@param rating  number  Rating value (1-10)
+@param username string Booklore username for Bearer token
+@param password string Booklore password for Bearer token
+@return boolean success
+@return string|nil error message on failure
+--]]
+function APIClient:submitRating(book_id, rating, username, password)
+    book_id = tonumber(book_id)
+    rating  = tonumber(rating)
+
+    if not book_id then
+        return false, "Invalid book_id"
+    end
+    if not rating or rating < 1 or rating > 10 then
+        return false, "Rating must be between 1 and 10"
+    end
+    if not username or username == "" then
+        return false, "Booklore username required for rating sync"
+    end
+    if not password or password == "" then
+        return false, "Booklore password required for rating sync"
+    end
+
+    self:logInfo("BookloreSync API: Submitting rating", rating, "for book_id", book_id)
+
+    -- Get (or refresh) Bearer token
+    local token_ok, token = self:getOrRefreshBearerToken(username, password, false)
+    if not token_ok then
+        self:logErr("BookloreSync API: Could not obtain Bearer token for rating:", token)
+        return false, token or "Failed to obtain auth token"
+    end
+
+    local body = json.encode({ ids = { book_id }, rating = rating })
+
+    local headers = {
+        ["Authorization"] = "Bearer " .. token,
+        ["Content-Type"]  = "application/json",
+    }
+
+    local success, code, response = self:request("PUT", "/api/v1/books/personal-rating", body, headers)
+
+    -- If token rejected, delete cache, get a fresh token and retry once
+    if not success and (code == 401 or code == 403) then
+        self:logWarn("BookloreSync API: Token rejected (" .. tostring(code) .. ") for rating, refreshing and retrying")
+        if self.db then
+            self.db:deleteBearerToken(username)
+        end
+        local refresh_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if refresh_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("PUT", "/api/v1/books/personal-rating", body, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+
+    if success and (code == 200 or code == 204) then
+        self:logInfo("BookloreSync API: Rating submitted successfully for book_id", book_id)
+        return true, nil
+    else
+        local err_msg = (type(response) == "string" and response ~= "") and response or ("HTTP " .. tostring(code))
+        self:logWarn("BookloreSync API: Failed to submit rating:", err_msg)
+        return false, err_msg
+    end
+end
+
+--[[--
+Submit a highlight (annotation) to Booklore.
+
+Endpoint: POST /api/v1/annotations
+Required body fields: bookId, cfi, text
+Optional: color (hex), style, note, chapterTitle
+
+@param book_id       number
+@param cfi           string  epubcfi(pos0,pos1)
+@param text          string  highlighted text
+@param opts          table   { color, style, note, chapter_title }
+@param username      string
+@param password      string
+@return boolean success
+@return number|string  server annotation id on success, error message on failure
+--]]
+function APIClient:submitHighlight(book_id, cfi, text, opts, username, password)
+    opts = opts or {}
+
+    if not book_id or not cfi or not text or text == "" then
+        return false, "Missing required highlight fields"
+    end
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password, false)
+    if not token_ok then
+        return false, token or "Failed to obtain auth token"
+    end
+
+    local body_tbl = {
+        bookId = tonumber(book_id),
+        cfi    = cfi,
+        text   = text,
+    }
+    if opts.color        and opts.color ~= ""        then body_tbl.color        = opts.color        end
+    if opts.style        and opts.style ~= ""        then body_tbl.style        = opts.style        end
+    if opts.note         and opts.note ~= ""         then body_tbl.note         = opts.note         end
+    if opts.chapter_title and opts.chapter_title ~= "" then body_tbl.chapterTitle = opts.chapter_title end
+
+    local body = json.encode(body_tbl)
+    local headers = {
+        ["Authorization"] = "Bearer " .. token,
+        ["Content-Type"]  = "application/json",
+    }
+
+    local success, code, response = self:request("POST", "/api/v1/annotations", body, headers)
+
+    if not success and (code == 401 or code == 403) then
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("POST", "/api/v1/annotations", body, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+
+    if success and code == 200 then
+        local server_id = type(response) == "table" and response.id or nil
+        self:logInfo("BookloreSync API: Highlight submitted, server id:", server_id)
+        return true, server_id
+    else
+        local err = (type(response) == "string" and response ~= "") and response or ("HTTP " .. tostring(code))
+        self:logWarn("BookloreSync API: Failed to submit highlight:", err)
+        return false, err
+    end
+end
+
+--[[--
+Submit an in-book note (v2) to Booklore.
+
+Endpoint: POST /api/v2/book-notes
+Required body fields: bookId, cfi, noteContent
+Optional: selectedText, color (hex), chapterTitle
+
+@param book_id        number
+@param cfi            string  epubcfi(pos0,pos1)
+@param note_content   string  the note text
+@param opts           table   { selected_text, color, chapter_title }
+@param username       string
+@param password       string
+@return boolean success
+@return number|string  server note id on success, error message on failure
+--]]
+function APIClient:submitInBookNote(book_id, cfi, note_content, opts, username, password)
+    opts = opts or {}
+
+    if not book_id or not cfi or not note_content or note_content == "" then
+        return false, "Missing required in-book note fields"
+    end
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password, false)
+    if not token_ok then
+        return false, token or "Failed to obtain auth token"
+    end
+
+    local body_tbl = {
+        bookId      = tonumber(book_id),
+        cfi         = cfi,
+        noteContent = note_content,
+    }
+    if opts.selected_text  and opts.selected_text ~= ""  then body_tbl.selectedText  = opts.selected_text  end
+    if opts.color          and opts.color ~= ""          then body_tbl.color          = opts.color          end
+    if opts.chapter_title  and opts.chapter_title ~= ""  then body_tbl.chapterTitle   = opts.chapter_title  end
+
+    local body = json.encode(body_tbl)
+    local headers = {
+        ["Authorization"] = "Bearer " .. token,
+        ["Content-Type"]  = "application/json",
+    }
+
+    local success, code, response = self:request("POST", "/api/v2/book-notes", body, headers)
+
+    if not success and (code == 401 or code == 403) then
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("POST", "/api/v2/book-notes", body, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+
+    if success and code == 200 then
+        local server_id = type(response) == "table" and response.id or nil
+        self:logInfo("BookloreSync API: In-book note submitted, server id:", server_id)
+        return true, server_id
+    else
+        local err = (type(response) == "string" and response ~= "") and response or ("HTTP " .. tostring(code))
+        self:logWarn("BookloreSync API: Failed to submit in-book note:", err)
+        return false, err
+    end
+end
+
+--[[--
+Submit a Booklore (web-UI) note to Booklore.
+
+Endpoint: POST /api/v1/book-notes
+Required body fields: bookId, content
+Optional: title
+
+@param book_id   number
+@param content   string  the note text
+@param title     string|nil  chapter title used as note title
+@param username  string
+@param password  string
+@return boolean success
+@return number|string  server note id on success, error message on failure
+--]]
+function APIClient:submitBookloreNote(book_id, content, title, username, password)
+    if not book_id or not content or content == "" then
+        return false, "Missing required Booklore note fields"
+    end
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password, false)
+    if not token_ok then
+        return false, token or "Failed to obtain auth token"
+    end
+
+    local body_tbl = {
+        bookId  = tonumber(book_id),
+        content = content,
+    }
+    if title and title ~= "" then body_tbl.title = title end
+
+    local body = json.encode(body_tbl)
+    local headers = {
+        ["Authorization"] = "Bearer " .. token,
+        ["Content-Type"]  = "application/json",
+    }
+
+    local success, code, response = self:request("POST", "/api/v1/book-notes", body, headers)
+
+    if not success and (code == 401 or code == 403) then
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("POST", "/api/v1/book-notes", body, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+
+    if success and code == 200 then
+        local server_id = type(response) == "table" and response.id or nil
+        self:logInfo("BookloreSync API: Booklore note submitted, server id:", server_id)
+        return true, server_id
+    else
+        local err = (type(response) == "string" and response ~= "") and response or ("HTTP " .. tostring(code))
+        self:logWarn("BookloreSync API: Failed to submit Booklore note:", err)
+        return false, err
+    end
+end
+
 return APIClient

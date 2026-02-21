@@ -31,17 +31,14 @@ Creates the log directory if it doesn't exist and sets up daily rotation.
 @return boolean success
 --]]
 function FileLogger:init(plugin_dir)
-    -- Detect plugin directory from this file's path if not provided
     if not plugin_dir then
         local source = debug.getinfo(1, "S").source
         -- source is "@/path/to/bookloresync.koplugin/booklore_file_logger.lua"
         plugin_dir = source:match("@(.*)/[^/]+$")
     end
 
-    -- Set log directory inside the plugin folder
     self.log_dir = plugin_dir .. "/logs"
 
-    -- Create logs directory using lfs if available, else fall back to os.execute
     local lfs_ok, lfs = pcall(require, "libs/libkoreader-lfs")
     if lfs_ok and lfs then
         if not lfs.attributes(self.log_dir) then
@@ -51,7 +48,6 @@ function FileLogger:init(plugin_dir)
         os.execute("mkdir -p " .. self.log_dir)
     end
 
-    -- Check if directory was created successfully
     local test_file = io.open(self.log_dir .. "/.test", "w")
     if not test_file then
         logger.err("BookloreSync FileLogger: Failed to create log directory:", self.log_dir)
@@ -125,14 +121,12 @@ Rotate old log files, keeping only the last N files
 @return boolean success
 --]]
 function FileLogger:rotateLogs()
-    -- Get all log files in the directory
     local log_files = self:_listLogFiles()
     if not log_files then
         logger.warn("BookloreSync FileLogger: Failed to list log files for rotation")
         return false
     end
     
-    -- Delete files beyond max_files
     if #log_files > self.max_files then
         logger.info("BookloreSync FileLogger: Rotating logs, found", #log_files, "files, keeping", self.max_files)
         
@@ -166,9 +160,7 @@ function FileLogger:write(level, ...)
     
     local current_date = self:getCurrentDate()
     
-    -- Check if we need to create a new log file (date changed)
     if current_date ~= self.current_date then
-        -- Close the current log file if open
         if self.current_log_file then
             self.current_log_file:close()
             self.current_log_file = nil
@@ -176,11 +168,9 @@ function FileLogger:write(level, ...)
         
         self.current_date = current_date
         
-        -- Rotate old logs
         self:rotateLogs()
     end
     
-    -- Open log file if not already open
     if not self.current_log_file then
         local log_path = self:getLogFilePath(current_date)
         self.current_log_file = io.open(log_path, "a")
@@ -195,7 +185,6 @@ function FileLogger:write(level, ...)
         self.current_log_file:flush()
     end
     
-    -- Format the log message
     local timestamp = os.date("%Y-%m-%d %H:%M:%S")
     local args = {...}
     local message_parts = {}
@@ -207,7 +196,6 @@ function FileLogger:write(level, ...)
     local message = table.concat(message_parts, " ")
     local log_entry = string.format("[%s] [%s] %s\n", timestamp, level, message)
     
-    -- Write to file
     self.current_log_file:write(log_entry)
     self.current_log_file:flush()
     
@@ -269,7 +257,6 @@ function FileLogger:clearAllLogs()
         return false
     end
     
-    -- Close current log file first
     if self.current_log_file then
         self.current_log_file:close()
         self.current_log_file = nil

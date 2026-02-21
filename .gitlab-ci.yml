@@ -5,6 +5,9 @@ include:
     inputs:
       changelog-enabled: true
       auto-release-enabled: true
+    rules:
+      - if: '$CI_MERGE_REQUEST_LABELS =~ /\brelease\b/'
+      - if: '$CI_COMMIT_MESSAGE =~ /\[release\]\s*$/'
 
 # secret variables
 # (define the variables below in your GitLab group/project variables)

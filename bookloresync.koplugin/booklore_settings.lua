@@ -513,21 +513,19 @@ function Settings:buildSyncingMenu(parent)
             },
             {
                 text = _("  On session upload"),
-                help_text = _("Check for new highlights and notes each time a reading session is uploaded. Only annotations not yet on the server will be sent."),
+                help_text = _("Check for new highlights and notes each time a reading session ends. Only annotations not yet on the server will be sent."),
                 enabled_func = function()
                     return parent.extended_sync_enabled and parent.highlights_notes_sync_enabled
                 end,
                 checked_func = function()
-                    return parent.upload_on_session
+                    return parent.upload_strategy == "on_session"
                 end,
                 callback = function()
-                    parent.upload_on_session = not parent.upload_on_session
-                    parent.settings:saveSetting("upload_on_session", parent.upload_on_session)
+                    parent.upload_strategy = "on_session"
+                    parent.settings:saveSetting("upload_strategy", parent.upload_strategy)
                     parent.settings:flush()
                     UIManager:show(InfoMessage:new{
-                        text = parent.upload_on_session
-                            and _("Upload on session: enabled")
-                            or  _("Upload on session: disabled"),
+                        text = _("Upload strategy: on session"),
                         timeout = 2,
                     })
                 end,
@@ -535,21 +533,19 @@ function Settings:buildSyncingMenu(parent)
             },
             {
                 text = _("  On read complete"),
-                help_text = _("Upload all highlights and notes when progress reaches 100%. Runs once at the end of the final reading session."),
+                help_text = _("Upload all highlights and notes only when progress reaches 99% or more. Runs once at the end of the final reading session."),
                 enabled_func = function()
                     return parent.extended_sync_enabled and parent.highlights_notes_sync_enabled
                 end,
                 checked_func = function()
-                    return parent.upload_on_complete
+                    return parent.upload_strategy == "on_complete"
                 end,
                 callback = function()
-                    parent.upload_on_complete = not parent.upload_on_complete
-                    parent.settings:saveSetting("upload_on_complete", parent.upload_on_complete)
+                    parent.upload_strategy = "on_complete"
+                    parent.settings:saveSetting("upload_strategy", parent.upload_strategy)
                     parent.settings:flush()
                     UIManager:show(InfoMessage:new{
-                        text = parent.upload_on_complete
-                            and _("Upload on complete: enabled")
-                            or  _("Upload on complete: disabled"),
+                        text = _("Upload strategy: on read complete"),
                         timeout = 2,
                     })
                 end,

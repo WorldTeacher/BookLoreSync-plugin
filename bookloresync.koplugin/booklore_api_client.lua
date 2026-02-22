@@ -164,7 +164,7 @@ function APIClient:extractErrorMessage(response_text, code)
         [504] = "Gateway Timeout",
     }
     
-    return status_messages[code] or "HTTP " .. tostring(code)
+    return status_messages[code] or ("HTTP " .. tostring(code))
 end
 
 --[[--

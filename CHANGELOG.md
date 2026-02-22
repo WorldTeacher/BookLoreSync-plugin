@@ -1,3 +1,36 @@
+# [3.4.0](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/3.3.1...3.4.0) (2026-02-22)
+
+
+### Bug Fixes
+
+* **api:** improve error message formatting in extractErrorMessage function [release] ([4c93031](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/4c93031f38847f3b8f253e1d8da467c6b7c26245))
+* **changelog:** change changelog match ([ef44eeb](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/ef44eeb151312ed51a4f41cb3e0e87e4e22547d7))
+* **ci:** add submodul handling ([545a75a](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/545a75af7b0eaa6e033efb3f9aac039ad04cb928))
+* **ci:** add workspace dir for zola ([61c0565](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/61c0565001c0cf40fc992416b03940580f8b3356))
+* **database:** update schema version and relax constraints for pending annotations and ratings ([e8a94f6](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/e8a94f6f1cacec6e3aa384322a4036704df8de09))
+* **documentation:** add sidebar template with table of contents, remove version picker ([33a88b5](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/33a88b55e52a85ca0111f3fafd421d95ed3bf7d8))
+* **rating:** delay keyboard display in rating dialog to prevent crashes on Linux ([c190d10](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/c190d1003b59957762d72f7580e4c67b9a3a3542))
+* **settings:** change upload strategy for notes ([f79df18](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/f79df181ca2fd8775fa94db23359dc67b2101ec7))
+* **sync:** mark annotations as synced when CFI cannot be built ([60bf873](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/60bf873b21adb7d11f064b1aebf0609d3cd35faf))
+* **update, log:** change path handling ([cc55ed9](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/cc55ed9ae775357214b23c026e2e5986ce9483d3))
+
+
+### Features
+
+* **api:** add annotation support ([11c43b3](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/11c43b308f27c7af9e2c3c144be527c88fab6188))
+* **api:** add submitRating function for personal book ratings ([6f9c90f](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/6f9c90f3696463b69665a6db8089f1907e93599b))
+* **database:** add annotation sync helpers for KOReader ([366893f](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/366893fdedfd7849ff1f31eae66c5ae79157b2ed))
+* **database:** update schema to version 9 and add book metadata sync functionality ([60db3ed](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/60db3eddb45f7706e5f3c6930a059cac0d5983cf))
+* **docs:** add documentation and zola support ([edb0c03](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/edb0c03cf729468b975f1bea66c613ce1c8198ac))
+* **metadata:** add metadata parser ([a483cb1](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/a483cb1a5512da18583b8014d5f76e8c37cec074))
+* **notes:** add  color mapping, cfi generation, sync  for notes ([2586a9b](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/2586a9b74d306fd00ee592978e05b544d96ae791))
+* **rating:** enhance rating sync with live in-memory support and retry mechanism ([ff3099d](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/ff3099d0327bd858ffc9abc6ac35906752038f49))
+* **rating:** respect user settings for rating sync and improve handling of deferred ratings ([823b5b6](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/823b5b688f376e597d8938fe19413665d4b53a20))
+* **settings:** add new sync menu for ratings and notes ([70556f2](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/70556f2cbf3a2344a518652cc68bbb66ba4025a6))
+* **settings:** rework clear cache to select entries to be cleared on category level ([6d33867](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/6d338676454bbb2f0375667f87fa5dddbcc8b2e6))
+* **settings:** sanitize server URL input and enhance connection test messages ([c03eae3](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/c03eae32fa4a446a4d1a8ac31509f0a87c17875e))
+* **sync:** enhance session details view and improve pending uploads handling ([b3b91eb](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/commit/b3b91ebeb7eea9c077fdf976b60cf7da6c8aa9ba))
+
 ## [3.3.1](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/compare/3.3.0...3.3.1) (2026-02-20)
 
 

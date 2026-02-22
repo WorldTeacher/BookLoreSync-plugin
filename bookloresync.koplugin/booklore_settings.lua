@@ -32,7 +32,7 @@ function Settings:configureServerUrl(parent)
                     text = _("Save"),
                     is_enter_default = true,
                     callback = function()
-                        parent.server_url = input_dialog:getInputText()
+                        parent.server_url = input_dialog:getInputText():gsub("/$", "")
                         parent.settings:saveSetting("server_url", parent.server_url)
                         parent.settings:flush()
 
@@ -372,9 +372,9 @@ function Settings:buildAuthMenu(parent)
             },
             {
                 text = _("Test Connection"),
-                help_text = _("Test the connection to your Booklore server to verify your credentials and network connectivity."),
+                help_text = _("Test the connection to your Booklore server and verify both KOReader and Booklore credentials. If Booklore login succeeds, the bearer token will be cached."),
                 enabled_func = function()
-                    return parent.server_url ~= "" and parent.username ~= ""
+                    return parent.server_url ~= ""
                 end,
                 callback = function()
                     parent:testConnection()

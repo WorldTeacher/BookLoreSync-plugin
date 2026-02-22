@@ -35,12 +35,11 @@ function Settings:configureServerUrl(parent)
                         parent.server_url = input_dialog:getInputText()
                         parent.settings:saveSetting("server_url", parent.server_url)
                         parent.settings:flush()
-                        
-                        -- Reinitialize API client with new URL
+
                         if parent.api then
                             parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
                         end
-                        
+
                         UIManager:close(input_dialog)
                         UIManager:show(InfoMessage:new{
                             text = _("Server URL saved"),
@@ -55,85 +54,142 @@ function Settings:configureServerUrl(parent)
     input_dialog:onShowKeyboard()
 end
 
-function Settings:configureUsername(parent)
-    local input_dialog
-    input_dialog = InputDialog:new{
+-- Chained dialog: Username → Next → Password → Save
+function Settings:configureConnection(parent)
+    local username_input
+    username_input = InputDialog:new{
         title = _("KOReader Username"),
         input = parent.username,
+        input_hint = _("Enter username"),
         buttons = {
             {
                 {
                     text = _("Cancel"),
                     callback = function()
-                        UIManager:close(input_dialog)
+                        UIManager:close(username_input)
                     end,
                 },
                 {
-                    text = _("Save"),
+                    text = _("Next"),
                     is_enter_default = true,
                     callback = function()
-                        parent.username = input_dialog:getInputText()
-                        parent.settings:saveSetting("username", parent.username)
-                        parent.settings:flush()
-                        
-                        -- Reinitialize API client with new username
-                        if parent.api then
-                            parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
-                        end
-                        
-                        UIManager:close(input_dialog)
-                        UIManager:show(InfoMessage:new{
-                            text = _("Username saved"),
-                            timeout = 1,
-                        })
+                        local new_username = username_input:getInputText()
+                        UIManager:close(username_input)
+
+                        local password_input
+                        password_input = InputDialog:new{
+                            title = _("KOReader Password"),
+                            input = parent.password,
+                            input_hint = _("Enter password"),
+                            text_type = "password",
+                            buttons = {
+                                {
+                                    {
+                                        text = _("Cancel"),
+                                        callback = function()
+                                            UIManager:close(password_input)
+                                        end,
+                                    },
+                                    {
+                                        text = _("Save"),
+                                        is_enter_default = true,
+                                        callback = function()
+                                            parent.username = new_username
+                                            parent.password = password_input:getInputText()
+                                            parent.settings:saveSetting("username", parent.username)
+                                            parent.settings:saveSetting("password", parent.password)
+                                            parent.settings:flush()
+
+                                            if parent.api then
+                                                parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
+                                            end
+
+                                            UIManager:close(password_input)
+                                            UIManager:show(InfoMessage:new{
+                                                text = _("Credentials saved"),
+                                                timeout = 2,
+                                            })
+                                        end,
+                                    },
+                                },
+                            },
+                        }
+                        UIManager:show(password_input)
+                        password_input:onShowKeyboard()
                     end,
                 },
             },
         },
     }
-    UIManager:show(input_dialog)
-    input_dialog:onShowKeyboard()
+    UIManager:show(username_input)
+    username_input:onShowKeyboard()
 end
 
-function Settings:configurePassword(parent)
-    local input_dialog
-    input_dialog = InputDialog:new{
-        title = _("KOReader Password"),
-        input = parent.password,
-        text_type = "password",
+-- Chained dialog: Booklore Username → Next → Password → Save
+function Settings:configureBookloreAccount(parent)
+    local username_input
+    username_input = InputDialog:new{
+        title = _("Booklore Username"),
+        input = parent.booklore_username,
+        input_hint = _("Enter Booklore username"),
         buttons = {
             {
                 {
                     text = _("Cancel"),
                     callback = function()
-                        UIManager:close(input_dialog)
+                        UIManager:close(username_input)
                     end,
                 },
                 {
-                    text = _("Save"),
+                    text = _("Next"),
                     is_enter_default = true,
                     callback = function()
-                        parent.password = input_dialog:getInputText()
-                        parent.settings:saveSetting("password", parent.password)
-                        parent.settings:flush()
-                        
-                        -- Reinitialize API client with new password
-                        if parent.api then
-                            parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
-                        end
-                        
-                        UIManager:close(input_dialog)
-                        UIManager:show(InfoMessage:new{
-                            text = _("Password saved"),
-                            timeout = 1,
-                        })
+                        local new_username = username_input:getInputText()
+                        UIManager:close(username_input)
+
+                        local password_input
+                        password_input = InputDialog:new{
+                            title = _("Booklore Password"),
+                            input = parent.booklore_password,
+                            input_hint = _("Enter Booklore password"),
+                            text_type = "password",
+                            buttons = {
+                                {
+                                    {
+                                        text = _("Cancel"),
+                                        callback = function()
+                                            UIManager:close(password_input)
+                                        end,
+                                    },
+                                    {
+                                        text = _("Save"),
+                                        is_enter_default = true,
+                                        callback = function()
+                                            parent.booklore_username = new_username
+                                            parent.booklore_password = password_input:getInputText()
+                                            parent.settings:saveSetting("booklore_username", parent.booklore_username)
+                                            parent.settings:saveSetting("booklore_password", parent.booklore_password)
+                                            parent.settings:flush()
+
+                                            UIManager:close(password_input)
+                                            UIManager:show(InfoMessage:new{
+                                                text = _("Booklore credentials saved"),
+                                                timeout = 2,
+                                            })
+                                        end,
+                                    },
+                                },
+                            },
+                        }
+                        UIManager:show(password_input)
+                        password_input:onShowKeyboard()
                     end,
                 },
             },
         },
     }
-    UIManager:show(input_dialog)
-    input_dialog:onShowKeyboard()
+    UIManager:show(username_input)
+    username_input:onShowKeyboard()
 end
 
 function Settings:configureMinDuration(parent)
@@ -269,7 +325,6 @@ function Settings:configureProgressDecimalPlaces(parent)
 end
 
 function Settings:showVersion(parent)
-    -- Load version information from _meta.lua and plugin_version.lua
     local version_info = require("plugin_version")
     local meta_info = require("_meta")
     
@@ -287,9 +342,9 @@ function Settings:showVersion(parent)
     })
 end
 
-function Settings:buildConnectionMenu(parent)
+function Settings:buildAuthMenu(parent)
     return {
-        text = _("Setup & Connection"),
+        text = _("Authentication"),
         sub_item_table = {
             {
                 text = _("Server URL"),
@@ -300,19 +355,19 @@ function Settings:buildConnectionMenu(parent)
                 end,
             },
             {
-                text = _("Username"),
-                help_text = _("Your Booklore username for authentication."),
+                text = _("Configure KOReader Account"),
+                help_text = _("Set the username and password used to authenticate with the Booklore server."),
                 keep_menu_open = true,
                 callback = function()
-                    self:configureUsername(parent)
+                    self:configureConnection(parent)
                 end,
             },
             {
-                text = _("Password"),
-                help_text = _("Your Booklore password. This is stored locally and used to authenticate with the server."),
+                text = _("Configure Booklore Account"),
+                help_text = _("Set the Booklore username and password used for importing reading history."),
                 keep_menu_open = true,
                 callback = function()
-                    self:configurePassword(parent)
+                    self:configureBookloreAccount(parent)
                 end,
             },
             {
@@ -329,41 +384,14 @@ function Settings:buildConnectionMenu(parent)
     }
 end
 
-function Settings:buildSyncingMenu(parent)
+function Settings:buildRatingMenu(parent)
     return {
-        text = _("Syncing"),
+        text = _("Rating"),
+        help_text = _("Configure how book ratings are synced to Booklore."),
         sub_item_table = {
-            -- Master toggle
-            {
-                text = _("Enable extended sync"),
-                help_text = _("Enable extended sync features: rating sync, metadata location detection, and highlights/notes upload."),
-                checked_func = function()
-                    return parent.extended_sync_enabled
-                end,
-                callback = function()
-                    parent.extended_sync_enabled = not parent.extended_sync_enabled
-                    parent.settings:saveSetting("extended_sync_enabled", parent.extended_sync_enabled)
-                    parent.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = parent.extended_sync_enabled
-                            and _("Extended sync enabled")
-                            or  _("Extended sync disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-
-            -- ── Rating ──────────────────────────────────────────────────────
-            {
-                text = _("── Rating ──"),
-                enabled = false,
-            },
             {
                 text = _("Enable rating sync"),
                 help_text = _("Sync the book rating to Booklore when a session ends."),
-                enabled_func = function()
-                    return parent.extended_sync_enabled
-                end,
                 checked_func = function()
                     return parent.rating_sync_enabled
                 end,
@@ -380,10 +408,10 @@ function Settings:buildSyncingMenu(parent)
                 end,
             },
             {
-                text = _("  KOReader rating (scaled ×2)"),
+                text = _("KOReader rating (scaled ×2)"),
                 help_text = _("Use the KOReader star rating (1-5) scaled to Booklore's 1-10 scale by multiplying by 2."),
                 enabled_func = function()
-                    return parent.extended_sync_enabled and parent.rating_sync_enabled
+                    return parent.rating_sync_enabled
                 end,
                 checked_func = function()
                     return parent.rating_sync_mode == "koreader_scaled"
@@ -400,10 +428,10 @@ function Settings:buildSyncingMenu(parent)
                 keep_menu_open = true,
             },
             {
-                text = _("  Select at complete"),
+                text = _("Select at complete"),
                 help_text = _("Show a 1-10 rating dialog when you finish reading a book (progress ≥ 99%)."),
                 enabled_func = function()
-                    return parent.extended_sync_enabled and parent.rating_sync_enabled
+                    return parent.rating_sync_enabled
                 end,
                 checked_func = function()
                     return parent.rating_sync_mode == "select_at_complete"
@@ -419,37 +447,23 @@ function Settings:buildSyncingMenu(parent)
                 end,
                 keep_menu_open = true,
             },
-
-            -- ── Metadata ────────────────────────────────────────────────────
             {
-                text = _("── Metadata ──"),
+                text = _("Hardcover rating (coming soon)"),
+                help_text = _("Sync rating to your Hardcover account. This feature is not yet implemented."),
                 enabled = false,
             },
-            {
-                text = _("Detect book metadata location"),
-                help_text = _("Detect and store the KOReader sidecar (.sdr) path for the currently open book so the plugin knows where to read metadata from."),
-                enabled_func = function()
-                    return parent.extended_sync_enabled
-                        and parent.ui ~= nil
-                        and parent.ui.document ~= nil
-                        and parent.ui.document.file ~= nil
-                end,
-                callback = function()
-                    parent:detectBookMetadataLocation()
-                end,
-            },
+        },
+    }
+end
 
-            -- ── Notes & Highlights ──────────────────────────────────────────
-            {
-                text = _("── Notes & Highlights ──"),
-                enabled = false,
-            },
+function Settings:buildAnnotationsMenu(parent)
+    return {
+        text = _("Annotations"),
+        help_text = _("Configure syncing of highlights, notes, and metadata to Booklore."),
+        sub_item_table = {
             {
                 text = _("Sync highlights and notes"),
                 help_text = _("Upload KOReader highlights and notes to Booklore."),
-                enabled_func = function()
-                    return parent.extended_sync_enabled
-                end,
                 checked_func = function()
                     return parent.highlights_notes_sync_enabled
                 end,
@@ -466,10 +480,10 @@ function Settings:buildSyncingMenu(parent)
                 end,
             },
             {
-                text = _("  Notes destination: In book"),
+                text = _("Notes destination: In book"),
                 help_text = _("Send notes to the in-book reader view in Booklore (requires EPUB CFI position). Notes will appear attached to the highlighted passage."),
                 enabled_func = function()
-                    return parent.extended_sync_enabled and parent.highlights_notes_sync_enabled
+                    return parent.highlights_notes_sync_enabled
                 end,
                 checked_func = function()
                     return parent.notes_destination == "in_book"
@@ -486,10 +500,10 @@ function Settings:buildSyncingMenu(parent)
                 keep_menu_open = true,
             },
             {
-                text = _("  Notes destination: In Booklore"),
+                text = _("Notes destination: In Booklore"),
                 help_text = _("Send notes to the Booklore book page (visible in the web UI). The chapter title is used as the note title."),
                 enabled_func = function()
-                    return parent.extended_sync_enabled and parent.highlights_notes_sync_enabled
+                    return parent.highlights_notes_sync_enabled
                 end,
                 checked_func = function()
                     return parent.notes_destination == "in_booklore"
@@ -505,17 +519,11 @@ function Settings:buildSyncingMenu(parent)
                 end,
                 keep_menu_open = true,
             },
-
-            -- ── Upload Strategy ─────────────────────────────────────────────
             {
-                text = _("── Upload Strategy ──"),
-                enabled = false,
-            },
-            {
-                text = _("  On session upload"),
+                text = _("Upload on session end"),
                 help_text = _("Check for new highlights and notes each time a reading session ends. Only annotations not yet on the server will be sent."),
                 enabled_func = function()
-                    return parent.extended_sync_enabled and parent.highlights_notes_sync_enabled
+                    return parent.highlights_notes_sync_enabled
                 end,
                 checked_func = function()
                     return parent.upload_strategy == "on_session"
@@ -532,10 +540,10 @@ function Settings:buildSyncingMenu(parent)
                 keep_menu_open = true,
             },
             {
-                text = _("  On read complete"),
+                text = _("Upload on read complete"),
                 help_text = _("Upload all highlights and notes only when progress reaches 99% or more. Runs once at the end of the final reading session."),
                 enabled_func = function()
-                    return parent.extended_sync_enabled and parent.highlights_notes_sync_enabled
+                    return parent.highlights_notes_sync_enabled
                 end,
                 checked_func = function()
                     return parent.upload_strategy == "on_complete"
@@ -586,7 +594,6 @@ function Settings:buildPreferencesMenu(parent)
                     parent.settings:saveSetting("log_to_file", parent.log_to_file)
                     parent.settings:flush()
                     
-                    -- Initialize or close file logger based on new setting
                     if parent.log_to_file then
                         if not parent.file_logger then
                             local FileLogger = require("booklore_file_logger")

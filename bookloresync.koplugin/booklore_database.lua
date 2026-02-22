@@ -12,17 +12,13 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 12,  -- Current database schema version
+    VERSION = 15,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
 
--- Migration definitions
--- Each migration is a list of SQL statements to execute
 Database.migrations = {
-    -- Migration 1: Initial schema
     [1] = {
-        -- Book cache table: stores file hashes and book IDs
         [[
             CREATE TABLE IF NOT EXISTS book_cache (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,8 +41,6 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_book_cache_book_id ON book_cache(book_id)
         ]],
-        
-        -- Pending sessions table: stores sessions waiting to be synced
         [[
             CREATE TABLE IF NOT EXISTS pending_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,8 +63,6 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_pending_sessions_book_hash ON pending_sessions(book_hash)
         ]],
-        
-        -- Match history table: tracks book matching decisions
         [[
             CREATE TABLE IF NOT EXISTS match_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,8 +78,6 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_match_history_file_hash ON match_history(file_hash)
         ]],
-        
-        -- Schema version table
         [[
             CREATE TABLE IF NOT EXISTS schema_version (
                 version INTEGER PRIMARY KEY,
@@ -140,20 +130,16 @@ Database.migrations = {
     
     -- Migration 3: Add ISBN support to book_cache
     [3] = {
-        -- Add ISBN-10 column
         [[
             ALTER TABLE book_cache ADD COLUMN isbn10 TEXT
         ]],
-        -- Add ISBN-13 column
         [[
             ALTER TABLE book_cache ADD COLUMN isbn13 TEXT
         ]],
-        -- Create index for ISBN-10 lookups
         [[
             CREATE INDEX IF NOT EXISTS idx_book_cache_isbn10 
             ON book_cache(isbn10)
         ]],
-        -- Create index for ISBN-13 lookups
         [[
             CREATE INDEX IF NOT EXISTS idx_book_cache_isbn13 
             ON book_cache(isbn13)
@@ -162,7 +148,6 @@ Database.migrations = {
     
     -- Migration 4: Bearer token cache table
     [4] = {
-        -- Store Bearer tokens to avoid duplicate token errors
         [[
             CREATE TABLE IF NOT EXISTS bearer_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -184,11 +169,9 @@ Database.migrations = {
     
     -- Migration 5: Remove unused match_history table
     [5] = {
-        -- Drop the index first
         [[
             DROP INDEX IF EXISTS idx_match_history_file_hash
         ]],
-        -- Then drop the table
         [[
             DROP TABLE IF EXISTS match_history
         ]],
@@ -196,7 +179,6 @@ Database.migrations = {
     
     -- Migration 6: Add book_title to pending_sessions
     [6] = {
-        -- Add book_title column to store the title for archiving
         [[
             ALTER TABLE pending_sessions ADD COLUMN book_title TEXT
         ]],
@@ -204,7 +186,6 @@ Database.migrations = {
     
     -- Migration 7: Add koreader_book_id to pending_sessions
     [7] = {
-        -- Add koreader_book_id column to store the KOReader book ID
         [[
             ALTER TABLE pending_sessions ADD COLUMN koreader_book_id INTEGER
         ]],
@@ -212,7 +193,6 @@ Database.migrations = {
     
     -- Migration 8: Add updater_cache table for caching GitHub release info
     [8] = {
-        -- Create updater_cache table for caching release information
         [[
             CREATE TABLE IF NOT EXISTS updater_cache (
                 key TEXT PRIMARY KEY,
@@ -224,7 +204,6 @@ Database.migrations = {
 
     -- Migration 9: Extended sync tables (book metadata location, rating, annotations)
     [9] = {
-        -- Store detected .sdr path and rating sync state per book
         [[
             CREATE TABLE IF NOT EXISTS book_metadata (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -241,7 +220,6 @@ Database.migrations = {
             CREATE INDEX IF NOT EXISTS idx_book_metadata_book_cache_id
             ON book_metadata(book_cache_id)
         ]],
-        -- Deduplication tracker for uploaded highlights and notes
         [[
             CREATE TABLE IF NOT EXISTS synced_annotations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -326,12 +304,125 @@ Database.migrations = {
             ALTER TABLE book_metadata ADD COLUMN pending_rating_prompt INTEGER DEFAULT 0
         ]],
     },
+
+    -- Migration 13: Pending annotations queue
+    -- Stores annotation upload attempts that failed so they can be retried on
+    -- the next sync trigger (session end, explicit "Sync Pending Now", etc.).
+    -- Each row represents one annotation that needs to be (re-)submitted.
+    -- The payload is stored as a JSON blob so no schema change is needed when
+    -- annotation fields evolve.
+    -- NOTE: book_id is nullable — annotations can be queued before the Booklore
+    -- book_id is known (e.g. server offline at close time).  syncPendingAnnotations
+    -- resolves the book_id from book_cache at retry time.
+    [13] = {
+        [[
+            CREATE TABLE IF NOT EXISTS pending_annotations (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL,
+                book_id       INTEGER,
+                ann_type      TEXT    NOT NULL,
+                datetime      TEXT    NOT NULL,
+                payload       TEXT    NOT NULL,
+                retry_count   INTEGER DEFAULT 0,
+                last_retry_at INTEGER,
+                created_at    INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(book_cache_id, datetime, ann_type),
+                FOREIGN KEY(book_cache_id) REFERENCES book_cache(id)
+            )
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_annotations_book_cache_id
+            ON pending_annotations(book_cache_id)
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_annotations_created_at
+            ON pending_annotations(created_at)
+        ]],
+    },
+
+    -- Migration 14: Relax pending_annotations.book_id NOT NULL constraint.
+    -- book_id must be nullable so annotations can be queued while the server
+    -- is offline and the Booklore book_id is not yet known.
+    -- SQLite does not support ALTER COLUMN, so recreate the table.
+    [14] = {
+        [[
+            CREATE TABLE IF NOT EXISTS pending_annotations_new (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL,
+                book_id       INTEGER,
+                ann_type      TEXT    NOT NULL,
+                datetime      TEXT    NOT NULL,
+                payload       TEXT    NOT NULL,
+                retry_count   INTEGER DEFAULT 0,
+                last_retry_at INTEGER,
+                created_at    INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(book_cache_id, datetime, ann_type),
+                FOREIGN KEY(book_cache_id) REFERENCES book_cache(id)
+            )
+        ]],
+        [[
+            INSERT OR IGNORE INTO pending_annotations_new
+                (id, book_cache_id, book_id, ann_type, datetime, payload,
+                 retry_count, last_retry_at, created_at)
+            SELECT id, book_cache_id, book_id, ann_type, datetime, payload,
+                   retry_count, last_retry_at, created_at
+            FROM pending_annotations
+        ]],
+        [[
+            DROP TABLE pending_annotations
+        ]],
+        [[
+            ALTER TABLE pending_annotations_new RENAME TO pending_annotations
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_annotations_book_cache_id
+            ON pending_annotations(book_cache_id)
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_annotations_created_at
+            ON pending_annotations(created_at)
+        ]],
+    },
+
+    -- Migration 15: Relax pending_ratings.book_id NOT NULL constraint.
+    -- book_id must be nullable so ratings can be queued while the server
+    -- is offline and the Booklore book_id is not yet known.
+    -- SQLite does not support ALTER COLUMN, so recreate the table.
+    [15] = {
+        [[
+            CREATE TABLE IF NOT EXISTS pending_ratings_new (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL UNIQUE,
+                book_id       INTEGER,
+                rating        INTEGER NOT NULL,
+                retry_count   INTEGER DEFAULT 0,
+                last_retry_at INTEGER,
+                created_at    INTEGER DEFAULT (strftime('%s', 'now')),
+                FOREIGN KEY(book_cache_id) REFERENCES book_cache(id)
+            )
+        ]],
+        [[
+            INSERT OR IGNORE INTO pending_ratings_new
+                (id, book_cache_id, book_id, rating, retry_count, last_retry_at, created_at)
+            SELECT id, book_cache_id, book_id, rating, retry_count, last_retry_at, created_at
+            FROM pending_ratings
+        ]],
+        [[
+            DROP TABLE pending_ratings
+        ]],
+        [[
+            ALTER TABLE pending_ratings_new RENAME TO pending_ratings
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_ratings_book_cache_id
+            ON pending_ratings(book_cache_id)
+        ]],
+    },
 }
 
--- Post-migration hooks (Lua functions run AFTER the SQL transaction commits).
--- Each hook receives the Database instance as its only argument.
--- Return true on success, false on failure (failure is logged but non-fatal
--- so that the schema version is still recorded and the migration is not retried).
+-- Post-migration hooks: Lua functions run after the SQL transaction commits.
+-- Each receives the Database instance; return true on success, false on failure
+-- (non-fatal: schema version is still recorded, migration is not retried).
 Database.migration_hooks = {
     -- Migration 10: copy all settings from booklore.lua into plugin_settings,
     -- then delete the LuaSettings file so it is no longer used.
@@ -355,8 +446,7 @@ Database.migration_hooks = {
         end
 
         -- All known settings keys with their storage types.
-        -- "bool" values are stored as "true"/"false" strings; numbers as their
-        -- decimal string representation; everything else as plain strings.
+        -- Booleans stored as "true"/"false" strings, numbers as decimal strings.
         local keys = {
             "server_url", "username", "password",
             "is_enabled", "log_to_file", "silent_messages", "secure_logs",
@@ -384,8 +474,6 @@ Database.migration_hooks = {
         for _, key in ipairs(keys) do
             local raw = lua_settings:readSetting(key)
             if raw ~= nil then
-                -- Serialise to string: booleans become "true"/"false", numbers
-                -- become their decimal string, everything else stays as-is.
                 local value_str
                 local t = type(raw)
                 if t == "boolean" then
@@ -448,7 +536,6 @@ function Database:init(db_name)
     
     logger.info("BookloreSync Database: Initializing database at", self.db_path)
     
-    -- Open database connection
     local conn = SQ3.open(self.db_path)
     if not conn then
         logger.err("BookloreSync Database: Failed to open database at", self.db_path)
@@ -457,7 +544,6 @@ function Database:init(db_name)
     
     self.conn = conn
     
-    -- Enable foreign keys
     self.conn:exec("PRAGMA foreign_keys = ON")
     
     -- Checkpoint any existing WAL file before changing journal mode
@@ -490,7 +576,6 @@ function Database:init(db_name)
         logger.dbg("BookloreSync Database: Successfully set TRUNCATE journal mode")
     end
     
-    -- Run migrations
     local success = self:runMigrations()
     if not success then
         logger.err("BookloreSync Database: Migration failed")
@@ -510,7 +595,6 @@ function Database:close()
 end
 
 function Database:getCurrentVersion()
-    -- Check if schema_version table exists
     local stmt = self.conn:prepare([[
         SELECT name FROM sqlite_master 
         WHERE type='table' AND name='schema_version'
@@ -531,7 +615,6 @@ function Database:getCurrentVersion()
         return 0
     end
     
-    -- Get current version
     stmt = self.conn:prepare("SELECT MAX(version) as version FROM schema_version")
     if not stmt then
         return 0
@@ -557,7 +640,6 @@ function Database:runMigrations()
         return true
     end
     
-    -- Run migrations in order
     for version = current_version + 1, self.VERSION do
         logger.info("BookloreSync Database: Applying migration", version)
         
@@ -567,7 +649,6 @@ function Database:runMigrations()
             return false
         end
         
-        -- Begin transaction
         self.conn:exec("BEGIN TRANSACTION")
         
         local success = true
@@ -584,7 +665,6 @@ function Database:runMigrations()
         end
         
         if success then
-            -- Record migration version
             local stmt = self.conn:prepare("INSERT INTO schema_version (version) VALUES (?)")
             if not stmt then
                 logger.err("BookloreSync Database: Failed to prepare version insert:", self.conn:errmsg())
@@ -592,7 +672,6 @@ function Database:runMigrations()
                 return false
             end
             
-            -- Ensure version is an integer
             version = tonumber(version)
             if not version then
                 logger.err("BookloreSync Database: Version is not a number")
@@ -626,7 +705,6 @@ function Database:runMigrations()
                 return false
             end
             
-            -- Commit transaction
             self.conn:exec("COMMIT")
             logger.info("BookloreSync Database: Migration", version, "applied successfully")
 
@@ -644,7 +722,6 @@ function Database:runMigrations()
                 end
             end
         else
-            -- Rollback transaction
             self.conn:exec("ROLLBACK")
             logger.err("BookloreSync Database: Migration", version, "failed, rolled back")
             return false
@@ -654,13 +731,10 @@ function Database:runMigrations()
     return true
 end
 
--- Book Cache operations
-
 function Database:getBookByFilePath(file_path)
     logger.dbg("BookloreSync Database: getBookByFilePath called")
     logger.dbg("  file_path:", file_path, "type:", type(file_path))
     
-    -- Ensure file_path is a string
     file_path = tostring(file_path)
     
     local stmt = self.conn:prepare([[
@@ -745,7 +819,6 @@ function Database:getBookByHash(file_hash)
 end
 
 function Database:getBookByBookId(book_id)
-    -- Ensure book_id is a number
     book_id = tonumber(book_id)
     if not book_id then
         logger.err("BookloreSync Database: Invalid book_id provided to getBookByBookId")
@@ -785,17 +858,14 @@ function Database:getBookByBookId(book_id)
 end
 
 function Database:saveBookCache(file_path, file_hash, book_id, title, author, isbn10, isbn13)
-    -- Ensure types are correct
     file_path = tostring(file_path or "")
     file_hash = tostring(file_hash or "")
     
-    -- Validate inputs - don't save if both file_path and file_hash are empty
     if file_path == "" and file_hash == "" then
         logger.warn("BookloreSync Database: Cannot save book cache with empty file_path and file_hash")
         return false
     end
     
-    -- Debug logging
     logger.dbg("BookloreSync Database: saveBookCache called with:")
     logger.dbg("  file_path:", file_path, "type:", type(file_path))
     logger.dbg("  file_hash:", file_hash, "type:", type(file_hash))
@@ -805,7 +875,6 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
     logger.dbg("  isbn10:", isbn10, "type:", type(isbn10))
     logger.dbg("  isbn13:", isbn13, "type:", type(isbn13))
     
-    -- book_id can be nil (NULL) or must be a number
     if book_id ~= nil then
         local original_book_id = book_id
         book_id = tonumber(book_id)
@@ -817,8 +886,6 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
     
     logger.dbg("BookloreSync Database: After conversion, book_id:", book_id, "type:", type(book_id))
     
-    -- Use INSERT OR REPLACE to upsert in one operation
-    -- The UNIQUE constraint on file_path ensures we don't get duplicates
     local stmt = self.conn:prepare([[
         INSERT OR REPLACE INTO book_cache (file_path, file_hash, book_id, title, author, isbn10, isbn13, last_accessed)
         VALUES (?, ?, ?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
@@ -843,13 +910,12 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
     return true
 end
 
--- Convenience method for caching a book
+-- Convenience method for caching a book without title/author/isbn.
 function Database:cacheBook(file_path, file_hash, book_id)
     return self:saveBookCache(file_path, file_hash, book_id, nil, nil, nil, nil)
 end
 
 function Database:updateBookId(file_hash, book_id)
-    -- Ensure book_id is a number
     if book_id ~= nil then
         book_id = tonumber(book_id)
         if not book_id then
@@ -936,10 +1002,7 @@ function Database:clearBookCache()
     return true
 end
 
--- Pending Sessions operations
-
 function Database:addPendingSession(session_data)
-    -- Ensure book_id is a number if present
     local book_id = session_data.bookId
     if book_id ~= nil then
         book_id = tonumber(book_id)
@@ -949,7 +1012,6 @@ function Database:addPendingSession(session_data)
         end
     end
     
-    -- Ensure duration_seconds is a number
     local duration_seconds = tonumber(session_data.durationSeconds) or 0
     
     local stmt = self.conn:prepare([[
@@ -1052,10 +1114,7 @@ function Database:deletePendingSession(session_id)
 end
 
 function Database:archivePendingSession(session_id)
-    -- Archive a pending session to historical_sessions before deletion
-    -- This provides a backup in case of data loss
-    
-    -- First, get the pending session data
+    -- Archives a pending session to historical_sessions before deletion.
     local get_stmt = self.conn:prepare([[
         SELECT 
             book_id, book_hash, book_title, koreader_book_id, book_type, start_time, end_time,
@@ -1099,7 +1158,6 @@ function Database:archivePendingSession(session_id)
         return false
     end
     
-    -- Use the stored title and koreader_book_id directly
     local book_title = session_data.book_title
     local koreader_book_id = session_data.koreader_book_id or 0
     local insert_stmt = self.conn:prepare([[
@@ -1187,11 +1245,7 @@ function Database:incrementSessionRetryCount(session_id)
     return true
 end
 
--- Historical Session Functions
-
 function Database:getUnmatchedHistoricalBooks()
-    -- Get books that have at least one session without a book_id
-    -- This excludes books where all sessions were successfully auto-matched
     local stmt = self.conn:prepare([[
         SELECT 
             koreader_book_id,
@@ -1224,8 +1278,6 @@ function Database:getUnmatchedHistoricalBooks()
 end
 
 function Database:getMatchedUnsyncedBooks()
-    -- Get books that have sessions with book_id but not yet synced
-    -- These are typically books auto-matched during extraction
     local stmt = self.conn:prepare([[
         SELECT 
             koreader_book_id,
@@ -1298,8 +1350,6 @@ function Database:getHistoricalSessionsForBook(koreader_book_id)
 end
 
 function Database:getHistoricalSessionsForBookUnsynced(koreader_book_id)
-    -- Get only unsynced sessions for a specific book
-    -- Used during auto-sync phase of Match Historical Data
     local stmt = self.conn:prepare([[
         SELECT 
             id, book_id, book_type, start_time, end_time,
@@ -1457,7 +1507,6 @@ function Database:markHistoricalSessionSynced(session_id)
 end
 
 function Database:markHistoricalSessionUnmatched(session_id)
-    -- Mark a session as unmatched and not synced (for re-matching after 404)
     local stmt = self.conn:prepare([[
         UPDATE historical_sessions 
         SET matched = 0, synced = 0, book_id = NULL
@@ -1477,7 +1526,6 @@ function Database:markHistoricalSessionUnmatched(session_id)
 end
 
 function Database:getAllSyncedHistoricalSessions()
-    -- Get all synced historical sessions for re-sync
     local stmt = self.conn:prepare([[
         SELECT 
             id, koreader_book_id, koreader_book_title, book_id, book_type,
@@ -1517,8 +1565,6 @@ function Database:getAllSyncedHistoricalSessions()
 end
 
 function Database:getMatchedUnsyncedHistoricalSessions()
-    -- Get sessions that are matched (have book_id) but not yet synced
-    -- These are typically sessions that were re-matched after a 404 error
     local stmt = self.conn:prepare([[
         SELECT 
             id, koreader_book_id, koreader_book_title, book_id, book_type,
@@ -1614,7 +1660,6 @@ Find book_id by ISBN (prefers ISBN-13 over ISBN-10)
 @return table|nil Returns {book_id, title, author, file_hash, isbn10, isbn13} or nil
 --]]
 function Database:findBookIdByIsbn(isbn10, isbn13)
-    -- Prefer ISBN-13 if both provided
     if isbn13 and isbn13 ~= "" then
         local stmt = self.conn:prepare([[
             SELECT book_id, title, author, file_hash, isbn10, isbn13
@@ -1645,7 +1690,6 @@ function Database:findBookIdByIsbn(isbn10, isbn13)
         stmt:close()
     end
     
-    -- Fallback to ISBN-10 if ISBN-13 not found or not provided
     if isbn10 and isbn10 ~= "" then
         local stmt = self.conn:prepare([[
             SELECT book_id, title, author, file_hash, isbn10, isbn13
@@ -1679,14 +1723,11 @@ function Database:findBookIdByIsbn(isbn10, isbn13)
     return nil
 end
 
--- Migration data from LuaSettings (for backward compatibility)
-
 function Database:migrateFromLuaSettings(local_db)
     logger.info("BookloreSync Database: Starting migration from LuaSettings")
     
     local success = true
     
-    -- Migrate book cache
     local book_cache = local_db:readSetting("book_cache") or {}
     local migrated_books = 0
     local failed_books = 0
@@ -1695,7 +1736,6 @@ function Database:migrateFromLuaSettings(local_db)
         for file_path, file_hash in pairs(book_cache.file_hashes) do
             local book_id = book_cache.book_ids[file_hash]
             
-            -- Debug logging
             logger.dbg("BookloreSync Database: Migrating book - path:", file_path, "hash:", file_hash, "id:", book_id, "type:", type(book_id))
             
             local ok, err = pcall(function()
@@ -1716,13 +1756,11 @@ function Database:migrateFromLuaSettings(local_db)
     
     logger.info("BookloreSync Database: Migrated", migrated_books, "book cache entries,", failed_books, "failed")
     
-    -- Migrate pending sessions
     local pending_sessions = local_db:readSetting("pending_sessions") or {}
     local migrated_sessions = 0
     local failed_sessions = 0
     
     for i, session in ipairs(pending_sessions) do
-        -- Validate session data before migrating
         if session.bookHash and session.startTime and session.endTime and session.durationSeconds then
             local result = self:addPendingSession(session)
             if result then
@@ -1747,14 +1785,9 @@ function Database:migrateFromLuaSettings(local_db)
     return success
 end
 
--- Bearer Token Management Functions
-
 function Database:saveBearerToken(username, token)
-    -- Save or update Bearer token for a user
-    -- Token expires in 4 weeks (28 days)
-    local expires_at = os.time() + (28 * 24 * 60 * 60)  -- 4 weeks from now
-    
-    -- Delete old token first to avoid unique constraint issues
+    -- Expires in 4 weeks (28 days)
+    local expires_at = os.time() + (28 * 24 * 60 * 60)
     local delete_stmt = self.conn:prepare("DELETE FROM bearer_tokens WHERE username = ?")
     if delete_stmt then
         delete_stmt:bind(username)
@@ -1762,7 +1795,6 @@ function Database:saveBearerToken(username, token)
         delete_stmt:close()
     end
     
-    -- Insert new token
     local stmt = self.conn:prepare([[
         INSERT INTO bearer_tokens (username, token, expires_at)
         VALUES (?, ?, ?)
@@ -1787,8 +1819,6 @@ function Database:saveBearerToken(username, token)
 end
 
 function Database:getBearerToken(username)
-    -- Get cached Bearer token if it exists and hasn't expired
-    -- Returns token and expires_at timestamp for proactive refresh checking
     local stmt = self.conn:prepare([[
         SELECT token, expires_at
         FROM bearer_tokens
@@ -1820,7 +1850,6 @@ function Database:getBearerToken(username)
 end
 
 function Database:deleteBearerToken(username)
-    -- Delete cached Bearer token (used when token is invalid)
     local stmt = self.conn:prepare("DELETE FROM bearer_tokens WHERE username = ?")
     
     if not stmt then
@@ -1837,7 +1866,6 @@ function Database:deleteBearerToken(username)
 end
 
 function Database:cleanupExpiredTokens()
-    -- Clean up expired tokens (maintenance function)
     local stmt = self.conn:prepare("DELETE FROM bearer_tokens WHERE expires_at <= ?")
     
     if not stmt then
@@ -1879,7 +1907,6 @@ function Database:getUpdaterCache(key)
     local cached_at = tonumber(row[2])
     local current_time = os.time()
     
-    -- Check if cache is expired (older than 1 hour)
     if current_time - cached_at > 3600 then
         logger.info("BookloreSync Database: Cache expired for key:", key)
         return nil
@@ -1932,7 +1959,42 @@ function Database:clearUpdaterCache()
     return true
 end
 
--- Book Metadata (Extended Sync) Functions
+function Database:getBookCacheById(id)
+    if not id then
+        return nil
+    end
+
+    local stmt = self.conn:prepare([[
+        SELECT id, file_path, file_hash, book_id, title, author
+        FROM book_cache WHERE id = ? LIMIT 1
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getBookCacheById:", self.conn:errmsg())
+        return nil
+    end
+
+    local ok, err = pcall(function() stmt:bind(tonumber(id)) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in getBookCacheById:", err)
+        stmt:close()
+        return nil
+    end
+
+    local result = nil
+    for row in stmt:rows() do
+        result = {
+            id        = tonumber(row[1]),
+            file_path = row[2],
+            file_hash = row[3],
+            book_id   = row[4] and tonumber(row[4]) or nil,
+            title     = row[5],
+            author    = row[6],
+        }
+        break
+    end
+    stmt:close()
+    return result
+end
 
 --[[--
 Get the book_cache id for a given file path.
@@ -1990,7 +2052,6 @@ function Database:upsertBookMetadata(book_cache_id, fields)
 
     fields = fields or {}
 
-    -- Check whether a row already exists
     local check_stmt = self.conn:prepare([[
         SELECT id FROM book_metadata WHERE book_cache_id = ? LIMIT 1
     ]])
@@ -2007,7 +2068,6 @@ function Database:upsertBookMetadata(book_cache_id, fields)
     check_stmt:close()
 
     if existing_id then
-        -- Build a dynamic UPDATE
         local sets = { "updated_at = CAST(strftime('%s', 'now') AS INTEGER)" }
         local binds = {}
         if fields.sdr_path ~= nil then
@@ -2044,7 +2104,6 @@ function Database:upsertBookMetadata(book_cache_id, fields)
         stmt:close()
         return result == SQ3.DONE or result == SQ3.OK
     else
-        -- INSERT
         local stmt = self.conn:prepare([[
             INSERT INTO book_metadata (book_cache_id, sdr_path, rating, rating_synced, pending_rating_prompt)
             VALUES (?, ?, ?, ?, ?)
@@ -2179,37 +2238,21 @@ function Database:getBooksPendingRatingPrompt()
     return rows
 end
 
--- Pending Ratings Queue
-
---[[--
-Add a rating to the pending_ratings queue.
-
-Called when a rating sync attempt fails so it can be retried on the next
-upload trigger (session, note, or explicit sync).
-
-Upserts by book_cache_id so duplicate failures don't grow the table —
-only the latest rating value is kept pending.
-
-@param book_cache_id integer  book_cache.id
-@param book_id       integer  Booklore book ID
-@param rating        integer  1-10 rating value
-@return boolean success
---]]
 function Database:addPendingRating(book_cache_id, book_id, rating)
-    if not book_cache_id or not book_id or not rating then
+    -- book_id may be nil when the server was offline at book-close time.
+    if not book_cache_id or not rating then
         logger.err("BookloreSync Database: addPendingRating called with missing args")
         return false
     end
     book_cache_id = tonumber(book_cache_id)
-    book_id       = tonumber(book_id)
+    if book_id ~= nil then book_id = tonumber(book_id) end
     rating        = tonumber(rating)
-    if not book_cache_id or not book_id or not rating then
+    if not book_cache_id or not rating then
         logger.err("BookloreSync Database: addPendingRating: non-numeric argument")
         return false
     end
 
-    -- Upsert: if a pending rating already exists for this book, update the
-    -- value and reset the retry counter so the latest rating wins.
+    -- Upsert: if a pending rating already exists, update value and reset retry counter.
     local stmt = self.conn:prepare([[
         INSERT INTO pending_ratings (book_cache_id, book_id, rating, retry_count, created_at)
         VALUES (?, ?, ?, 0, CAST(strftime('%s', 'now') AS INTEGER))
@@ -2358,18 +2401,6 @@ function Database:incrementPendingRatingRetryCount(id)
     return result == SQ3.DONE or result == SQ3.OK
 end
 
--- Annotation / Highlight Sync Helpers
-
---[[--
-Check whether a KOReader annotation has already been synced.
-
-Uniqueness key: (book_cache_id, koreader_datetime, annotation_type)
-
-@param book_cache_id  number  book_cache.id
-@param koreader_datetime  string  annotation datetime from sidecar (e.g. "2026-02-20 18:08:13")
-@param annotation_type   string  "highlight", "in_book_note", or "booklore_note"
-@return boolean  true if already synced
---]]
 function Database:isAnnotationSynced(book_cache_id, koreader_datetime, annotation_type)
     if not book_cache_id or not koreader_datetime or not annotation_type then
         return false
@@ -2453,18 +2484,190 @@ function Database:markAnnotationSynced(book_cache_id, koreader_datetime, annotat
     return result == SQ3.DONE or result == SQ3.OK
 end
 
--- Plugin Settings helpers
+function Database:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, payload)
+    if not book_cache_id or not ann_type or not datetime or not payload then
+        logger.err("BookloreSync Database: addPendingAnnotation called with missing args")
+        return false
+    end
+    book_cache_id = tonumber(book_cache_id)
+    -- book_id is nullable: nil means the Booklore ID is not yet known
+    book_id = book_id and tonumber(book_id) or nil
+    if not book_cache_id then
+        logger.err("BookloreSync Database: addPendingAnnotation: non-numeric book_cache_id")
+        return false
+    end
+
+    local stmt = self.conn:prepare([[
+        INSERT INTO pending_annotations
+            (book_cache_id, book_id, ann_type, datetime, payload, retry_count, created_at)
+        VALUES (?, ?, ?, ?, ?, 0, CAST(strftime('%s', 'now') AS INTEGER))
+        ON CONFLICT(book_cache_id, datetime, ann_type) DO UPDATE SET
+            book_id       = excluded.book_id,
+            payload       = excluded.payload,
+            retry_count   = 0,
+            last_retry_at = NULL
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare addPendingAnnotation:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function()
+        stmt:bind(book_cache_id, book_id, tostring(ann_type), tostring(datetime), tostring(payload))
+    end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in addPendingAnnotation:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    if result ~= SQ3.DONE and result ~= SQ3.OK then
+        logger.err("BookloreSync Database: addPendingAnnotation step failed:", self.conn:errmsg())
+        return false
+    end
+    return true
+end
 
 --[[--
-Read a single plugin setting from the plugin_settings table.
+Return all rows from the pending_annotations queue, oldest first.
 
-Values are stored as TEXT.  Boolean strings ("true"/"false") and numeric
-strings are returned as their native Lua types so that callers can use
-the result exactly as they would a LuaSettings:readSetting() value.
-
-@param key string  Setting key
-@return string|number|boolean|nil  Typed value, or nil if not present
+@return table  Array of {id, book_cache_id, book_id, ann_type, datetime, payload, retry_count}
 --]]
+function Database:getPendingAnnotations()
+    local stmt = self.conn:prepare([[
+        SELECT id, book_cache_id, book_id, ann_type, datetime, payload, retry_count
+        FROM pending_annotations
+        ORDER BY created_at ASC
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getPendingAnnotations:", self.conn:errmsg())
+        return {}
+    end
+
+    local rows = {}
+    for row in stmt:rows() do
+        table.insert(rows, {
+            id            = tonumber(row[1]),
+            book_cache_id = tonumber(row[2]),
+            book_id       = tonumber(row[3]),
+            ann_type      = row[4],
+            datetime      = row[5],
+            payload       = row[6],
+            retry_count   = tonumber(row[7]) or 0,
+        })
+    end
+    stmt:close()
+    return rows
+end
+
+--[[--
+Return the number of annotations currently in the pending queue.
+
+@return integer
+--]]
+function Database:getPendingAnnotationCount()
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_annotations")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getPendingAnnotationCount:", self.conn:errmsg())
+        return 0
+    end
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
+    stmt:close()
+    return count
+end
+
+--[[--
+Remove a successfully-synced annotation from the pending queue.
+
+@param id integer  pending_annotations.id
+@return boolean success
+--]]
+function Database:deletePendingAnnotation(id)
+    if not id then
+        logger.err("BookloreSync Database: deletePendingAnnotation called without id")
+        return false
+    end
+    id = tonumber(id)
+    if not id then return false end
+
+    local stmt = self.conn:prepare("DELETE FROM pending_annotations WHERE id = ?")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare deletePendingAnnotation:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function() stmt:bind(id) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in deletePendingAnnotation:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
+--[[--
+Increment the retry counter for a pending annotation.
+
+@param id integer  pending_annotations.id
+@return boolean success
+--]]
+function Database:incrementPendingAnnotationRetryCount(id)
+    if not id then return false end
+    id = tonumber(id)
+    if not id then return false end
+
+    local stmt = self.conn:prepare([[
+        UPDATE pending_annotations
+        SET retry_count   = retry_count + 1,
+            last_retry_at = CAST(strftime('%s', 'now') AS INTEGER)
+        WHERE id = ?
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare incrementPendingAnnotationRetryCount:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function() stmt:bind(id) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in incrementPendingAnnotationRetryCount:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
+--[[--
+Delete all rows from the pending_annotations queue.
+
+@return boolean success
+--]]
+function Database:clearPendingAnnotations()
+    local result = self.conn:exec("DELETE FROM pending_annotations")
+    return result == SQ3.OK
+end
+
+--[[--
+Delete all rows from pending_ratings.
+
+@return boolean success
+--]]
+function Database:clearPendingRatings()
+    local result = self.conn:exec("DELETE FROM pending_ratings")
+    return result == SQ3.OK
+end
+
 function Database:getPluginSetting(key)
     if not key then return nil end
     key = tostring(key)
@@ -2592,17 +2795,6 @@ function Database:getAllPluginSettings()
     return settings
 end
 
--- Rating Sync History helpers
-
---[[--
-Record a rating sync attempt in rating_sync_history.
-
-@param book_cache_id  number   book_cache.id
-@param rating         number   Rating value that was synced (1-10)
-@param status         string   "success" or "error"  (default "success")
-@param error_message  string|nil  Error detail when status is "error"
-@return boolean success
---]]
 function Database:recordRatingSyncHistory(book_cache_id, rating, status, error_message)
     if not book_cache_id or not rating then
         logger.err("BookloreSync Database: recordRatingSyncHistory called with missing args")

@@ -34,7 +34,6 @@ local function redactUrls(message)
     if type(message) ~= "string" then
         message = tostring(message)
     end
-    -- Match http:// or https:// URLs and replace them with [URL REDACTED]
     return message:gsub("https?://[^%s]+", "[URL REDACTED]")
 end
 
@@ -52,14 +51,13 @@ function APIClient:init(server_url, username, password, db, secure_logs)
     self.db = db  -- Store database reference for token caching
     self.secure_logs = secure_logs or false
     
-    -- Remove trailing slash from server URL
     if self.server_url and self.server_url:sub(-1) == "/" then
         self.server_url = self.server_url:sub(1, -2)
     end
     
     self:logInfo("BookloreSync API: Initialized with server:", self.server_url)
 end
--- Secure logger wrappers
+
 function APIClient:logInfo(...)
     local args = {...}
     if self.secure_logs then
@@ -99,6 +97,7 @@ function APIClient:logDbg(...)
     end
     logger.dbg(table.unpack(args))
 end
+
 --[[--
 Parse JSON response with error handling
 
@@ -134,11 +133,9 @@ Tries to get error message from various possible formats:
 @return string User-friendly error message
 --]]
 function APIClient:extractErrorMessage(response_text, code)
-    -- Try to parse as JSON first
     local json_data, parse_err = self:parseJSON(response_text)
     
     if json_data then
-        -- Check common error message fields
         if json_data.message then
             return json_data.message
         elseif json_data.error then
@@ -152,13 +149,10 @@ function APIClient:extractErrorMessage(response_text, code)
         end
     end
     
-    -- If JSON parsing failed or no message found, use response text or HTTP code
     if response_text and response_text ~= "" and #response_text < 500 then
-        -- Use response text if it's reasonably short
         return response_text
     end
     
-    -- Fall back to generic HTTP status message
     local status_messages = {
         [400] = "Bad Request",
         [401] = "Unauthorized - Invalid credentials",
@@ -190,11 +184,9 @@ function APIClient:request(method, path, body, headers)
         return false, nil, "Server URL not configured"
     end
     
-    -- Build full URL
     local url = self.server_url .. path
     self:logInfo("BookloreSync API:", method, url)
     
-    -- Prepare headers
     local req_headers = headers or {}
     
     -- Add authentication if username/password provided and no custom Authorization header
@@ -204,7 +196,6 @@ function APIClient:request(method, path, body, headers)
         req_headers["x-auth-key"] = password_hash
     end
     
-    -- Prepare request body
     local req_body = nil
     local source = nil
     
@@ -222,20 +213,16 @@ function APIClient:request(method, path, body, headers)
         self:logDbg("BookloreSync API: Request body length:", #req_body)
     end
     
-    -- Prepare response capture
     local response_body = {}
     local sink = ltn12.sink.table(response_body)
     
-    -- Choose HTTP or HTTPS
     local http_client = http
     if url:match("^https://") then
         http_client = https
     end
     
-    -- Set timeout
     http_client.TIMEOUT = self.timeout
     
-    -- Make request
     local req_args = {
         url = url,
         method = method,
@@ -249,44 +236,36 @@ function APIClient:request(method, path, body, headers)
     
     local res, code, response_headers = http_client.request(req_args)
     
-    -- Process response
     local response_text = table.concat(response_body)
     
     self:logInfo("BookloreSync API: Response code:", tostring(code))
     self:logDbg("BookloreSync API: Response length:", #response_text)
     
-    -- Check for network/connection errors
     if not code then
         local error_msg = res or "Connection failed"
         self:logErr("BookloreSync API: Network error:", error_msg)
         return false, nil, "Network error: " .. error_msg
     end
     
-    -- Ensure code is a number (http client can return strings like "connection refused")
     if type(code) ~= "number" then
         local error_msg = tostring(code)
         self:logErr("BookloreSync API: Non-numeric response code:", error_msg)
         return false, nil, "Connection error: " .. error_msg
     end
     
-    -- Success codes (2xx)
     if code >= 200 and code < 300 then
-        -- Try to parse JSON response
         if response_text and response_text ~= "" then
             local json_data, parse_err = self:parseJSON(response_text)
             if json_data then
                 return true, code, json_data
             else
-                -- Not JSON, return raw text
                 return true, code, response_text
             end
         else
-            -- Empty success response
             return true, code, nil
         end
     end
     
-    -- Error codes (4xx, 5xx)
     local error_message = self:extractErrorMessage(response_text, code)
     self:logWarn("BookloreSync API: Request failed:", code, "-", error_message)
     
@@ -340,7 +319,6 @@ function APIClient:getBookByHash(book_hash)
     if success and type(response) == "table" then
         self:logInfo("BookloreSync API: Found book, ID:", response.id)
         
-        -- Extract ISBN from metadata if present
         local isbn10 = nil
         local isbn13 = nil
         if response.metadata and type(response.metadata) == "table" then
@@ -348,7 +326,6 @@ function APIClient:getBookByHash(book_hash)
             isbn13 = response.metadata.isbn13
         end
         
-        -- Store ISBN in top-level response for easier access by caller
         response.isbn10 = isbn10
         response.isbn13 = isbn13
         
@@ -416,17 +393,14 @@ function APIClient:submitSessionBatch(book_id, book_type, sessions)
         return false, "Invalid or empty sessions array", nil
     end
     
-    -- Log batch submission
     self:logInfo("BookloreSync API: Submitting batch of", #sessions, "sessions for book:", book_id)
     
-    -- Build payload
     local payload = {
         bookId = book_id,
         bookType = book_type or "EPUB",
         sessions = sessions
     }
     
-    -- Submit batch
     local success, code, response = self:request("POST", "/api/v1/reading-sessions/batch", payload)
     
     if success then
@@ -474,7 +448,6 @@ Search books by title (fuzzy match)
 function APIClient:searchBooks(title)
     self:logInfo("BookloreSync API: Searching books with title:", title)
     
-    -- URL encode the title
     local encoded_title = self:_urlEncode(title)
     local endpoint = "/api/v1/books/search?title=" .. encoded_title
     
@@ -545,11 +518,9 @@ token expiration.
 function APIClient:getOrRefreshBearerToken(username, password, force_refresh)
     force_refresh = force_refresh or false
     
-    -- Try to use cached token first (unless force refresh)
     if not force_refresh and self.db then
         local cached_token, expires_at = self.db:getBearerToken(username)
         if cached_token then
-            -- Check if token will expire within 1 day (86400 seconds)
             -- Proactively refresh to avoid mid-operation expiration
             if expires_at and (expires_at - os.time()) < 86400 then
                 self:logInfo("BookloreSync API: Token expires soon, refreshing for:", username)
@@ -561,12 +532,10 @@ function APIClient:getOrRefreshBearerToken(username, password, force_refresh)
         end
     end
     
-    -- No cached token or force refresh - login to get new token
     self:logInfo("BookloreSync API: Getting new Bearer token for:", username)
     local success, token = self:loginBooklore(username, password)
     
     if success and token then
-        -- Save token to cache
         if self.db then
             self.db:saveBearerToken(username, token)
         end
@@ -583,12 +552,10 @@ Validate Bearer token by making a test request
 @return boolean valid (true if token works)
 --]]
 function APIClient:validateBearerToken(token)
-    -- Try to make a simple request with the token
     local headers = {
         ["Authorization"] = "Bearer " .. token
     }
     
-    -- Use a lightweight endpoint to test the token
     local success, code, response = self:request("GET", "/api/v1/books/search?title=test&limit=1", nil, headers)
     
     -- Token is valid if request succeeds (200) or returns 404 (endpoint exists but no results)
@@ -613,7 +580,6 @@ Search books by title with custom authentication credentials
 function APIClient:searchBooksWithAuth(title, username, password)
     self:logInfo("BookloreSync API: Searching books with Booklore auth, title:", title)
     
-    -- Get or refresh cached Bearer token
     local login_success, token = self:getOrRefreshBearerToken(username, password)
     
     if not login_success then
@@ -621,11 +587,9 @@ function APIClient:searchBooksWithAuth(title, username, password)
         return false, token or "Authentication failed"
     end
     
-    -- URL encode the title
     local encoded_title = self:_urlEncode(title)
     local endpoint = "/api/v1/books/search?title=" .. encoded_title
     
-    -- Make request with Bearer token
     local headers = {
         ["Authorization"] = "Bearer " .. token
     }
@@ -636,7 +600,6 @@ function APIClient:searchBooksWithAuth(title, username, password)
     if not success and (code == 401 or code == 403) then
         self:logWarn("BookloreSync API: Token rejected (401/403), refreshing and retrying")
         
-        -- Delete cached token and get fresh one
         if self.db then
             self.db:deleteBearerToken(username)
         end
@@ -653,7 +616,6 @@ function APIClient:searchBooksWithAuth(title, username, password)
     if success and type(response) == "table" then
         self:logInfo("BookloreSync API: Found", #response, "matches")
         
-        -- Normalize each book object to extract ISBN from metadata
         for i, book in ipairs(response) do
             response[i] = self:_normalizeBookObject(book)
         end
@@ -678,7 +640,6 @@ Search books by ISBN with custom authentication credentials
 function APIClient:searchBooksByIsbn(isbn, username, password)
     self:logInfo("BookloreSync API: Searching books by ISBN:", isbn)
     
-    -- Get or refresh cached Bearer token
     local login_success, token = self:getOrRefreshBearerToken(username, password)
     
     if not login_success then
@@ -686,11 +647,9 @@ function APIClient:searchBooksByIsbn(isbn, username, password)
         return false, token or "Authentication failed"
     end
     
-    -- URL encode the ISBN
     local encoded_isbn = self:_urlEncode(isbn)
     local endpoint = "/api/v1/books/search?isbn=" .. encoded_isbn
     
-    -- Make request with Bearer token
     local headers = {
         ["Authorization"] = "Bearer " .. token
     }
@@ -717,7 +676,6 @@ function APIClient:searchBooksByIsbn(isbn, username, password)
     if success and type(response) == "table" then
         self:logInfo("BookloreSync API: Found", #response, "ISBN matches")
         
-        -- Normalize each book object to extract ISBN from metadata
         for i, book in ipairs(response) do
             response[i] = self:_normalizeBookObject(book)
         end
@@ -742,7 +700,6 @@ Get book by hash with Bearer token authentication
 function APIClient:getBookByHashWithAuth(book_hash, username, password)
     self:logInfo("BookloreSync API: Looking up book by hash with Booklore auth:", book_hash)
     
-    -- Get or refresh cached Bearer token
     local login_success, token = self:getOrRefreshBearerToken(username, password)
     
     if not login_success then
@@ -750,7 +707,6 @@ function APIClient:getBookByHashWithAuth(book_hash, username, password)
         return false, "Authentication failed"
     end
     
-    -- Make request with Bearer token
     local headers = {
         ["Authorization"] = "Bearer " .. token
     }
@@ -777,7 +733,6 @@ function APIClient:getBookByHashWithAuth(book_hash, username, password)
     if success and type(response) == "table" then
         self:logInfo("BookloreSync API: Found book by hash, ID:", response.id)
         
-        -- Extract ISBN from metadata if present
         local isbn10 = nil
         local isbn13 = nil
         if response.metadata and type(response.metadata) == "table" then
@@ -785,7 +740,6 @@ function APIClient:getBookByHashWithAuth(book_hash, username, password)
             isbn13 = response.metadata.isbn13
         end
         
-        -- Store ISBN in top-level response for easier access by caller
         response.isbn10 = isbn10
         response.isbn13 = isbn13
         
@@ -830,7 +784,6 @@ function APIClient:_normalizeBookObject(book)
         return book
     end
     
-    -- Extract ISBN from metadata if present
     if book.metadata and type(book.metadata) == "table" then
         if not book.isbn10 then
             book.isbn10 = book.metadata.isbn10
@@ -877,7 +830,6 @@ function APIClient:submitRating(book_id, rating, username, password)
 
     self:logInfo("BookloreSync API: Submitting rating", rating, "for book_id", book_id)
 
-    -- Get (or refresh) Bearer token
     local token_ok, token = self:getOrRefreshBearerToken(username, password, false)
     if not token_ok then
         self:logErr("BookloreSync API: Could not obtain Bearer token for rating:", token)

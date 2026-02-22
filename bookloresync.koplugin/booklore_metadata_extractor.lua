@@ -409,7 +409,6 @@ function BookloreMetadataExtractor:getCounts(doc_path)
     
     local counts = {highlights = 0, notes = 0, bookmarks = 0}
     
-    -- Count annotations
     local annotations = doc_settings:readSetting("annotations")
     if annotations and type(annotations) == "table" then
         for _, annotation in ipairs(annotations) do
@@ -422,7 +421,6 @@ function BookloreMetadataExtractor:getCounts(doc_path)
         end
     end
     
-    -- Count bookmarks
     local bookmarks = doc_settings:readSetting("bookmarks")
     if bookmarks and type(bookmarks) == "table" then
         counts.bookmarks = #bookmarks

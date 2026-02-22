@@ -1,0 +1,6 @@
+/* Custom styles for Booklore Sync documentation */
+
+/* Hide scroll progress indicator */
+.scroll-progress {
+    display: none !important;
+}

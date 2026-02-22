@@ -8,7 +8,16 @@ include:
     rules:
       - if: '$CI_MERGE_REQUEST_LABELS =~ /\brelease\b/'
       - if: '$CI_COMMIT_MESSAGE =~ /\[release\]\s*$/'
-
+  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola@1.0"
+    inputs:
+      lint-disabled: true
+      lychee-enabled: true
+      workspace-dir: "docs"
+  # Zola template (GitLab Pages variant)
+  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola-pages@1.0"
+  - component: "$CI_SERVER_FQDN/to-be-continuous/gitlab-butler/gitlab-ci-butler@1.4"
+    inputs:
+      pipelines-delete-older-than: "30"
 # secret variables
 # (define the variables below in your GitLab group/project variables)
 # GITLAB_TOKEN: A GitLab 'project access token' or 'personal access token' with `api`, `read_repository` and `write repository` scopes.

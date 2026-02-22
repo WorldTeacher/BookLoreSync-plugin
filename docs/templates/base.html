@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="{{ lang | default(value='en') }}" data-theme="dark" prefix="og: https://ogp.me/ns#">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+
+    {# ===== Primary Meta Tags ===== #}
+    <title>{% block title %}{{ page.title | default(value=section.title) | default(value=config.title) }}{% endblock %} | {{ config.title }}</title>
+
+    {# Description #}
+    {% if page.description %}
+    <meta name="description" content="{{ page.description }}">
+    {% elif section.description is defined and section.description %}
+    <meta name="description" content="{{ section.description }}">
+    {% else %}
+    <meta name="description" content="{{ config.description }}">
+    {% endif %}
+
+    {# Keywords from tags #}
+    {% if page.taxonomies.tags is defined and page.taxonomies.tags %}
+    <meta name="keywords" content="{{ page.taxonomies.tags | join(sep=', ') }}">
+    {% elif config.extra.keywords is defined %}
+    <meta name="keywords" content="{{ config.extra.keywords }}">
+    {% endif %}
+
+    {# Author #}
+    {% if config.extra.author is defined %}
+    <meta name="author" content="{{ config.extra.author }}">
+    {% endif %}
+
+    {# Robots #}
+    <meta name="robots" content="index, follow">
+    <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+    {# Canonical URL #}
+    {% if current_url is defined %}
+    <link rel="canonical" href="{{ current_url | safe }}">
+    <link rel="alternate" hreflang="en" href="{{ current_url | safe }}">
+    <link rel="alternate" hreflang="x-default" href="{{ current_url | safe }}">
+    {% endif %}
+
+    {# ===== Open Graph / Facebook ===== #}
+    <meta property="og:type" content="{% if page %}article{% else %}website{% endif %}">
+    {% if current_url is defined %}
+    <meta property="og:url" content="{{ current_url | safe }}">
+    {% endif %}
+    {% if page.title is defined %}
+    <meta property="og:title" content="{{ page.title }}">
+    {% elif section.title is defined %}
+    <meta property="og:title" content="{{ section.title }}">
+    {% else %}
+    <meta property="og:title" content="{{ config.title }}">
+    {% endif %}
+    {% if page.description is defined %}
+    <meta property="og:description" content="{{ page.description }}">
+    {% elif section.description is defined %}
+    <meta property="og:description" content="{{ section.description }}">
+    {% else %}
+    <meta property="og:description" content="{{ config.description }}">
+    {% endif %}
+    {% if config.extra.og_image is defined %}
+    <meta property="og:image" content="{{ get_url(path=config.extra.og_image) | safe }}">
+    <meta property="og:image:width" content="{{ config.extra.og_image_width | default(value=1200) }}">
+    <meta property="og:image:height" content="{{ config.extra.og_image_height | default(value=630) }}">
+    <meta property="og:image:alt" content="{{ config.extra.og_image_alt | default(value=config.title) }}">
+    {% endif %}
+    <meta property="og:site_name" content="{{ config.title }}">
+    <meta property="og:locale" content="{{ lang | default(value='en') | replace(from='-', to='_') }}">
+
+    {# Article-specific OG tags #}
+    {% if page %}
+    {% if page.date is defined and page.date %}
+    <meta property="article:published_time" content="{{ page.date | date(format='%Y-%m-%dT%H:%M:%S') }}">
+    {% endif %}
+    {% if page.updated is defined and page.updated %}
+    <meta property="article:modified_time" content="{{ page.updated | date(format='%Y-%m-%dT%H:%M:%S') }}">
+    {% endif %}
+    {% if page.taxonomies.tags is defined %}
+    {% for tag in page.taxonomies.tags %}
+    <meta property="article:tag" content="{{ tag }}">
+    {% endfor %}
+    {% endif %}
+    {% endif %}
+
+    {# ===== Twitter Card ===== #}
+    <meta name="twitter:card" content="summary_large_image">
+    {% if current_url is defined %}
+    <meta name="twitter:url" content="{{ current_url | safe }}">
+    {% endif %}
+    {% if page.title is defined %}
+    <meta name="twitter:title" content="{{ page.title }}">
+    {% elif section.title is defined %}
+    <meta name="twitter:title" content="{{ section.title }}">
+    {% else %}
+    <meta name="twitter:title" content="{{ config.title }}">
+    {% endif %}
+    {% if page.description is defined %}
+    <meta name="twitter:description" content="{{ page.description }}">
+    {% elif section.description is defined %}
+    <meta name="twitter:description" content="{{ section.description }}">
+    {% else %}
+    <meta name="twitter:description" content="{{ config.description }}">
+    {% endif %}
+    {% if config.extra.og_image is defined %}
+    <meta name="twitter:image" content="{{ get_url(path=config.extra.og_image) | safe }}">
+    <meta name="twitter:image:alt" content="{{ config.extra.og_image_alt | default(value=config.title) }}">
+    {% endif %}
+    {% if config.extra.twitter_site is defined %}
+    <meta name="twitter:site" content="{{ config.extra.twitter_site }}">
+    {% endif %}
+
+    {# ===== JSON-LD Structured Data for AEO ===== #}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "WebSite",
+                "@id": "{{ config.base_url | safe }}#website",
+                "url": "{{ config.base_url | safe }}",
+                "name": "{{ config.title }}",
+                "description": "{{ config.description }}",
+                "publisher": {
+                    "@id": "https://zentinelproxy.io/#organization"
+                },
+                "inLanguage": "{{ lang | default(value='en') }}",
+                "potentialAction": {
+                    "@type": "SearchAction",
+                    "target": {
+                        "@type": "EntryPoint",
+                        "urlTemplate": "{{ config.base_url | safe }}?q={search_term_string}"
+                    },
+                    "query-input": "required name=search_term_string"
+                }
+            },
+            {
+                "@type": "Organization",
+                "@id": "https://zentinelproxy.io/#organization",
+                "name": "{{ config.extra.author | default(value='raskell.io') }}",
+                "url": "https://zentinelproxy.io",
+                "logo": {
+                    "@type": "ImageObject",
+                    "url": "https://zentinelproxy.io/img/og-image.png",
+                    "width": 1200,
+                    "height": 630
+                }
+            },
+            {
+                "@type": "WebPage",
+                "@id": "{% if current_url is defined %}{{ current_url | safe }}{% else %}{{ config.base_url | safe }}{% endif %}#webpage",
+                "url": "{% if current_url is defined %}{{ current_url | safe }}{% else %}{{ config.base_url | safe }}{% endif %}",
+                "name": "{% if page.title is defined %}{{ page.title }}{% elif section.title is defined %}{{ section.title }}{% else %}{{ config.title }}{% endif %}",
+                "isPartOf": {
+                    "@id": "{{ config.base_url | safe }}#website"
+                },
+                "description": "{% if page.description is defined %}{{ page.description }}{% elif section.description is defined %}{{ section.description }}{% else %}{{ config.description }}{% endif %}",
+                "inLanguage": "{{ lang | default(value='en') }}"
+                {% if page.date is defined and page.date %},
+                "datePublished": "{{ page.date | date(format='%Y-%m-%d') }}"
+                {% endif %}
+                {% if page.updated is defined and page.updated %},
+                "dateModified": "{{ page.updated | date(format='%Y-%m-%d') }}"
+                {% endif %}
+            }
+            {% if page %}
+            ,{
+                "@type": "Article",
+                "@id": "{{ current_url | safe }}#article",
+                "isPartOf": {
+                    "@id": "{{ current_url | safe }}#webpage"
+                },
+                "headline": "{{ page.title }}",
+                {% if page.description is defined and page.description %}
+                "description": "{{ page.description }}",
+                {% endif %}
+                {% if page.date is defined and page.date %}
+                "datePublished": "{{ page.date | date(format='%Y-%m-%dT%H:%M:%S') }}",
+                {% endif %}
+                {% if page.updated is defined and page.updated %}
+                "dateModified": "{{ page.updated | date(format='%Y-%m-%dT%H:%M:%S') }}",
+                {% endif %}
+                "author": {
+                    "@id": "https://zentinelproxy.io/#organization"
+                },
+                "publisher": {
+                    "@id": "https://zentinelproxy.io/#organization"
+                },
+                {% if page.taxonomies.tags is defined %}
+                "keywords": "{{ page.taxonomies.tags | join(sep=', ') }}",
+                {% endif %}
+                {% if page.word_count is defined %}
+                "wordCount": {{ page.word_count }},
+                {% endif %}
+                "inLanguage": "{{ lang | default(value='en') }}"
+            }
+            {% endif %}
+        ]
+    }
+    </script>
+
+    {# ===== Breadcrumb JSON-LD ===== #}
+    {% if page.ancestors is defined and page.ancestors | length > 0 %}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "{{ config.title }}",
+                "item": "{{ config.base_url | safe }}"
+            }
+            {% set position = 2 %}
+            {% for ancestor in page.ancestors %}
+            {% set ancestor_section = get_section(path=ancestor) %}
+            ,{
+                "@type": "ListItem",
+                "position": {{ position }},
+                "name": "{{ ancestor_section.title }}",
+                "item": "{{ ancestor_section.permalink | safe }}"
+            }
+            {% set position = position + 1 %}
+            {% endfor %}
+            ,{
+                "@type": "ListItem",
+                "position": {{ page.ancestors | length + 2 }},
+                "name": "{{ page.title }}",
+                "item": "{{ page.permalink | safe }}"
+            }
+        ]
+    }
+    </script>
+    {% endif %}
+
+    {# ===== Stylesheets ===== #}
+    <link rel="stylesheet" href="{{ get_url(path='style.css') | safe }}">
+
+    {# Syntax highlighting #}
+    {% if config.markdown.highlight_code is defined and config.markdown.highlight_code %}
+    <link rel="stylesheet" href="{{ get_url(path='syntax-light.css') | safe }}" media="(prefers-color-scheme: light)">
+    <link rel="stylesheet" href="{{ get_url(path='syntax-dark.css') | safe }}" media="(prefers-color-scheme: dark)">
+    {% endif %}
+
+    {# Custom styles #}
+    <link rel="stylesheet" href="{{ get_url(path='custom.css') | safe }}">
+
+    {# ===== Preload fonts ===== #}
+    <link rel="preload" href="{{ get_url(path='fonts/Geist-Variable.woff2') | safe }}" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="{{ get_url(path='fonts/GeistMono-Variable.woff2') | safe }}" as="font" type="font/woff2" crossorigin>
+
+    {# ===== Favicon ===== #}
+    {% if config.extra.favicon %}
+    <link rel="icon" href="{{ get_url(path=config.extra.favicon) | safe }}">
+    {% endif %}
+    {% if config.extra.apple_touch_icon is defined %}
+    <link rel="apple-touch-icon" href="{{ get_url(path=config.extra.apple_touch_icon) | safe }}">
+    {% endif %}
+
+    {# ===== RSS Feed ===== #}
+    {% if config.generate_feeds %}
+    <link rel="alternate" type="application/rss+xml" title="{{ config.title }}" href="{{ get_url(path='rss.xml') | safe }}">
+    {% endif %}
+
+    {# ===== Theme script (inline to prevent flash) ===== #}
+    {% set mode = config.extra.mode | default(value="site") %}
+    {% if mode == "site" or mode == "blog" %}
+    {# raskell.io style 3-way theme toggle for site/blog mode #}
+    <script>
+        (function() {
+            var colorSchemeKey = 'ThemeColorScheme';
+            var colorSchemeItem = localStorage.getItem(colorSchemeKey) || 'auto';
+            var supportDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches === true;
+
+            // Set theme setting (light/dark/auto)
+            document.documentElement.dataset.themeSetting = colorSchemeItem;
+
+            // Set effective theme (light/dark)
+            if (colorSchemeItem == 'dark' || colorSchemeItem === 'auto' && supportDarkMode) {
+                document.documentElement.dataset.userColorScheme = 'dark';
+                document.documentElement.setAttribute('data-theme', 'dark');
+            } else {
+                document.documentElement.dataset.userColorScheme = 'light';
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+    {% else %}
+    {# Original tanuki theme toggle for docs/book/product modes #}
+    <script>
+        (function() {
+            try {
+                var stored = localStorage.getItem('tanuki-theme') || 'auto';
+                var theme = stored === 'auto'
+                    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                    : stored;
+                document.documentElement.setAttribute('data-theme', theme);
+                document.documentElement.setAttribute('data-theme-setting', stored);
+            } catch(e) {}
+        })();
+    </script>
+    {% endif %}
+
+    {% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+    {# ===== Skip Link for Accessibility ===== #}
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    {# Get mode from config #}
+    {% set mode = config.extra.mode | default(value="site") %}
+
+    {# Determine if header should be fixed (default: for docs and product modes) #}
+    {% if config.extra.fixed_header is defined %}
+        {% set fixed_header = config.extra.fixed_header %}
+    {% else %}
+        {% set fixed_header = mode == "docs" or mode == "product" %}
+    {% endif %}
+
+    {# Layout wrapper #}
+    <div class="layout layout--{{ mode }}{% if fixed_header %} layout--fixed-header{% endif %}" data-mode="{{ mode }}">
+        {% block sidebar %}{% endblock %}
+
+        <div class="layout__main">
+            {% block header %}
+            {% include "partials/header.html" %}
+            {% endblock %}
+
+            {# Scroll Progress Indicator - docs mode only #}
+            {% if mode == "docs" %}
+            <div class="scroll-progress" aria-hidden="true">
+                <div class="scroll-progress__bar"></div>
+                <span class="scroll-progress__percent">0%</span>
+            </div>
+            {% endif %}
+
+            {% block nav_buttons %}{% endblock %}
+
+            <div class="layout__content-area">
+                <main id="main-content" class="main-content" role="main" aria-label="Main content">
+                    {% block content %}{% endblock %}
+                </main>
+
+                {# Page ToC panel for docs mode - right sidebar #}
+                {% if mode == "docs" %}
+                {% include "partials/page-toc-panel.html" %}
+                {% endif %}
+            </div>
+
+            {% block footer %}
+            {% if mode != "docs" and mode != "book" and mode != "product" %}
+            {% include "partials/footer.html" %}
+            {% endif %}
+            {% endblock %}
+        </div>
+    </div>
+
+    {# Sidebar overlay for mobile #}
+    <div class="sidebar-overlay" aria-hidden="true"></div>
+
+    {# Search overlay - only for docs/book/product modes (site/blog has it in header) #}
+    {% if config.build_search_index and mode != "site" and mode != "blog" %}
+    {% include "partials/search.html" %}
+    {% endif %}
+
+    {# ToC overlay for book mode only #}
+    {% if mode == "book" %}
+    {% include "partials/toc-overlay.html" %}
+    {% endif %}
+
+    {# Nav overlay for mobile menu - only for product mode (site/blog has it in header, docs/book use sidebar) #}
+    {% if mode == "product" %}
+    {% include "partials/nav-overlay.html" %}
+    {% endif %}
+
+    {# Page ToC toggle button - docs mode only, fixed position #}
+    {% set has_toc = (page and page.toc) or (section and section.toc) %}
+    {% if mode == "docs" and has_toc %}
+    <button class="page-toc-toggle" type="button" aria-label="Toggle table of contents" aria-expanded="false" aria-controls="page-toc-panel" title="On this page">
+        <svg class="page-toc-toggle__icon page-toc-toggle__icon--list" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M16 5H3"/>
+            <path d="M16 12H3"/>
+            <path d="M16 19H3"/>
+            <path d="M21 5h.01"/>
+            <path d="M21 12h.01"/>
+            <path d="M21 19h.01"/>
+        </svg>
+        <svg class="page-toc-toggle__icon page-toc-toggle__icon--close" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18"/>
+            <path d="m6 6 12 12"/>
+        </svg>
+    </button>
+    {% endif %}
+
+    {# Scroll to top button (not for book mode) #}
+    {% if mode != "book" %}
+    <button class="fab scroll-to-top" aria-label="Scroll to top" title="Scroll to top">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m18 15-6-6-6 6"/>
+        </svg>
+    </button>
+    {% endif %}
+
+    {# Scripts #}
+    {% if mode == "site" or mode == "blog" %}
+    {# raskell.io style scripts for site/blog mode #}
+    <script src="{{ get_url(path='js/anchors.js') | safe }}"></script>
+    <script src="{{ get_url(path='js/scroll-to-top.js') | safe }}"></script>
+
+    {% if config.build_search_index %}
+    <script src="{{ get_url(path='elasticlunr.min.js') | safe }}"></script>
+    <script src="{{ get_url(path='search_index.en.js') | safe }}"></script>
+    <script src="{{ get_url(path='js/search-raskell.js') | safe }}"></script>
+    {% endif %}
+    {% else %}
+    {# Original tanuki scripts for docs/book/product modes #}
+    <script src="{{ get_url(path='js/theme.js') | safe }}" defer></script>
+    <script src="{{ get_url(path='js/navigation.js') | safe }}" defer></script>
+    <script src="{{ get_url(path='js/code.js') | safe }}" defer></script>
+
+    {% if config.build_search_index %}
+    <script src="{{ get_url(path='elasticlunr.min.js') | safe }}"></script>
+    <script src="{{ get_url(path='search_index.en.js') | safe }}"></script>
+    <script src="{{ get_url(path='js/search.js') | safe }}" defer></script>
+    {% endif %}
+    {% endif %}
+
+    {% block scripts %}{% endblock %}
+
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        mermaid.initialize({ startOnLoad: false });
+        mermaid.run({ querySelector: '.mermaid' });
+      });
+    </script>
+</body>
+</html>

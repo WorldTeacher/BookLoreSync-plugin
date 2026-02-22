@@ -1,0 +1,26 @@
+# The URL the site will be built for
+base_url = "https://docs.worldteacher.dev/worldteacher/booklore-koreader-plugin"
+title = "Booklore Sync — KOReader Plugin"
+description = "Official documentation for the Booklore Sync KOReader plugin. Automatically track reading sessions, sync ratings, highlights, and notes to your self-hosted Booklore server."
+theme = "tanuki"
+# Whether to automatically compile all Sass files in the sass directory
+compile_sass = true
+
+# Whether to build a search index to be used later on by a JavaScript library
+build_search_index = true
+
+[markdown]
+insert_anchor_links = "left"
+
+[extra]
+mode = "docs"
+gitlab = "https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin"
+show_theme_toggle = true
+
+# Optional: version picker
+# Note: url values are emitted verbatim as href — they must include the full subpath from base_url.
+[extra.versions]
+current = "3.3.1"
+list = [
+    { version = "3.3.1", url = "/worldteacher/booklore-koreader-plugin/", label = "latest" },
+]

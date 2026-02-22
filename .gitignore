@@ -25,3 +25,4 @@ booklore_db.lua
 .DS_Store
 Thumbs.db
 old/
+docs/public/

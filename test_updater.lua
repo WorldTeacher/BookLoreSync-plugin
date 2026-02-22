@@ -4,21 +4,17 @@ Test script for Booklore Updater version comparison logic
 Tests the core version parsing and comparison functions
 --]]
 
--- Standalone version of parseVersion
 local function parseVersion(version_string)
     if not version_string then
         return nil
     end
     
-    -- Strip leading 'v' if present
     version_string = version_string:gsub("^v", "")
     
-    -- Check for dev version
     if version_string:match("dev") then
         return {major = 0, minor = 0, patch = 0, is_dev = true}
     end
     
-    -- Parse semantic version (X.Y.Z)
     local major, minor, patch = version_string:match("^(%d+)%.(%d+)%.(%d+)")
     
     if not major then
@@ -33,7 +29,6 @@ local function parseVersion(version_string)
     }
 end
 
--- Standalone version of compareVersions
 local function compareVersions(v1, v2)
     if not v1 or not v2 then
         return 0
@@ -53,20 +48,18 @@ local function compareVersions(v1, v2)
     -- Compare major version
     if v1.major < v2.major then return -1 end
     if v1.major > v2.major then return 1 end
-    
+
     -- Compare minor version
     if v1.minor < v2.minor then return -1 end
     if v1.minor > v2.minor then return 1 end
-    
+
     -- Compare patch version
     if v1.patch < v2.patch then return -1 end
     if v1.patch > v2.patch then return 1 end
-    
-    -- Versions are equal
+
     return 0
 end
 
--- Standalone version of formatBytes
 local function formatBytes(bytes)
     if not bytes or bytes == 0 then
         return "Unknown size"
@@ -81,7 +74,6 @@ local function formatBytes(bytes)
     end
 end
 
--- Test version parsing
 print("\n=== Testing Version Parsing ===")
 local test_versions = {
     "1.0.5",
@@ -105,7 +97,6 @@ for _, version_str in ipairs(test_versions) do
     end
 end
 
--- Test version comparison
 print("\n=== Testing Version Comparison ===")
 local test_cases = {
     {"1.0.5", "1.0.6", -1, "1.0.5 < 1.0.6"},
@@ -139,7 +130,6 @@ end
 
 print(string.format("\nResults: %d passed, %d failed", passed, failed))
 
--- Test format bytes
 print("\n=== Testing Format Bytes ===")
 local byte_tests = {
     {0, "Unknown size"},
@@ -160,7 +150,6 @@ for _, test in ipairs(byte_tests) do
     end
 end
 
--- Test real-world scenario: current local version vs GitHub latest
 print("\n=== Real-World Test ===")
 local current_local = "0.0.0-dev+179f0b9"
 local github_latest = "1.1.1"
@@ -183,5 +172,4 @@ end
 
 print("\n=== All Tests Complete ===\n")
 
--- Return exit code
 os.exit(failed == 0 and 0 or 1)

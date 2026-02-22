@@ -17,10 +17,3 @@ mode = "docs"
 gitlab = "https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin"
 show_theme_toggle = true
 
-# Optional: version picker
-# Note: url values are emitted verbatim as href — they must include the full subpath from base_url.
-[extra.versions]
-current = "3.3.1"
-list = [
-    { version = "3.3.1", url = "/worldteacher/booklore-koreader-plugin/", label = "latest" },
-]

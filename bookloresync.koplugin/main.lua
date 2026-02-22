@@ -1261,7 +1261,8 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document)
     -- In that case we skip API calls but still compute CFIs (while the doc is
     -- open) and queue every annotation into pending_annotations so they are
     -- submitted on the next sync once the book_id has been resolved.
-    local queue_only = (book_id == nil)
+    -- Also queue when manual_sync_only is enabled (cache everything mode).
+    local queue_only = (book_id == nil) or self.manual_sync_only
 
     local annotations = self.metadata_extractor:getHighlights(doc_path)
     if not annotations or #annotations == 0 then
@@ -1300,6 +1301,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document)
     local synced_count  = 0
     local skipped_count = 0
     local failed_count  = 0
+    local queued_count  = 0
 
     for _, ann in ipairs(annotations) do
         local datetime = ann.datetime or ""
@@ -1385,7 +1387,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document)
             end
 
             if queue_only then
-                -- No book_id yet — queue for retry with full CFI cached in payload.
+                -- No book_id yet or manual_sync_only mode — queue for retry with full CFI cached in payload.
                 local pending_payload = json.encode({
                     ann_type   = ann_type,
                     datetime   = datetime,
@@ -1399,8 +1401,12 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document)
                     pos1       = ann.pos1,
                     notes_dest = notes_dest,
                 })
-                self.db:addPendingAnnotation(book_cache_id, nil, ann_type, datetime, pending_payload)
-                failed_count = failed_count + 1
+                self.db:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, pending_payload)
+                if self.manual_sync_only then
+                    queued_count = queued_count + 1
+                else
+                    failed_count = failed_count + 1
+                end
             elseif ok then
                 self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, server_id)
                 synced_count = synced_count + 1
@@ -1453,10 +1459,17 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document)
         ::continue::
     end
 
-    self:logInfo(string.format(
-        "BookloreSync: Highlights/notes sync done — synced:%d  skipped:%d  failed:%d",
-        synced_count, skipped_count, failed_count
-    ))
+    if self.manual_sync_only and queued_count > 0 then
+        self:logInfo(string.format(
+            "BookloreSync: Highlights/notes cached — queued:%d  skipped:%d",
+            queued_count, skipped_count
+        ))
+    else
+        self:logInfo(string.format(
+            "BookloreSync: Highlights/notes sync done — synced:%d  skipped:%d  failed:%d  queued:%d",
+            synced_count, skipped_count, failed_count, queued_count
+        ))
+    end
 end
 
 function BookloreSync:addToMainMenu(menu_items)
@@ -1976,37 +1989,61 @@ function BookloreSync:testConnection()
         return
     end
     
-    if not self.username or self.username == "" then
-        UIManager:show(InfoMessage:new{
-            text = _("Error: Username not configured"),
-            timeout = 3,
-        })
-        return
-    end
+    -- Test KOReader user authentication
+    local koreader_success = false
+    local koreader_message = ""
     
-    if not self.password or self.password == "" then
-        UIManager:show(InfoMessage:new{
-            text = _("Error: Password not configured"),
-            timeout = 3,
-        })
-        return
-    end
-    
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
-    
-    local success, message = self.api:testAuth()
-    
-    if success then
-        UIManager:show(InfoMessage:new{
-            text = _("✓ Connection successful!\n\nAuthentication verified."),
-            timeout = 3,
-        })
+    if self.username and self.username ~= "" and self.password and self.password ~= "" then
+        self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+        koreader_success, koreader_message = self.api:testAuth()
     else
-        UIManager:show(InfoMessage:new{
-            text = T(_("✗ Connection failed\n\n%1"), message),
-            timeout = 5,
-        })
+        koreader_message = "KOReader credentials not configured"
     end
+    
+    -- Test Booklore user authentication
+    local booklore_success = false
+    local booklore_message = ""
+    local booklore_token = nil
+    
+    if self.booklore_username and self.booklore_username ~= "" and 
+       self.booklore_password and self.booklore_password ~= "" then
+        booklore_success, booklore_token = self.api:loginBooklore(self.booklore_username, self.booklore_password)
+        
+        if booklore_success and booklore_token then
+            -- Store the bearer token
+            if self.db then
+                self.db:saveBearerToken(self.booklore_username, booklore_token)
+            end
+            booklore_message = "Booklore login successful"
+        else
+            booklore_message = booklore_token or "Booklore login failed"
+        end
+    else
+        booklore_message = "Booklore credentials not configured"
+    end
+    
+    -- Build result message
+    local result_parts = {}
+    
+    if koreader_success then
+        table.insert(result_parts, "✓ KOReader: " .. _("Success"))
+    else
+        table.insert(result_parts, "✗ KOReader: " .. koreader_message)
+    end
+    
+    if booklore_success then
+        table.insert(result_parts, "✓ Booklore: " .. _("Success"))
+    else
+        table.insert(result_parts, "✗ Booklore: " .. booklore_message)
+    end
+    
+    local overall_success = koreader_success or booklore_success
+    local result_text = table.concat(result_parts, "\n")
+    
+    UIManager:show(InfoMessage:new{
+        text = result_text,
+        timeout = overall_success and 4 or 6,
+    })
 end
 
 --[[--

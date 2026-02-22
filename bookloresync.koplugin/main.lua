@@ -1340,7 +1340,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document)
                 -- ── Pure highlight ──────────────────────────────────────────────
                 cfi = self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
                 if not cfi then
-                    self:logWarn("BookloreSync: Could not build CFI for highlight at:", datetime)
+                    self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, nil)
                     skipped_count = skipped_count + 1
                     return
                 end
@@ -1360,7 +1360,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document)
                 -- ── In-book note (v2) ────────────────────────────────────────────
                 cfi = self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
                 if not cfi then
-                    self:logWarn("BookloreSync: Could not build CFI for in-book note at:", datetime)
+                    self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, nil)
                     skipped_count = skipped_count + 1
                     return
                 end

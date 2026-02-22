@@ -18,7 +18,6 @@ local ffi = require("ffi")
 local util = require("util")
 
 local Updater = {
-    -- Constants
     GITHUB_REPO = "WorldTeacher/BookLoreSync-plugin",
     GITHUB_API_BASE = "https://api.github.com",
     RELEASE_ASSET_NAME = "bookloresync.koplugin.zip",
@@ -26,12 +25,10 @@ local Updater = {
     BACKUP_KEEP_COUNT = 3,
     HTTP_TIMEOUT = 10,
     
-    -- Paths (initialized in init())
     plugin_dir = nil,
     backup_dir = nil,
     temp_dir = nil,
     
-    -- Database reference
     db = nil,
 }
 
@@ -52,7 +49,6 @@ function Updater:init(plugin_dir, db)
     self.plugin_dir = plugin_dir
     self.db = db
     
-    -- Set up backup directory
     self.backup_dir = DataStorage:getDataDir() .. "/booklore-backups"
     
     -- Set up temp directory inside KOReader data dir (writable on all platforms including Android)
@@ -63,7 +59,6 @@ function Updater:init(plugin_dir, db)
     logger.info("BookloreSync Updater: Backup dir:", self.backup_dir)
     logger.info("BookloreSync Updater: Temp dir:", self.temp_dir)
     
-    -- Create backup directory if it doesn't exist
     os.execute("mkdir -p " .. self.backup_dir)
 end
 
@@ -100,15 +95,12 @@ function Updater:parseVersion(version_string)
         return nil
     end
     
-    -- Strip leading 'v' if present
     version_string = version_string:gsub("^v", "")
     
-    -- Check for dev version
     if version_string:match("dev") then
         return {major = 0, minor = 0, patch = 0, is_dev = true}
     end
     
-    -- Parse semantic version (X.Y.Z)
     local major, minor, patch = version_string:match("^(%d+)%.(%d+)%.(%d+)")
     
     if not major then
@@ -147,19 +139,15 @@ function Updater:compareVersions(v1, v2)
         return 0
     end
     
-    -- Compare major version
     if v1.major < v2.major then return -1 end
     if v1.major > v2.major then return 1 end
     
-    -- Compare minor version
     if v1.minor < v2.minor then return -1 end
     if v1.minor > v2.minor then return 1 end
     
-    -- Compare patch version
     if v1.patch < v2.patch then return -1 end
     if v1.patch > v2.patch then return 1 end
     
-    -- Versions are equal
     return 0
 end
 
@@ -185,15 +173,12 @@ function Updater:_makeHttpRequest(url, headers, max_redirects)
         local response_body = {}
         local request_headers = headers or {}
         
-        -- Set User-Agent for GitHub API
         if not request_headers["User-Agent"] then
             request_headers["User-Agent"] = "BookloreSync-KOReader-Plugin"
         end
         
-        -- Choose http or https based on URL
         local protocol = current_url:match("^https") and https or http
         
-        -- Set timeout
         protocol.TIMEOUT = self.HTTP_TIMEOUT
         
         local response, code, response_headers = protocol.request{
@@ -203,7 +188,6 @@ function Updater:_makeHttpRequest(url, headers, max_redirects)
             sink = ltn12.sink.table(response_body),
         }
         
-        -- Check for network errors
         if type(code) ~= "number" then
             local error_msg = tostring(code)
             logger.err("BookloreSync Updater: HTTP request failed:", error_msg)
@@ -212,7 +196,6 @@ function Updater:_makeHttpRequest(url, headers, max_redirects)
         
         local response_text = table.concat(response_body)
         
-        -- Handle redirects (3xx status codes)
         if code >= 300 and code < 400 then
             local location = response_headers and response_headers["location"]
             if not location then
@@ -220,7 +203,6 @@ function Updater:_makeHttpRequest(url, headers, max_redirects)
                 return false, "Redirect without location", code, response_headers
             end
             
-            -- Handle relative redirects
             if location:sub(1, 1) == "/" then
                 local base_url = current_url:match("^(https?://[^/]+)")
                 location = base_url .. location
@@ -234,12 +216,9 @@ function Updater:_makeHttpRequest(url, headers, max_redirects)
             
             logger.info("BookloreSync Updater: Following redirect to", location)
             current_url = location
-            -- Continue loop to follow redirect
         elseif code >= 200 and code < 300 then
-            -- Success
             return true, response_text, code, response_headers
         else
-            -- Error
             logger.err("BookloreSync Updater: HTTP", code, "response")
             return false, response_text, code, response_headers
         end
@@ -265,20 +244,17 @@ function Updater:getLatestRelease()
         return nil, "Failed to fetch release info: " .. tostring(response)
     end
     
-    -- Parse JSON response
     local ok, release_data = pcall(json.decode, response)
     if not ok then
         logger.err("BookloreSync Updater: Failed to parse JSON:", release_data)
         return nil, "Invalid response from GitHub API"
     end
     
-    -- Extract version from tag_name
     local version = release_data.tag_name
     if not version then
         return nil, "No tag_name in release data"
     end
     
-    -- Find the ZIP asset and CHANGELOG.md
     local download_url = nil
     local asset_size = 0
     local changelog_url = nil
@@ -289,7 +265,6 @@ function Updater:getLatestRelease()
                 download_url = asset.browser_download_url
                 asset_size = asset.size or 0
             elseif asset.name == "CHANGELOG.md" then
-                -- Found CHANGELOG.md file
                 changelog_url = asset.browser_download_url
                 logger.info("BookloreSync Updater: Found CHANGELOG.md in release assets")
             end
@@ -346,35 +321,26 @@ function Updater:parseChangelogForVersion(changelog_content, version)
         return nil
     end
     
-    -- Strip leading 'v' if present
     local version_clean = version:gsub("^v", "")
     
-    -- Split content into lines
     local lines = {}
     for line in changelog_content:gmatch("[^\r\n]+") do
         table.insert(lines, line)
     end
     
-    -- Find the section for this version
     local in_section = false
     local section_lines = {}
     
     for _, line in ipairs(lines) do
-        -- Check if this is a version heading (e.g., "# [3.2.0]" or "## [3.3.1]")
         if line:match("^##?%s+%[") then
-            -- Check if this is our version
             if line:match("%[" .. version_clean:gsub("%.", "%%.") .. "%]") then
-                -- Start capturing
                 in_section = true
-                -- Don't include the heading itself
             else
-                -- If we were in our section, stop now
                 if in_section then
                     break
                 end
             end
         elseif in_section then
-            -- Capture all lines in our section
             table.insert(section_lines, line)
         end
     end
@@ -384,10 +350,8 @@ function Updater:parseChangelogForVersion(changelog_content, version)
         return nil
     end
     
-    -- Join the lines back together
     local changelog_section = table.concat(section_lines, "\n")
     
-    -- Trim leading/trailing whitespace
     changelog_section = changelog_section:match("^%s*(.-)%s*$")
     
     logger.info("BookloreSync Updater: Extracted", #changelog_section, "bytes for version", version_clean)
@@ -415,19 +379,14 @@ function Updater:cleanChangelog(changelog_text)
     for _, line in ipairs(lines) do
         local cleaned_line = line
         
-        -- Remove markdown links [text](url) -> text
         cleaned_line = cleaned_line:gsub("%[([^%]]+)%]%(([^%)]+)%)", "%1")
         
-        -- Remove commit references like ([abc1234])
         cleaned_line = cleaned_line:gsub("%s*%(%[?[a-f0-9]+%]?%)%s*", " ")
         
-        -- Remove URLs that appear standalone
         cleaned_line = cleaned_line:gsub("https?://[^%s]+", "")
         
-        -- Clean up multiple spaces
         cleaned_line = cleaned_line:gsub("%s+", " ")
         
-        -- Trim trailing/leading whitespace
         cleaned_line = cleaned_line:match("^%s*(.-)%s*$")
         
         if cleaned_line ~= "" then
@@ -453,7 +412,6 @@ function Updater:getCachedReleaseInfo()
         return nil
     end
     
-    -- Parse cached JSON
     local ok, release_info = pcall(json.decode, cached_json)
     if not ok then
         logger.warn("BookloreSync Updater: Failed to parse cached release info")
@@ -501,11 +459,9 @@ Check for available updates
 function Updater:checkForUpdates(use_cache)
     logger.info("BookloreSync Updater: Checking for updates (use_cache=" .. tostring(use_cache) .. ")")
     
-    -- Get current version
     local current_info = self:getCurrentVersion()
     local current_version = current_info.version
     
-    -- Get latest release (from cache or API)
     local release_info, error_msg
     
     if use_cache then
@@ -519,11 +475,9 @@ function Updater:checkForUpdates(use_cache)
             return nil
         end
         
-        -- Cache the result
         self:cacheReleaseInfo(release_info)
     end
     
-    -- Parse versions
     local current_parsed = self:parseVersion(current_version)
     local latest_parsed = self:parseVersion(release_info.version)
     
@@ -532,7 +486,6 @@ function Updater:checkForUpdates(use_cache)
         return nil
     end
     
-    -- Compare versions
     local comparison = self:compareVersions(current_parsed, latest_parsed)
     local update_available = comparison < 0
     
@@ -579,7 +532,6 @@ Download update file with progress callback and redirect support
 function Updater:downloadUpdate(url, progress_callback)
     logger.info("BookloreSync Updater: Downloading from", url)
     
-    -- Create temp directory
     os.execute("mkdir -p " .. self.temp_dir)
     
     local zip_path = self.temp_dir .. "/download.zip"
@@ -592,11 +544,9 @@ function Updater:downloadUpdate(url, progress_callback)
     while redirect_count <= max_redirects do
         logger.info("BookloreSync Updater: Checking URL", final_url)
         
-        -- Choose protocol
         local protocol = final_url:match("^https") and https or http
         protocol.TIMEOUT = 60  -- Longer timeout for downloads
         
-        -- Make HEAD request to check for redirects
         local head_response = {}
         local response, code, response_headers = protocol.request{
             url = final_url,
@@ -611,14 +561,12 @@ function Updater:downloadUpdate(url, progress_callback)
             return false, "Connection error: " .. tostring(code)
         end
         
-        -- Handle redirects
         if code >= 300 and code < 400 then
             local location = response_headers and response_headers["location"]
             if not location then
                 return false, "Redirect without location"
             end
             
-            -- Handle relative redirects
             if location:sub(1, 1) == "/" then
                 local base_url = final_url:match("^(https?://[^/]+)")
                 location = base_url .. location
@@ -632,7 +580,6 @@ function Updater:downloadUpdate(url, progress_callback)
             logger.info("BookloreSync Updater: Following redirect to", location)
             final_url = location
         elseif code >= 200 and code < 300 then
-            -- Found final URL, proceed with download
             break
         else
             return false, "HTTP error: " .. tostring(code)
@@ -647,11 +594,9 @@ function Updater:downloadUpdate(url, progress_callback)
         return false, "Failed to create download file"
     end
     
-    -- Track download progress
     local bytes_downloaded = 0
     local total_bytes = 0
     
-    -- Custom sink to track progress
     local function progress_sink(chunk, err)
         if chunk then
             file:write(chunk)
@@ -664,11 +609,9 @@ function Updater:downloadUpdate(url, progress_callback)
         return 1
     end
     
-    -- Choose protocol for final download
     local protocol = final_url:match("^https") and https or http
     protocol.TIMEOUT = 60
     
-    -- Make GET request to download
     local response, code, response_headers = protocol.request{
         url = final_url,
         method = "GET",
@@ -680,7 +623,6 @@ function Updater:downloadUpdate(url, progress_callback)
     
     file:close()
     
-    -- Check for errors
     if type(code) ~= "number" then
         os.execute("rm -f " .. zip_path)
         return false, "Connection error: " .. tostring(code)
@@ -715,13 +657,11 @@ Validate ZIP file structure
 function Updater:_validateZipStructure(zip_path)
     logger.info("BookloreSync Updater: Validating ZIP structure")
     
-    -- List ZIP contents
     local list_cmd = string.format("unzip -l '%s' 2>&1", zip_path)
     local handle = io.popen(list_cmd)
     local output = handle:read("*a")
     handle:close()
     
-    -- Check for required files
     local has_main = output:match("bookloresync%.koplugin/main%.lua")
     local has_meta = output:match("bookloresync%.koplugin/_meta%.lua")
     
@@ -748,10 +688,8 @@ Extract ZIP file to destination directory
 function Updater:_extractZip(zip_path, dest_dir)
     logger.info("BookloreSync Updater: Extracting to", dest_dir)
     
-    -- Create destination directory
     os.execute("mkdir -p " .. dest_dir)
     
-    -- Extract ZIP
     local extract_cmd = string.format("unzip -q -o '%s' -d '%s' 2>&1", zip_path, dest_dir)
     local handle = io.popen(extract_cmd)
     local output = handle:read("*a")
@@ -779,7 +717,6 @@ function Updater:backupCurrentVersion()
     
     logger.info("BookloreSync Updater: Backing up to", backup_path)
     
-    -- Create backup using cp -r
     local backup_cmd = string.format("cp -r '%s' '%s' 2>&1", self.plugin_dir, backup_path)
     local handle = io.popen(backup_cmd)
     local output = handle:read("*a")
@@ -792,7 +729,6 @@ function Updater:backupCurrentVersion()
     
     logger.info("BookloreSync Updater: Backup created successfully")
     
-    -- Cleanup old backups
     self:cleanupOldBackups(self.BACKUP_KEEP_COUNT)
     
     return true, backup_path
@@ -875,7 +811,6 @@ Rollback to most recent backup
 function Updater:rollback()
     logger.info("BookloreSync Updater: Rolling back to previous version")
     
-    -- Find most recent backup
     local list_cmd = string.format("ls -t '%s' 2>&1", self.backup_dir)
     local handle = io.popen(list_cmd)
     local output = handle:read("*a")
@@ -897,10 +832,8 @@ function Updater:rollback()
     
     logger.info("BookloreSync Updater: Restoring from", backup_path)
     
-    -- Remove current plugin
     os.execute(string.format("rm -rf '%s'", self.plugin_dir))
     
-    -- Restore backup
     local restore_cmd = string.format("cp -r '%s' '%s' 2>&1", backup_path, self.plugin_dir)
     handle = io.popen(restore_cmd)
     output = handle:read("*a")
@@ -937,7 +870,6 @@ function Updater:cleanupOldBackups(keep_count)
     
     logger.info("BookloreSync Updater: Cleaning up old backups (keeping", keep_count, ")")
     
-    -- List backups sorted by modification time (newest first)
     local list_cmd = string.format("ls -t '%s' 2>&1", self.backup_dir)
     local handle = io.popen(list_cmd)
     local output = handle:read("*a")
@@ -950,7 +882,6 @@ function Updater:cleanupOldBackups(keep_count)
         end
     end
     
-    -- Delete old backups
     local deleted_count = 0
     for i = keep_count + 1, #backups do
         local backup_path = self.backup_dir .. "/" .. backups[i]

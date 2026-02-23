@@ -297,7 +297,44 @@ function BookloreSync:init()
     end
     
     self.ui.menu:registerToMainMenu(self)
-    
+
+    -- Register file manager long-press (hold) dialog buttons.
+    -- self.ui is the FileManager instance when the plugin is loaded from the file browser.
+    if self.ui.file_chooser and self.ui.addFileDialogButtons then
+        self.ui:addFileDialogButtons("booklore_sync_actions", function(file, is_file, _book_props)
+            if not is_file then return nil end
+            return {
+                {
+                    text = _("Sync all annotations"),
+                    callback = function()
+                        if self.ui.file_dialog then
+                            UIManager:close(self.ui.file_dialog)
+                        end
+                        self:fileDialogSyncAnnotations(file)
+                    end,
+                },
+                {
+                    text = _("Match Book"),
+                    callback = function()
+                        if self.ui.file_dialog then
+                            UIManager:close(self.ui.file_dialog)
+                        end
+                        self:fileDialogMatchBook(file)
+                    end,
+                },
+                {
+                    text = _("Sync Rating"),
+                    callback = function()
+                        if self.ui.file_dialog then
+                            UIManager:close(self.ui.file_dialog)
+                        end
+                        self:fileDialogSyncRating(file)
+                    end,
+                },
+            }
+        end)
+    end
+
     self:registerDispatcherActions()
 end
 
@@ -1546,6 +1583,199 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
     end
 
     return synced_count, queued_count, failed_count
+end
+
+--[[--
+File manager long-press: Sync all annotations for a single book.
+Looks up the book in the local DB, then calls syncHighlightsAndNotes.
+Requires the book to have been opened at least once so it has a book_cache entry.
+--]]
+function BookloreSync:fileDialogSyncAnnotations(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
+        return
+    end
+    if not self.highlights_notes_sync_enabled then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: annotation sync is disabled in settings") })
+        return
+    end
+    if self.booklore_username == "" or self.booklore_password == "" then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
+        return
+    end
+
+    local book = self.db:getBookByFilePath(file_path)
+    if not book then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book not found in local database.\nOpen the book first to register it."),
+        })
+        return
+    end
+    if not book.book_id then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book is not yet matched to Booklore.\nUse \"Match Book\" first."),
+        })
+        return
+    end
+
+    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+
+    UIManager:show(InfoMessage:new{
+        text = _("Booklore: syncing annotations…"),
+        timeout = 1,
+    })
+
+    -- syncHighlightsAndNotes requires an open document for CFI generation;
+    -- without it we can only retry pending annotations.
+    local synced, failed = self:syncPendingAnnotations(false)
+    local msg
+    if synced > 0 then
+        msg = T(_("Booklore: synced %1 annotation(s), %2 failed"), synced, failed)
+    elseif failed > 0 then
+        msg = T(_("Booklore: %1 annotation(s) failed to sync"), failed)
+    else
+        msg = _("Booklore: no pending annotations to sync for this book.\nAnnotations are captured when you close the book.")
+    end
+    UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
+end
+
+--[[--
+File manager long-press: Match a single book to Booklore.
+Uses the existing interactive book-cache matching flow but scoped to one book.
+--]]
+function BookloreSync:fileDialogMatchBook(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
+        return
+    end
+    if self.booklore_username == "" or self.booklore_password == "" then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
+        return
+    end
+
+    local book = self.db:getBookByFilePath(file_path)
+    if not book then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book not found in local database.\nOpen the book first to register it."),
+        })
+        return
+    end
+    if book.book_id then
+        UIManager:show(ConfirmBox:new{
+            text = T(_("Booklore: this book is already matched (id %1).\nRe-match it?"), book.book_id),
+            ok_text = _("Re-match"),
+            ok_callback = function()
+                self:_matchSingleBook(book)
+            end,
+        })
+        return
+    end
+
+    self:_matchSingleBook(book)
+end
+
+--[[--
+Internal: run the interactive match dialog for a single book_cache row.
+--]]
+function BookloreSync:_matchSingleBook(book)
+    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+
+    local search_term = book.title and book.title ~= "" and book.title
+                        or book.file_path:match("([^/]+)$") or ""
+
+    UIManager:show(InfoMessage:new{
+        text = T(_("Booklore: searching for: %1"), search_term),
+        timeout = 1,
+    })
+
+    local success, results = self.api:searchBooksWithAuth(
+        search_term, self.booklore_username, self.booklore_password
+    )
+
+    if not success then
+        local err = type(results) == "string" and results or _("Unknown error")
+        UIManager:show(InfoMessage:new{
+            text = T(_("Booklore: search failed: %1"), err),
+        })
+        return
+    end
+
+    if not results or #results == 0 then
+        UIManager:show(InfoMessage:new{
+            text = T(_("Booklore: no matches found for:\n%1"), search_term),
+        })
+        return
+    end
+
+    local top_results = {}
+    for i = 1, math.min(5, #results) do
+        top_results[i] = results[i]
+    end
+
+    local buttons = {}
+    for _, result in ipairs(top_results) do
+        local score = result.matchScore
+            and string.format(" (%.0f%%)", result.matchScore * 100)
+            or ""
+        local label = result.title .. score
+        if result.author and result.author ~= "" then
+            label = label .. "\n" .. result.author
+        end
+        local r = result
+        table.insert(buttons, {{
+            text = label,
+            callback = function()
+                UIManager:close(self.bk_match_dialog)
+                self:_saveBookCacheMatch(book, r)
+            end,
+        }})
+    end
+    table.insert(buttons, {{
+        text = _("Cancel"),
+        callback = function()
+            UIManager:close(self.bk_match_dialog)
+        end,
+    }})
+
+    self.bk_match_dialog = ButtonDialog:new{
+        title = T(_("Select match for:\n%1"), search_term),
+        buttons = buttons,
+    }
+    UIManager:show(self.bk_match_dialog)
+end
+
+--[[--
+File manager long-press: Sync the KOReader star rating for a single book.
+--]]
+function BookloreSync:fileDialogSyncRating(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
+        return
+    end
+    if self.booklore_username == "" or self.booklore_password == "" then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
+        return
+    end
+
+    local book = self.db:getBookByFilePath(file_path)
+    if not book then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book not found in local database.\nOpen the book first to register it."),
+        })
+        return
+    end
+    if not book.book_id then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book is not yet matched to Booklore.\nUse \"Match Book\" first."),
+        })
+        return
+    end
+
+    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+
+    -- syncKOReaderRating requires a live_rating or reads from doc_settings;
+    -- pass nil so it reads from the stored sdr/doc_settings for this path.
+    self:syncKOReaderRating(file_path, book.book_id, nil)
 end
 
 function BookloreSync:addToMainMenu(menu_items)

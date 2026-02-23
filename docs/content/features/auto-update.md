@@ -117,4 +117,4 @@ The current version, build date, and git commit are shown at:
 
 **Tools → BookLore Sync → About & Updates → Version Info**
 
-You can also see this information in the [Reference → Changelog](/reference/changelog/).
+You can also see this information in the [Reference → Changelog](@/reference/changelog.md).

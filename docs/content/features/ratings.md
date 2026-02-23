@@ -14,7 +14,7 @@ The rating sync feature pushes your book ratings from KOReader to your BookLore 
 
 Rating sync requires:
 
-- The **BookLore account credentials** to be configured (for Bearer token authentication). See [Authentication](/configuration/authentication/).
+- The **BookLore account credentials** to be configured (for Bearer token authentication). See [Authentication](@/configuration/authentication.md).
 - **Enable rating sync** toggled on in **Settings → Rating**.
 
 ---

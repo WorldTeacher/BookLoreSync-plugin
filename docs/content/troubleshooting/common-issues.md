@@ -147,7 +147,7 @@ If upload strategy is set to "Upload on read complete", annotations are only syn
 
 **Check 4 — Deduplication:**
 
-If you believe an annotation was never uploaded but the plugin shows it as already synced, inspect the `synced_annotations` table in the database. See [Database](/troubleshooting/database/).
+If you believe an annotation was never uploaded but the plugin shows it as already synced, inspect the `synced_annotations` table in the database. See [Database](@/troubleshooting/database.md).
 
 ---
 

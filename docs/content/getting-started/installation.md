@@ -25,7 +25,7 @@ Download the latest release ZIP from the [GitLab releases page](https://gitlab.w
 
 The ZIP contains a single folder named `bookloresync.koplugin`.
 
-Alternatively, the plugin can update itself once installed — see [Auto-Update](/features/auto-update/).
+Alternatively, the plugin can update itself once installed — see [Auto-Update](@/features/auto-update.md).
 
 ---
 
@@ -165,4 +165,4 @@ A confirmation message will appear if the connection succeeds.
 
 ## Next steps
 
-Once the plugin is installed and connected, follow the [Quick Start](/getting-started/quick-start/) guide to confirm your first session syncs correctly.
+Once the plugin is installed and connected, follow the [Quick Start](@/getting-started/quick-start.md) guide to confirm your first session syncs correctly.

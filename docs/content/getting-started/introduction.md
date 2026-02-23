@@ -53,8 +53,8 @@ The plugin works with any book format that KOReader can open:
 
 ## Quick navigation
 
-- **New here?** Start with [Installation](/getting-started/installation/) and then [Quick Start](/getting-started/quick-start/).
-- **Already installed?** Jump to [Configuration](/configuration/) to set up your server connection.
-- **Looking for a specific feature?** Browse the [Features](/features/) section.
-- **Something broken?** Check [Troubleshooting](/troubleshooting/common-issues/).
-- **Need a settings reference?** See [Reference → Settings](/reference/settings/).
+- **New here?** Start with [Installation](@/getting-started/installation.md) and then [Quick Start](@/getting-started/quick-start.md).
+- **Already installed?** Jump to [Configuration](@/configuration/_index.md) to set up your server connection.
+- **Looking for a specific feature?** Browse the [Features](@/features/_index.md) section.
+- **Something broken?** Check [Troubleshooting](@/troubleshooting/common-issues.md).
+- **Need a settings reference?** See [Reference → Settings](@/reference/settings.md).

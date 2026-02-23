@@ -49,4 +49,4 @@ The exact menu path varies slightly by device type and KOReader version.
 
 - Assigning a dispatcher action to a gesture requires going through KOReader's standard gesture UI. The plugin has no separate gesture configuration screen.
 - If an action appears greyed out or missing, ensure the plugin is installed and has been loaded at least once (open a book, then close it).
-- For full details on each action's behaviour, see [Dispatcher Actions](/reference/dispatcher-actions/).
+- For full details on each action's behaviour, see [Dispatcher Actions](@/reference/dispatcher-actions.md).

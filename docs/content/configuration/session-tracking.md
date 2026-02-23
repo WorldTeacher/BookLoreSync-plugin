@@ -59,7 +59,7 @@ Controls how many decimal places are included in the progress percentage **sent 
 
 ## Rating Sync
 
-Requires **BookLore account credentials** to be configured. See [Authentication](/configuration/authentication/).
+Requires **BookLore account credentials** to be configured. See [Authentication](@/configuration/authentication.md).
 
 ### Enable rating sync
 
@@ -94,7 +94,7 @@ A future mode will sync ratings to a [Hardcover](https://hardcover.app) account.
 
 > **Warning:** Annotation sync currently only works for EPUB files. Highlights and notes from PDF, CBZ, and other formats are not synced.
 
-Requires **BookLore account credentials** to be configured. See [Authentication](/configuration/authentication/).
+Requires **BookLore account credentials** to be configured. See [Authentication](@/configuration/authentication.md).
 
 ### Enable highlights and notes sync
 

@@ -14,7 +14,7 @@ The annotations sync feature uploads highlights and notes you make in KOReader t
 
 Annotation sync requires:
 
-- The **BookLore account credentials** configured for Bearer token authentication. See [Authentication](/configuration/authentication/).
+- The **BookLore account credentials** configured for Bearer token authentication. See [Authentication](@/configuration/authentication.md).
 - **Sync highlights and notes** toggled on in **Settings → Annotations**.
 
 ---

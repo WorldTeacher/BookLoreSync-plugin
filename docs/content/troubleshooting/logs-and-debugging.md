@@ -136,4 +136,4 @@ When opening a bug report on the [GitLab issue tracker](https://gitlab.worldteac
 3. **Device and OS** (Kindle, Kobo, Android, Linux, etc.)
 4. **Steps to reproduce** the issue
 5. **A log file** captured with Debug logging and Secure logs enabled
-6. **Database state** if relevant (see [Database](/troubleshooting/database/))
+6. **Database state** if relevant (see [Database](@/troubleshooting/database.md))

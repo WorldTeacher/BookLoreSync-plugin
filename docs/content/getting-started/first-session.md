@@ -119,4 +119,4 @@ Key tables:
 | `synced_annotations` | Deduplication record for uploaded highlights/notes |
 | `bearer_tokens` | Cached JWT token for extended API features |
 
-See [Reference → Settings](/reference/settings/) for a full list of configuration keys stored in `plugin_settings`.
+See [Reference → Settings](@/reference/settings.md) for a full list of configuration keys stored in `plugin_settings`.

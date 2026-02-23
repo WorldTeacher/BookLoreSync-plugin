@@ -87,7 +87,7 @@ Authentification verified
 
 A failed test shows a specific error message — for example, if the server is unreachable, if credentials are wrong, or if the health endpoint returns an unexpected status.
 
-> You can also use the dispatcher action `TestBookloreConnection` to test the connection from a KOReader gesture or button shortcut. See [Gestures and Buttons](/features/gestures/) for how to set this up.
+> You can also use the dispatcher action `TestBookloreConnection` to test the connection from a KOReader gesture or button shortcut. See [Gestures and Buttons](@/features/gestures.md) for how to set this up.
 
 ---
 

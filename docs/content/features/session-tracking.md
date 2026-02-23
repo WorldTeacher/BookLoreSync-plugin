@@ -129,4 +129,4 @@ Progress is always stored locally at full precision. The decimal places setting 
 
 For most use cases the default of 2 is fine. Increase it if your BookLore server reports noticeably rounded progress values for very long books.
 
-See [Configuration → Session Tracking](/configuration/session-tracking/#progress-decimal-places) to change this setting.
+See [Configuration → Session Tracking](@/configuration/session-tracking.md#progress-decimal-places) to change this setting.

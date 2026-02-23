@@ -43,7 +43,7 @@ Log entries cover:
 - Error conditions with stack information
 - Auto-update check activity
 
-Enable this setting when investigating an issue and share the log file when reporting a bug. See [Troubleshooting → Logs and Debugging](/troubleshooting/logs-and-debugging/) for guidance on reading the logs.
+Enable this setting when investigating an issue and share the log file when reporting a bug. See [Troubleshooting → Logs and Debugging](@/troubleshooting/logs-and-debugging.md) for guidance on reading the logs.
 
 ---
 

@@ -6,7 +6,7 @@ weight = 2
 
 # Quick Start
 
-This guide assumes you have already [installed the plugin](/getting-started/installation/) and configured a server connection. It takes about five minutes.
+This guide assumes you have already [installed the plugin](@/getting-started/installation.md) and configured a server connection. It takes about five minutes.
 
 ---
 
@@ -74,7 +74,7 @@ This shows the details of the database.. You can manually trigger a sync from:
 
 **Tools → BookLore Sync → Sync Pending Now**
 
-If sessions remain stuck in the queue, see [Troubleshooting → Common Issues](/troubleshooting/common-issues/).
+If sessions remain stuck in the queue, see [Troubleshooting → Common Issues](@/troubleshooting/common-issues.md).
 
 ---
 
@@ -82,4 +82,4 @@ If sessions remain stuck in the queue, see [Troubleshooting → Common Issues](/
 
 The plugin will now track every reading session automatically in the background. You do not need to do anything else for basic session tracking to work.
 
-To set up ratings, highlights, and notes sync, continue to [Configuration → Sync Settings](/configuration/session-tracking/).
+To set up ratings, highlights, and notes sync, continue to [Configuration → Sync Settings](@/configuration/session-tracking.md).

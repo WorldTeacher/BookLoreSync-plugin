@@ -22,6 +22,7 @@ include:
 # Initialize git submodules (required for tanuki theme)
 variables:
   GIT_SUBMODULE_STRATEGY: recursive
+  ZOLA_WORKSPACE_DIR: "docs"
 
 # secret variables
 # (define the variables below in your GitLab group/project variables)

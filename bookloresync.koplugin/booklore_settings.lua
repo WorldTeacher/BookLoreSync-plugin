@@ -6,9 +6,11 @@ Handles all user configuration for the Booklore KOReader plugin.
 @module koplugin.BookloreSync.settings
 --]]--
 
+local DataStorage = require("datastorage")
 local InputDialog = require("ui/widget/inputdialog")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
+local json = require("json")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
@@ -563,6 +565,56 @@ function Settings:buildAnnotationsMenu(parent)
     }
 end
 
+function Settings:exportSettings(parent)
+    local export_data = {
+        is_enabled                    = parent.is_enabled,
+        silent_messages               = parent.silent_messages,
+        log_to_file                   = parent.log_to_file,
+        secure_logs                   = parent.secure_logs,
+        min_duration                  = parent.min_duration,
+        min_pages                     = parent.min_pages,
+        session_detection_mode        = parent.session_detection_mode,
+        progress_decimal_places       = parent.progress_decimal_places,
+        force_push_session_on_suspend = parent.force_push_session_on_suspend,
+        connect_network_on_suspend    = parent.connect_network_on_suspend,
+        sync_mode                     = parent.sync_mode,
+        manual_sync_only              = parent.manual_sync_only,
+        extended_sync_enabled         = parent.extended_sync_enabled,
+        rating_sync_enabled           = parent.rating_sync_enabled,
+        rating_sync_mode              = parent.rating_sync_mode,
+        highlights_notes_sync_enabled = parent.highlights_notes_sync_enabled,
+        notes_destination             = parent.notes_destination,
+        upload_strategy               = parent.upload_strategy,
+        auto_update_check             = parent.auto_update_check,
+    }
+
+    local ok_enc, encoded = pcall(json.encode, export_data)
+    if not ok_enc then
+        UIManager:show(InfoMessage:new{
+            text = T(_("Failed to encode settings: %1"), encoded),
+            timeout = 4,
+        })
+        return
+    end
+
+    local export_path = DataStorage:getSettingsDir() .. "/booklore_settings_export.json"
+    local f, err = io.open(export_path, "w")
+    if not f then
+        UIManager:show(InfoMessage:new{
+            text = T(_("Failed to write export file: %1"), tostring(err)),
+            timeout = 4,
+        })
+        return
+    end
+    f:write(encoded)
+    f:close()
+
+    UIManager:show(InfoMessage:new{
+        text = T(_("Settings exported to:\n%1"), export_path),
+        timeout = 5,
+    })
+end
+
 function Settings:buildPreferencesMenu(parent)
     return {
         text = _("Preferences"),
@@ -629,10 +681,18 @@ function Settings:buildPreferencesMenu(parent)
                     parent.secure_logs = not parent.secure_logs
                     parent.settings:saveSetting("secure_logs", parent.secure_logs)
                     parent.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = parent.secure_logs and _("Secure logging enabled") or _("Secure logging disabled"),
-                        timeout = 2,
-                    })
+                UIManager:show(InfoMessage:new{
+                    text = parent.secure_logs and _("Secure logging enabled") or _("Secure logging disabled"),
+                    timeout = 2,
+                })
+                end,
+            },
+            {
+                text = _("Export Settings"),
+                help_text = _("Export plugin settings to a JSON file. Sensitive fields (server URL, usernames, and passwords) are excluded from the export."),
+                keep_menu_open = true,
+                callback = function()
+                    self:exportSettings(parent)
                 end,
             },
         },

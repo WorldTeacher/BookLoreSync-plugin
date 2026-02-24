@@ -17,6 +17,10 @@ Before you start, make sure you have:
 
 The plugin has no other dependencies — everything it needs (SQLite, JSON, HTTP) is already bundled with KOReader.
 
+> **Important: Custom Docker Image Required**
+>
+> This plugin requires the custom Booklore Docker image `worldteacher99/booklore:koreader-plugin`. The standard Booklore image does **not** include the API endpoints needed by this plugin. Make sure your Booklore server is running this image before proceeding.
+
 ---
 
 ## Step 1 — Download the plugin

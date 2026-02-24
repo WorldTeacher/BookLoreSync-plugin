@@ -16,6 +16,12 @@
 
 **Automatically track reading sessions in KOReader and sync them to your self-hosted Booklore server.**
 
+> **Docker Image Requirement**
+>
+> This plugin requires the custom Booklore Docker image to function. The standard Booklore image does **not** include the necessary API endpoints used by this plugin.
+>
+> You must use: **`worldteacher99/booklore:koreader-plugin`**
+
 ## Features
 
 - 📚 **Automatic Session Tracking** - Duration, progress, pages, and location tracking

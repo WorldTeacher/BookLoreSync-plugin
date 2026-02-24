@@ -32,7 +32,7 @@ Beyond session tracking, the plugin also supports:
 | Offline queue with auto-retry | Fully implemented |
 | Batch session upload (up to 100) | Fully implemented |
 | Book rating sync | Fully implemented |
-| Highlights and notes sync | Fully implemented |
+| Highlights and notes sync | Currently not working |
 | EPUB CFI position for annotations | Fully implemented |
 | Auto-update from GitHub | Fully implemented |
 | Supported formats: EPUB, PDF, CBZ, CBR | Fully implemented |

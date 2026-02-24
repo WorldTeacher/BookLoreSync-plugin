@@ -79,24 +79,7 @@ Auto-check on startup is enabled by default (checks once per day).
 
 ## Troubleshooting
 
-### Plugin not appearing in menu
-- Verify files are in `plugins/bookloresync.koplugin/`
-- Restart KOReader completely (not sleep mode)
-
-### Connection test fails
-```bash
-# Verify server is running
-curl http://your-server:6060/api/health
-# Should return: {"status":"ok"}
-```
-Check server URL, username, and password.
-
-### Sessions not syncing
-- Check **Tools → BookLore Sync → Manage Sessions** for pending count
-- Disable **Manual Sync Only** if you want auto-sync
-- Try manual sync: **Manage Sessions → Sync Pending Now**
-
-**More help:** [Troubleshooting Guide](https://docs.worldteacher.dev/worldteacher/booklore-koreader-plugin/troubleshooting/common-issues/)
+[Troubleshooting Guide](https://docs.worldteacher.dev/worldteacher/booklore-koreader-plugin/troubleshooting/common-issues/)
 
 ## Development
 
@@ -135,5 +118,4 @@ MIT License
 ## Links
 
 - **Documentation:** https://docs.worldteacher.dev/worldteacher/booklore-koreader-plugin/
-- **Booklore Server:** https://gitlab.worldteacher.dev/WorldTeacher/booklore
 - **KOReader:** https://github.com/koreader/koreader

@@ -1861,6 +1861,13 @@ function BookloreSync:addToMainMenu(menu_items)
                     self:syncRematchedSessions()
                 end,
             },
+            {
+                text = _("Manual Matching"),
+                help_text = _("Manually search for and match a book to a Booklore entry."),
+                callback = function()
+                    self:manualMatching()
+                end,
+            },
         },
     })
     
@@ -4941,6 +4948,16 @@ function BookloreSync:syncRematchedSessions()
     
     self:logInfo("BookloreSync: Re-matched sync complete - synced:", total_synced,
                 "failed:", total_failed, "not found:", total_not_found)
+end
+
+--[[--
+Manual Matching — placeholder, work in progress.
+--]]
+function BookloreSync:manualMatching()
+    UIManager:show(InfoMessage:new{
+        text = _("WIP, sorry"),
+        timeout = 5,
+    })
 end
 
 --[[--

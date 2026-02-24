@@ -8,6 +8,7 @@ Syncs reading sessions to Booklore server via REST API.
 
 local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
+local FileManager = require("apps/filemanager/filemanager")
 local EventListener = require("ui/widget/eventlistener")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
@@ -299,46 +300,48 @@ function BookloreSync:init()
     self.ui.menu:registerToMainMenu(self)
 
     -- Register file manager long-press (hold) dialog buttons.
-    -- self.ui is the FileManager instance when the plugin is loaded from the file browser.
-    if self.ui.file_chooser and self.ui.addFileDialogButtons then
-        self.ui:addFileDialogButtons("booklore_sync_actions", function(file, is_file, _book_props)
-            if not is_file then return nil end
-            return {
-                {
-                    text = _("Sync all annotations"),
-                    callback = function()
-                        if self.ui.file_dialog then
-                            UIManager:close(self.ui.file_dialog)
-                        end
-                        self:fileDialogSyncAnnotations(file)
-                    end,
-                },
-                {
-                    text = _("Match Book"),
-                    callback = function()
-                        if self.ui.file_dialog then
-                            UIManager:close(self.ui.file_dialog)
-                        end
-                        self:fileDialogMatchBook(file)
-                    end,
-                },
-                {
-                    text = _("Sync Rating"),
-                    callback = function()
-                        if self.ui.file_dialog then
-                            UIManager:close(self.ui.file_dialog)
-                        end
-                        self:fileDialogSyncRating(file)
-                    end,
-                },
-            }
-        end)
-    end
+    -- Register on the FileManager CLASS table (not a live instance), matching the
+    -- coverbrowser pattern: FileManager.addFileDialogButtons(FileManager, id, func).
+    -- showFileDialog reads file_manager.file_dialog_added_buttons where file_manager is
+    -- the live instance; Lua's __index chain finds the entry on the class table.
+    -- Registration must be unconditional — init() is always called from the reader
+    -- context where self.ui.file_chooser is nil.
+    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions", function(file, is_file, _book_props)
+        if not is_file then return nil end
+        return {
+            {
+                text = _("Sync all annotations"),
+                callback = function()
+                    local fc = FileManager.instance and FileManager.instance.file_chooser
+                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
+                    self:fileDialogSyncAnnotations(file)
+                end,
+            },
+            {
+                text = _("Match Book"),
+                callback = function()
+                    local fc = FileManager.instance and FileManager.instance.file_chooser
+                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
+                    self:fileDialogMatchBook(file)
+                end,
+            },
+            {
+                text = _("Sync Rating"),
+                callback = function()
+                    local fc = FileManager.instance and FileManager.instance.file_chooser
+                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
+                    self:fileDialogSyncRating(file)
+                end,
+            },
+        }
+    end)
 
     self:registerDispatcherActions()
 end
 
 function BookloreSync:onExit()
+    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions")
+
     if self.db then
         self.db:close()
     end

@@ -267,7 +267,11 @@ function APIClient:request(method, path, body, headers)
     end
     
     local error_message = self:extractErrorMessage(response_text, code)
-    self:logWarn("BookloreSync API: Request failed:", code, "-", error_message)
+    if response_text and response_text ~= "" then
+        self:logWarn("BookloreSync API: Request failed:", code, "-", error_message, "| Raw response:", response_text)
+    else
+        self:logWarn("BookloreSync API: Request failed:", code, "-", error_message, "| Raw response: (empty)")
+    end
     
     return false, code, error_message
 end
@@ -366,18 +370,10 @@ function APIClient:getBookByHash(book_hash)
     if success and type(response) == "table" then
         self:logInfo("BookloreSync API: Found book, ID:", response.id)
         
-        local isbn10 = nil
-        local isbn13 = nil
-        if response.metadata and type(response.metadata) == "table" then
-            isbn10 = response.metadata.isbn10
-            isbn13 = response.metadata.isbn13
-        end
+        response = self:_normalizeBookObject(response)
         
-        response.isbn10 = isbn10
-        response.isbn13 = isbn13
-        
-        if isbn10 or isbn13 then
-            self:logInfo("BookloreSync API: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
+        if response.isbn10 or response.isbn13 then
+            self:logInfo("BookloreSync API: Book has ISBN-10:", response.isbn10, "ISBN-13:", response.isbn13)
         else
             self:logInfo("BookloreSync API: Book has no ISBN data")
         end
@@ -421,6 +417,9 @@ Submit batch of reading sessions for a single book
 Submits multiple sessions in a single request for improved performance.
 Automatically falls back to individual uploads if batch endpoint is not available (404).
 
+Uses KOReader x-auth-user/x-auth-key authentication, consistent with the
+single-session endpoint.
+
 @param book_id Booklore book ID (number)
 @param book_type Book type (string): "EPUB", "PDF", etc.
 @param sessions Array of session objects (table), max 100 sessions recommended
@@ -448,6 +447,8 @@ function APIClient:submitSessionBatch(book_id, book_type, sessions)
         sessions = sessions
     }
     
+    -- Uses KOReader x-auth-user/x-auth-key auth (injected automatically by request())
+    self:logInfo("BookloreSync API: Batch upload auth method: x-auth-user/x-auth-key")
     local success, code, response = self:request("POST", "/api/v1/reading-sessions/batch", payload)
     
     if success then
@@ -780,18 +781,10 @@ function APIClient:getBookByHashWithAuth(book_hash, username, password)
     if success and type(response) == "table" then
         self:logInfo("BookloreSync API: Found book by hash, ID:", response.id)
         
-        local isbn10 = nil
-        local isbn13 = nil
-        if response.metadata and type(response.metadata) == "table" then
-            isbn10 = response.metadata.isbn10
-            isbn13 = response.metadata.isbn13
-        end
+        response = self:_normalizeBookObject(response)
         
-        response.isbn10 = isbn10
-        response.isbn13 = isbn13
-        
-        if isbn10 or isbn13 then
-            self:logInfo("BookloreSync API: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
+        if response.isbn10 or response.isbn13 then
+            self:logInfo("BookloreSync API: Book has ISBN-10:", response.isbn10, "ISBN-13:", response.isbn13)
         end
         
         return true, response
@@ -821,10 +814,15 @@ function APIClient:_urlEncode(str)
 end
 
 --[[--
-Normalize book object by extracting ISBN from metadata to top level
+Normalize book object by promoting fields from nested metadata to top level
+
+Booklore's /api/v1/ endpoints nest title, authors, and ISBNs under a
+`metadata` sub-object, while the /api/koreader/ endpoints return them at
+the top level. This function promotes the fields so all callers can access
+them uniformly as book.title, book.authors, book.isbn10, book.isbn13.
 
 @param book Book object from API
-@return table Normalized book object with isbn10/isbn13 at top level
+@return table Normalized book object with metadata fields at top level
 --]]
 function APIClient:_normalizeBookObject(book)
     if not book or type(book) ~= "table" then
@@ -832,6 +830,12 @@ function APIClient:_normalizeBookObject(book)
     end
     
     if book.metadata and type(book.metadata) == "table" then
+        if not book.title or book.title == "" then
+            book.title = book.metadata.title
+        end
+        if not book.authors or book.authors == "" then
+            book.authors = book.metadata.authors
+        end
         if not book.isbn10 then
             book.isbn10 = book.metadata.isbn10
         end

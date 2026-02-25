@@ -5355,7 +5355,7 @@ Database:updateHardcoverId() when present.
 Shows a summary InfoMessage when done.
 --]]
 function BookloreSync:fetchAndStoreHardcoverIds()
-    if not self.booklore_url or self.booklore_url == "" then
+    if not self.server_url or self.server_url == "" then
         UIManager:show(InfoMessage:new{
             text = _("Booklore URL is not configured."),
             timeout = 3,

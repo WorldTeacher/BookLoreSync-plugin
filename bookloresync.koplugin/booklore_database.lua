@@ -958,6 +958,41 @@ function Database:updateBookId(file_hash, book_id)
 end
 
 --[[--
+Return all book_cache rows that have a matched Booklore book_id.
+
+Used by the debug metadata-fetch action to know which books to query.
+
+@return table  Array of { id, file_path, file_hash, book_id, hardcover_id }
+--]]
+function Database:getAllMatchedBooks()
+    local stmt = self.conn:prepare([[
+        SELECT id, file_path, file_hash, book_id, hardcover_id
+        FROM book_cache
+        WHERE book_id IS NOT NULL
+        ORDER BY last_accessed DESC
+    ]])
+
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getAllMatchedBooks:", self.conn:errmsg())
+        return {}
+    end
+
+    local books = {}
+    for row in stmt:rows() do
+        table.insert(books, {
+            id           = tonumber(row[1]),
+            file_path    = tostring(row[2]),
+            file_hash    = tostring(row[3]),
+            book_id      = tonumber(row[4]),
+            hardcover_id = row[5] and tonumber(row[5]) or nil,
+        })
+    end
+
+    stmt:close()
+    return books
+end
+
+--[[--
 Store or clear the Hardcover book ID for a cached book.
 
 Called after a successful Booklore API response that includes a hardcover_id,

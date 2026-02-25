@@ -4148,19 +4148,19 @@ function BookloreSync:_uploadSessionsWithBatching(book_id, book_type, sessions)
         end
         
         -- Try batch upload
-        self:logInfo("BookloreSync: Attempting batch", batch_num, "of", batch_count, "with", (end_idx - start_idx + 1), "sessions")
+        self:logInfo("BookloreSync: Attempting batch", batch_num, "of", batch_count, "with", (end_idx - start_idx + 1), "sessions for booklore_book_id:", book_id)
         local success, message, code = self.api:submitSessionBatch(book_id, book_type, batch_sessions)
-        self:logInfo("BookloreSync: Batch", batch_num, "result - success:", tostring(success), "code:", tostring(code or "nil"), "message:", tostring(message or "nil"))
+        self:logInfo("BookloreSync: Batch", batch_num, "result - booklore_book_id:", book_id, "success:", tostring(success), "code:", tostring(code or "nil"), "message:", tostring(message or "nil"))
         
         if success then
             for i = start_idx, end_idx do
                 self.db:markHistoricalSessionSynced(sessions[i].id)
                 synced_count = synced_count + 1
             end
-            self:logInfo("BookloreSync: Batch", batch_num, "of", batch_count, "uploaded successfully (" .. (end_idx - start_idx + 1) .. " sessions)")
-        elseif code == 404 or code == 403 then
-            -- Server doesn't have batch endpoint (404/403) OR book not found (404)
-            -- Fallback to individual upload to determine which
+            self:logInfo("BookloreSync: Batch", batch_num, "of", batch_count, "uploaded successfully (" .. (end_idx - start_idx + 1) .. " sessions) for booklore_book_id:", book_id)
+        elseif code == 404 then
+            -- Server doesn't have batch endpoint OR book not found; fallback to
+            -- individual upload to determine which
             self:logWarn("BookloreSync: Batch returned", code, "falling back to individual upload for batch", batch_num)
             
             for i = start_idx, end_idx do
@@ -4180,8 +4180,8 @@ function BookloreSync:_uploadSessionsWithBatching(book_id, book_type, sessions)
             end
         else
             -- Other error: all sessions in batch failed
-            self:logErr("BookloreSync: Batch upload failed for batch", batch_num, "of", batch_count, 
-                       "(" .. (end_idx - start_idx + 1) .. " sessions) - Error:", message, "Code:", tostring(code or "nil"))
+            self:logErr("BookloreSync: Batch upload failed for batch", batch_num, "of", batch_count,
+                       "booklore_book_id:", book_id, "(" .. (end_idx - start_idx + 1) .. " sessions) - Error:", message, "Code:", tostring(code or "nil"))
             failed_count = failed_count + (end_idx - start_idx + 1)
         end
     end

@@ -456,7 +456,7 @@ Database.migration_hooks = {
             "manual_sync_only", "sync_mode",
             "historical_sync_ack",
             "booklore_username", "booklore_password",
-            "extended_sync_enabled", "rating_sync_enabled", "rating_sync_mode",
+            "rating_sync_enabled", "rating_sync_mode",
             "highlights_notes_sync_enabled", "notes_destination", "upload_strategy",
             "auto_update_check", "last_update_check",
         }
@@ -1242,6 +1242,25 @@ function Database:incrementSessionRetryCount(session_id)
     stmt:step()
     stmt:close()
     
+    return true
+end
+
+function Database:updatePendingSessionBookId(session_id, book_id)
+    local stmt = self.conn:prepare([[
+        UPDATE pending_sessions
+        SET book_id = ?
+        WHERE id = ?
+    ]])
+
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        return false
+    end
+
+    stmt:bind(book_id, session_id)
+    stmt:step()
+    stmt:close()
+
     return true
 end
 

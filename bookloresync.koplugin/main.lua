@@ -1909,7 +1909,23 @@ function BookloreSync:addToMainMenu(menu_items)
             },
         },
     })
-    
+
+    -- Debug menu
+    table.insert(base_menu, {
+        text = _("Debug"),
+        help_text = _("Developer tools and diagnostics."),
+        sub_item_table = {
+            {
+                text = _("Request book metadata from BookLore"),
+                help_text = _("Fetch metadata from the Booklore server for every matched book and store any Hardcover book IDs returned."),
+                keep_menu_open = true,
+                callback = function()
+                    self:fetchAndStoreHardcoverIds()
+                end,
+            },
+        },
+    })
+
     menu_items.booklore_sync = {
         text = _("Booklore Sync"),
         sorting_hint = "tools",
@@ -5325,6 +5341,92 @@ function BookloreSync:clearUpdateCache()
     UIManager:show(InfoMessage:new{
         text = _("Update cache cleared.\n\nNext check will fetch fresh data."),
         timeout = 2,
+    })
+end
+
+--[[--
+Debug action: fetch metadata from Booklore for every matched book and
+persist any hardcover_id values returned.
+
+Iterates all book_cache rows that have a book_id, calls
+APIClient:getBookById() for each, and stores the hardcover_id via
+Database:updateHardcoverId() when present.
+
+Shows a summary InfoMessage when done.
+--]]
+function BookloreSync:fetchAndStoreHardcoverIds()
+    if not self.booklore_url or self.booklore_url == "" then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore URL is not configured."),
+            timeout = 3,
+        })
+        return
+    end
+    if not self.booklore_username or self.booklore_username == "" then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore credentials are not configured."),
+            timeout = 3,
+        })
+        return
+    end
+
+    UIManager:show(InfoMessage:new{
+        text = _("Fetching book metadata from Booklore…"),
+        timeout = 2,
+    })
+
+    -- Collect all book_cache rows that have a book_id
+    local books = self.db:getAllMatchedBooks()
+    if not books or #books == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No matched books found in the local cache."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local total    = #books
+    local updated  = 0
+    local skipped  = 0
+    local failed   = 0
+
+    for _, book in ipairs(books) do
+        local ok, data = self.api:getBookById(
+            book.book_id,
+            self.booklore_username,
+            self.booklore_password
+        )
+
+        if ok and data then
+            local hc_id = data.hardcover_id
+            if hc_id then
+                local saved = self.db:updateHardcoverId(book.file_hash, hc_id)
+                if saved then
+                    updated = updated + 1
+                    self:logInfo("BookloreSync: Stored hardcover_id", hc_id,
+                        "for book_id", book.book_id, "hash", book.file_hash)
+                else
+                    failed = failed + 1
+                    self:logWarn("BookloreSync: Failed to save hardcover_id for book_id", book.book_id)
+                end
+            else
+                skipped = skipped + 1
+                self:logInfo("BookloreSync: No hardcover_id in response for book_id", book.book_id)
+            end
+        else
+            failed = failed + 1
+            self:logWarn("BookloreSync: getBookById failed for book_id", book.book_id, "—", tostring(data))
+        end
+    end
+
+    UIManager:show(InfoMessage:new{
+        text = T(_(
+            "Metadata fetch complete.\n\n" ..
+            "Books checked: %1\n" ..
+            "Hardcover IDs stored: %2\n" ..
+            "No Hardcover ID: %3\n" ..
+            "Errors: %4"
+        ), total, updated, skipped, failed),
     })
 end
 

@@ -305,6 +305,53 @@ function APIClient:testAuth()
 end
 
 --[[--
+Probe the by-hash endpoint to verify server compatibility.
+
+Sends a GET request to /api/koreader/books/by-hash/<random_hash>.
+A functioning server returns 404 (book not found), which confirms the
+endpoint exists and is reachable.  Any non-404 HTTP failure (e.g. 401,
+500) or a network/connection error is surfaced as an incompatibility.
+
+@return boolean endpoint_ok   true if the endpoint is reachable
+@return string  message       human-readable result or error detail
+--]]
+function APIClient:testByHashEndpoint()
+    -- Generate a pseudo-random 32-char hex hash that will never match a real book.
+    -- We use os.time() mixed with a fixed salt so it varies per call without
+    -- requiring an external random library.
+    local salt = 0xDEADBEEF
+    local t = os.time()
+    local probe_hash = string.format("%08x%08x%08x%08x",
+        t,
+        (t * 6364136223846793005) % 0x100000000,
+        salt,
+        ((t + salt) * 1442695040888963407) % 0x100000000)
+
+    self:logInfo("BookloreSync API: Probing by-hash endpoint with hash:", probe_hash)
+
+    local _, code, _ = self:request("GET", "/api/koreader/books/by-hash/" .. probe_hash)
+
+    if code == 404 then
+        -- Expected: endpoint exists, book simply not found.
+        self:logInfo("BookloreSync API: by-hash endpoint reachable (404 as expected)")
+        return true, "by-hash endpoint OK"
+    elseif code == 401 or code == 403 then
+        local msg = "by-hash endpoint reachable but returned HTTP " .. tostring(code) .. " (auth error)"
+        self:logWarn("BookloreSync API:", msg)
+        -- The endpoint exists; auth issues are a separate problem.
+        return true, msg
+    elseif code then
+        local msg = "by-hash endpoint returned unexpected HTTP " .. tostring(code)
+        self:logWarn("BookloreSync API:", msg)
+        return false, msg
+    else
+        local msg = "by-hash endpoint unreachable (connection failed)"
+        self:logErr("BookloreSync API:", msg)
+        return false, msg
+    end
+end
+
+--[[--
 Get book by hash
 
 @param book_hash The MD5 hash of the book file

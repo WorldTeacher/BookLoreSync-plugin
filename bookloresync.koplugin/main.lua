@@ -2029,6 +2029,17 @@ function BookloreSync:testConnection()
         booklore_message = "Booklore credentials not configured"
     end
     
+    -- Test by-hash endpoint compatibility (critical for plugin operation)
+    local hash_endpoint_ok = false
+    local hash_endpoint_message = ""
+
+    if koreader_success or booklore_success then
+        -- Only probe if at least one auth check passed so the server is reachable
+        hash_endpoint_ok, hash_endpoint_message = self.api:testByHashEndpoint()
+    else
+        hash_endpoint_message = "Skipped (no successful auth)"
+    end
+
     -- Build result message
     local result_parts = {}
     
@@ -2043,13 +2054,23 @@ function BookloreSync:testConnection()
     else
         table.insert(result_parts, "✗ Booklore: " .. booklore_message)
     end
+
+    if hash_endpoint_ok then
+        table.insert(result_parts, "✓ by-hash endpoint: " .. _("OK"))
+    else
+        table.insert(result_parts, "✗ by-hash endpoint: " .. hash_endpoint_message)
+    end
     
     local overall_success = koreader_success or booklore_success
     local result_text = table.concat(result_parts, "\n")
+
+    if not hash_endpoint_ok and (koreader_success or booklore_success) then
+        result_text = result_text .. "\n\n" .. _("Warning: the by-hash endpoint is unavailable. Book matching will not work. Please update your Booklore server.")
+    end
     
     UIManager:show(InfoMessage:new{
         text = result_text,
-        timeout = overall_success and 4 or 6,
+        timeout = (overall_success and hash_endpoint_ok) and 4 or 6,
     })
 end
 

@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 15,  -- Current database schema version
+    VERSION = 16,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -418,6 +418,19 @@ Database.migrations = {
             ON pending_ratings(book_cache_id)
         ]],
     },
+
+    -- Migration 16: add hardcover_id column to book_cache
+    -- Stores the Hardcover integer book ID returned by the Booklore API,
+    -- so we can rate books on Hardcover without a lookup on every sync.
+    [16] = {
+        [[
+            ALTER TABLE book_cache ADD COLUMN hardcover_id INTEGER
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_book_cache_hardcover_id
+            ON book_cache(hardcover_id)
+        ]],
+    },
 }
 
 -- Post-migration hooks: Lua functions run after the SQL transaction commits.
@@ -738,7 +751,7 @@ function Database:getBookByFilePath(file_path)
     file_path = tostring(file_path)
     
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13, hardcover_id
         FROM book_cache
         WHERE file_path = ?
     ]])
@@ -775,6 +788,7 @@ function Database:getBookByFilePath(file_path)
             last_accessed = row[7] and tonumber(row[7]) or nil,
             isbn10 = row[8] and tostring(row[8]) or nil,
             isbn13 = row[9] and tostring(row[9]) or nil,
+            hardcover_id = row[10] and tonumber(row[10]) or nil,
         }
         break
     end
@@ -785,7 +799,7 @@ end
 
 function Database:getBookByHash(file_hash)
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13, hardcover_id
         FROM book_cache
         WHERE file_hash = ?
         LIMIT 1
@@ -810,6 +824,7 @@ function Database:getBookByHash(file_hash)
             last_accessed = row[7] and tonumber(row[7]) or nil,
             isbn10 = row[8] and tostring(row[8]) or nil,
             isbn13 = row[9] and tostring(row[9]) or nil,
+            hardcover_id = row[10] and tonumber(row[10]) or nil,
         }
         break
     end
@@ -939,6 +954,44 @@ function Database:updateBookId(file_hash, book_id)
     stmt:step()
     stmt:close()
     
+    return true
+end
+
+--[[--
+Store or clear the Hardcover book ID for a cached book.
+
+Called after a successful Booklore API response that includes a hardcover_id,
+so subsequent rating syncs can skip the lookup entirely.
+
+@param file_hash string   SHA-256 hash identifying the local file
+@param hardcover_id number|nil  Hardcover integer book ID (nil to clear)
+@return boolean true on success
+--]]
+function Database:updateHardcoverId(file_hash, hardcover_id)
+    if hardcover_id ~= nil then
+        hardcover_id = tonumber(hardcover_id)
+        if not hardcover_id then
+            logger.warn("BookloreSync Database: Invalid hardcover_id in updateHardcoverId, aborting")
+            return false
+        end
+    end
+
+    local stmt = self.conn:prepare([[
+        UPDATE book_cache
+        SET hardcover_id = ?, updated_at = CAST(strftime('%s', 'now') AS INTEGER)
+        WHERE file_hash = ?
+    ]])
+
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare updateHardcoverId statement:", self.conn:errmsg())
+        return false
+    end
+
+    stmt:bind(hardcover_id, file_hash)
+    stmt:step()
+    stmt:close()
+
+    logger.dbg("BookloreSync Database: hardcover_id updated to", hardcover_id, "for hash", file_hash)
     return true
 end
 

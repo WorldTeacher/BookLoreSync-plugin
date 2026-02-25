@@ -4460,7 +4460,8 @@ function BookloreSync:_showNextBookMatch()
             )
             
             if success and server_book then
-                self:_confirmHashMatch(book, server_book)
+                self:logInfo("BookloreSync: Hash match found for:", book.koreader_book_title, "-> Booklore:", server_book.title, "(auto-accepting)")
+                self:_saveMatchAndSync(book, server_book)
                 return
             end
         end
@@ -4493,46 +4494,6 @@ function BookloreSync:_confirmAutoMatch(book, book_id)
             self:_showNextBookMatch()
         end,
     })
-end
-
-function BookloreSync:_confirmHashMatch(book, server_book)
-    local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
-    
-    self.hash_match_dialog = ButtonDialog:new{
-        title = T(_("Found by hash:\n\n%1\n\n%2"), server_book.title or "Unknown", progress_text),
-        buttons = {
-            {
-                {
-                    text = _("Proceed"),
-                    callback = function()
-                        UIManager:close(self.hash_match_dialog)
-                        self:_saveMatchAndSync(book, server_book)
-                    end,
-                },
-            },
-            {
-                {
-                    text = _("Manual Match"),
-                    callback = function()
-                        UIManager:close(self.hash_match_dialog)
-                        self:_performManualSearch(book)
-                    end,
-                },
-            },
-            {
-                {
-                    text = _("Skip"),
-                    callback = function()
-                        UIManager:close(self.hash_match_dialog)
-                        self.matching_index = self.matching_index + 1
-                        self:_showNextBookMatch()
-                    end,
-                },
-            },
-        },
-    }
-    
-    UIManager:show(self.hash_match_dialog)
 end
 
 function BookloreSync:_confirmIsbnMatch(book, server_book, matched_isbn_type)

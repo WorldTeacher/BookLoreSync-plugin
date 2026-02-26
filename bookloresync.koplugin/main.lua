@@ -257,6 +257,7 @@ function BookloreSync:init()
     self.rating_sync_enabled                = self.settings:readSetting("rating_sync_enabled")                or false
     self.hardcover_rating_sync_enabled      = self.settings:readSetting("hardcover_rating_sync_enabled")      or false
     self.rating_sync_mode                   = self.settings:readSetting("rating_sync_mode")                   or "koreader_scaled"
+    self.rating_sync_enabled           = self.settings:readSetting("rating_sync_enabled")           or false
     self.highlights_notes_sync_enabled = self.settings:readSetting("highlights_notes_sync_enabled") or false
     self.notes_destination             = self.settings:readSetting("notes_destination")             or "in_book"
     self.upload_strategy               = self.settings:readSetting("upload_strategy")               or "on_session"

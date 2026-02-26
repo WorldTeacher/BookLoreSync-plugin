@@ -1005,7 +1005,7 @@ so subsequent rating syncs can skip the lookup entirely.
 function Database:updateHardcoverId(file_hash, hardcover_id)
     if hardcover_id ~= nil then
         hardcover_id = tonumber(hardcover_id)
-        if not hardcover_id then
+        if not hardcover_id or hardcover_id <= 0 then
             logger.warn("BookloreSync Database: Invalid hardcover_id in updateHardcoverId, aborting")
             return false
         end
@@ -2986,6 +2986,32 @@ function Database:getRatingSyncHistory(book_cache_id)
     end
     stmt:close()
     return rows
+end
+
+--[[--
+Persist the Hardcover numeric user ID so it survives plugin restarts.
+
+Stored in plugin_settings under the key "hardcover_user_id".
+
+@param user_id number  The integer user ID returned by the Hardcover `me {}` query
+@return boolean success
+--]]
+function Database:saveHardcoverUserId(user_id)
+    user_id = tonumber(user_id)
+    if not user_id then
+        logger.err("BookloreSync Database: saveHardcoverUserId: invalid user_id")
+        return false
+    end
+    return self:savePluginSetting("hardcover_user_id", user_id)
+end
+
+--[[--
+Retrieve the cached Hardcover user ID, or nil if not yet stored.
+
+@return number|nil  Integer user ID, or nil
+--]]
+function Database:getHardcoverUserId()
+    return self:getPluginSetting("hardcover_user_id")
 end
 
 return Database

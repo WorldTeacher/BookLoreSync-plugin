@@ -253,9 +253,10 @@ function BookloreSync:init()
     self.booklore_username = self.settings:readSetting("booklore_username") or ""
     self.booklore_password = self.settings:readSetting("booklore_password") or ""
 
-    self.extended_sync_enabled         = self.settings:readSetting("extended_sync_enabled")         or false
-    self.rating_sync_enabled           = self.settings:readSetting("rating_sync_enabled")           or false
-    self.rating_sync_mode              = self.settings:readSetting("rating_sync_mode")              or "koreader_scaled"
+    self.extended_sync_enabled              = self.settings:readSetting("extended_sync_enabled")              or false
+    self.rating_sync_enabled                = self.settings:readSetting("rating_sync_enabled")                or false
+    self.hardcover_rating_sync_enabled      = self.settings:readSetting("hardcover_rating_sync_enabled")      or false
+    self.rating_sync_mode                   = self.settings:readSetting("rating_sync_mode")                   or "koreader_scaled"
     self.highlights_notes_sync_enabled = self.settings:readSetting("highlights_notes_sync_enabled") or false
     self.notes_destination             = self.settings:readSetting("notes_destination")             or "in_book"
     self.upload_strategy               = self.settings:readSetting("upload_strategy")               or "on_session"
@@ -594,6 +595,31 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
             self.db:addPendingRating(book_cache_id, book_id, rating_scaled)
             self.db:recordRatingSyncHistory(book_cache_id, rating_scaled, "error", err)
             self:logInfo("BookloreSync: Rating queued for retry (book_cache_id:", book_cache_id, ")")
+        end
+    end
+
+    -- Hardcover rating sync: run in addition to Booklore if enabled and a
+    -- hardcover_id is stored for this book.
+    if self.hardcover_rating_sync_enabled then
+        local hc_id
+        -- Re-use book_cache_id if already resolved above, otherwise look it up now.
+        local cache_id = book_cache_id or self.db:getBookCacheIdByFilePath(doc_path)
+        if cache_id then
+            local cache_row = self.db:getBookCacheById(cache_id)
+            hc_id = cache_row and cache_row.hardcover_id
+        end
+
+        if hc_id then
+            self:logInfo("BookloreSync: Syncing rating to Hardcover — hardcover_id:", hc_id,
+                "rating:", rating_scaled)
+            local hc_ok, hc_err = self.api:submitHardcoverRating(hc_id, rating_scaled)
+            if hc_ok then
+                self:logInfo("BookloreSync: Hardcover rating synced successfully")
+            else
+                self:logWarn("BookloreSync: Hardcover rating sync failed:", tostring(hc_err))
+            end
+        else
+            self:logInfo("BookloreSync: Hardcover rating sync enabled but no hardcover_id found for this book — skipping")
         end
     end
 end

@@ -1117,4 +1117,65 @@ function APIClient:submitBookloreNote(book_id, content, title, username, passwor
     end
 end
 
+--[[--
+Submit a bookmark to Booklore.
+
+Endpoint: POST /api/v1/bookmarks
+
+@param book_id     number  Booklore book ID
+@param cfi         string  EPUB CFI (or mock CFI for PDF) identifying the bookmark position
+@param opts        table   Optional fields: chapter_title, notes
+@param username    string
+@param password    string
+@return boolean, number|string  success flag + server id or error message
+--]]
+function APIClient:submitBookmark(book_id, cfi, opts, username, password)
+    opts = opts or {}
+
+    if not book_id or not cfi then
+        return false, "Missing required bookmark fields (book_id, cfi)"
+    end
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password, false)
+    if not token_ok then
+        return false, token or "Failed to obtain auth token"
+    end
+
+    local body_tbl = {
+        bookId = tonumber(book_id),
+        cfi    = cfi,
+    }
+    if opts.chapter_title and opts.chapter_title ~= "" then body_tbl.chapterTitle = opts.chapter_title end
+    if opts.notes         and opts.notes ~= ""         then body_tbl.notes        = opts.notes        end
+
+    local body = json.encode(body_tbl)
+    local headers = {
+        ["Authorization"] = "Bearer " .. token,
+        ["Content-Type"]  = "application/json",
+    }
+
+    local success, code, response = self:request("POST", "/api/v1/bookmarks", body, headers)
+
+    if not success and (code == 401 or code == 403) then
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("POST", "/api/v1/bookmarks", body, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+
+    if success and (code == 200 or code == 201) then
+        local server_id = type(response) == "table" and response.id or nil
+        self:logInfo("BookloreSync API: Bookmark submitted, server id:", server_id)
+        return true, server_id
+    else
+        local err = (type(response) == "string" and response ~= "") and response or ("HTTP " .. tostring(code))
+        self:logWarn("BookloreSync API: Failed to submit bookmark:", err)
+        return false, err
+    end
+end
+
 return APIClient

@@ -14,6 +14,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local LuaSettings = require("luasettings")
 local NetworkMgr = require("ui/network/manager")
+local ProgressbarDialog = require("ui/widget/progressbardialog")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
@@ -253,11 +254,11 @@ function BookloreSync:init()
 
     self.booklore_username = self.settings:readSetting("booklore_username") or ""
     self.booklore_password = self.settings:readSetting("booklore_password") or ""
+    self.hardcover_token   = self.settings:readSetting("hardcover_token")   or ""
 
     self.rating_sync_enabled                = self.settings:readSetting("rating_sync_enabled")                or false
     self.hardcover_rating_sync_enabled      = self.settings:readSetting("hardcover_rating_sync_enabled")      or false
     self.rating_sync_mode                   = self.settings:readSetting("rating_sync_mode")                   or "koreader_scaled"
-    self.rating_sync_enabled           = self.settings:readSetting("rating_sync_enabled")           or false
     self.highlights_notes_sync_enabled = self.settings:readSetting("highlights_notes_sync_enabled") or false
     self.notes_destination             = self.settings:readSetting("notes_destination")             or "in_book"
     self.upload_strategy               = self.settings:readSetting("upload_strategy")               or "on_session"
@@ -283,6 +284,7 @@ function BookloreSync:init()
         plugin_dir = DataStorage:getDataDir() .. "/bookloresync.koplugin"
     end
     
+    self.plugin_dir = plugin_dir
     self.updater:init(plugin_dir, self.db)
     
     self.auto_update_check = self.settings:readSetting("auto_update_check")
@@ -641,25 +643,29 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
     -- Hardcover rating sync: run in addition to Booklore if enabled and a
     -- hardcover_id is stored for this book.
     if self.hardcover_rating_sync_enabled then
-        local hc_id
-        -- Re-use book_cache_id if already resolved above, otherwise look it up now.
-        local cache_id = book_cache_id or self.db:getBookCacheIdByFilePath(doc_path)
-        if cache_id then
-            local cache_row = self.db:getBookCacheById(cache_id)
-            hc_id = cache_row and cache_row.hardcover_id
-        end
-
-        if hc_id then
-            self:logInfo("BookloreSync: Syncing rating to Hardcover — hardcover_id:", hc_id,
-                "rating:", rating_scaled)
-            local hc_ok, hc_err = self.api:submitHardcoverRating(hc_id, rating_scaled)
-            if hc_ok then
-                self:logInfo("BookloreSync: Hardcover rating synced successfully")
-            else
-                self:logWarn("BookloreSync: Hardcover rating sync failed:", tostring(hc_err))
-            end
+        if not self.hardcover_token or self.hardcover_token == "" then
+            self:logWarn("BookloreSync: Hardcover rating sync enabled but no token configured — skipping")
         else
-            self:logInfo("BookloreSync: Hardcover rating sync enabled but no hardcover_id found for this book — skipping")
+            local hc_id
+            -- Re-use book_cache_id if already resolved above, otherwise look it up now.
+            local cache_id = book_cache_id or self.db:getBookCacheIdByFilePath(doc_path)
+            if cache_id then
+                local cache_row = self.db:getBookCacheById(cache_id)
+                hc_id = cache_row and cache_row.hardcover_id
+            end
+
+            if hc_id then
+                self:logInfo("BookloreSync: Syncing rating to Hardcover — hardcover_id:", hc_id,
+                    "rating:", rating_scaled)
+                local hc_ok, hc_err = self.api:submitHardcoverRating(hc_id, rating_scaled, self.hardcover_token)
+                if hc_ok then
+                    self:logInfo("BookloreSync: Hardcover rating synced successfully")
+                else
+                    self:logWarn("BookloreSync: Hardcover rating sync failed:", tostring(hc_err))
+                end
+            else
+                self:logInfo("BookloreSync: Hardcover rating sync enabled but no hardcover_id found for this book — skipping")
+            end
         end
     end
 end
@@ -5819,10 +5825,11 @@ function BookloreSync:fetchAndStoreHardcoverIds()
         return
     end
 
-    UIManager:show(InfoMessage:new{
+    local booklore_msg = InfoMessage:new{
         text = _("Fetching book metadata from Booklore…"),
         timeout = 2,
-    })
+    }
+    UIManager:show(booklore_msg)
 
     -- Collect all book_cache rows that have a book_id
     local books = self.db:getAllMatchedBooks()
@@ -5839,44 +5846,149 @@ function BookloreSync:fetchAndStoreHardcoverIds()
     local skipped  = 0
     local failed   = 0
 
-    for _, book in ipairs(books) do
-        local ok, data = self.api:getBookById(
-            book.book_id,
-            self.booklore_username,
-            self.booklore_password
-        )
+    -- Books with no hardcover_id from Booklore; candidates for Hardcover fallback search.
+    -- Each entry: { file_hash, isbn13, isbn10, title, authors }
+    local fallback_candidates = {}
 
-        if ok and data then
-            local hc_id = data.hardcover_id
-            if hc_id then
-                local saved = self.db:updateHardcoverId(book.file_hash, hc_id)
-                if saved then
-                    updated = updated + 1
-                    self:logInfo("BookloreSync: Stored hardcover_id", hc_id,
-                        "for book_id", book.book_id, "hash", book.file_hash)
+    for _, book in ipairs(books) do
+        -- Skip books that already have a valid hardcover_id stored locally.
+        if book.hardcover_id and book.hardcover_id > 0 then
+            skipped = skipped + 1
+            self:logInfo("BookloreSync: hardcover_id already stored for book_id", book.book_id, "— skipping")
+        else
+            local ok, data = self.api:getBookById(
+                book.book_id,
+                self.booklore_username,
+                self.booklore_password
+            )
+
+            if ok and data then
+                local hc_id = data.hardcover_id
+                if hc_id then
+                    local saved = self.db:updateHardcoverId(book.file_hash, hc_id)
+                    if saved then
+                        updated = updated + 1
+                        self:logInfo("BookloreSync: Stored hardcover_id", hc_id,
+                            "for book_id", book.book_id, "hash", book.file_hash)
+                    else
+                        failed = failed + 1
+                        self:logWarn("BookloreSync: Failed to save hardcover_id for book_id", book.book_id)
+                    end
                 else
-                    failed = failed + 1
-                    self:logWarn("BookloreSync: Failed to save hardcover_id for book_id", book.book_id)
+                    self:logInfo("BookloreSync: No hardcover_id in Booklore response for book_id", book.book_id)
+                    -- Flatten authors: may be a table of {name=...} objects or a plain string
+                    local author_str
+                    if type(data.authors) == "table" then
+                        local names = {}
+                        for _, a in ipairs(data.authors) do
+                            if type(a) == "table" and a.name then
+                                table.insert(names, a.name)
+                            elseif type(a) == "string" then
+                                table.insert(names, a)
+                            end
+                        end
+                        author_str = #names > 0 and names[1] or nil
+                    else
+                        author_str = data.authors ~= "" and data.authors or nil
+                    end
+                    table.insert(fallback_candidates, {
+                        file_hash = book.file_hash,
+                        isbn13    = data.isbn13,
+                        isbn10    = data.isbn10,
+                        title     = data.title,
+                        authors   = author_str,
+                    })
                 end
             else
-                skipped = skipped + 1
-                self:logInfo("BookloreSync: No hardcover_id in response for book_id", book.book_id)
+                failed = failed + 1
+                self:logWarn("BookloreSync: getBookById failed for book_id", book.book_id, "—", tostring(data))
             end
-        else
-            failed = failed + 1
-            self:logWarn("BookloreSync: getBookById failed for book_id", book.book_id, "—", tostring(data))
         end
     end
 
-    UIManager:show(InfoMessage:new{
-        text = T(_(
+    -- Hardcover fallback: for books where Booklore returned no hardcover_id,
+    -- attempt to find the book on Hardcover directly (ISBN first, then title+author).
+    local hc_found = 0
+    self:logInfo("BookloreSync: Hardcover fallback — token set:", (self.hardcover_token ~= ""),
+        "candidates:", #fallback_candidates)
+    if self.hardcover_token and self.hardcover_token ~= "" and #fallback_candidates > 0 then
+        self:logInfo("BookloreSync: Starting Hardcover fallback search for",
+            #fallback_candidates, "books")
+
+        local progress_dialog = ProgressbarDialog:new{
+            title = _("Searching Hardcover…"),
+            subtitle = T(_("%1 books to search"), #fallback_candidates),
+            progress_max = #fallback_candidates,
+        }
+        UIManager:close(booklore_msg)
+        progress_dialog:show()
+
+        for i, cand in ipairs(fallback_candidates) do
+            local hc_id, hc_err
+
+            -- Step 1: try ISBN-13 then ISBN-10
+            local isbn = cand.isbn13 or cand.isbn10
+            if isbn and isbn ~= "" then
+                hc_id, hc_err = self.api:hardcoverFindBookByIsbn(isbn, self.hardcover_token)
+                if hc_id then
+                    self:logInfo("BookloreSync: Hardcover fallback — ISBN match →", hc_id)
+                else
+                    self:logInfo("BookloreSync: Hardcover fallback — ISBN lookup failed:", tostring(hc_err))
+                end
+            end
+
+            -- Step 2: title+author search if ISBN lookup yielded nothing
+            if not hc_id and cand.title and cand.title ~= "" then
+                hc_id, hc_err = self.api:hardcoverSearchBook(cand.title, cand.authors, self.hardcover_token)
+                if hc_id then
+                    self:logInfo("BookloreSync: Hardcover fallback — title/author match →", hc_id)
+                else
+                    self:logInfo("BookloreSync: Hardcover fallback — title/author search failed:", tostring(hc_err))
+                end
+            end
+
+            if hc_id then
+                local saved = self.db:updateHardcoverId(cand.file_hash, hc_id)
+                if saved then
+                    hc_found = hc_found + 1
+                else
+                    self:logWarn("BookloreSync: Hardcover fallback — failed to save hardcover_id", hc_id)
+                    failed = failed + 1
+                end
+            else
+                skipped = skipped + 1
+            end
+
+            progress_dialog:reportProgress(i)
+        end
+
+        progress_dialog:close()
+    else
+        -- No Hardcover token or no candidates — count all candidates as skipped
+        skipped = skipped + #fallback_candidates
+    end
+
+    local summary
+    if hc_found > 0 then
+        summary = T(_(
+            "Metadata fetch complete.\n\n" ..
+            "Books checked: %1\n" ..
+            "Hardcover IDs stored (Booklore): %2\n" ..
+            "Hardcover IDs stored (fallback search): %3\n" ..
+            "No Hardcover ID found: %4\n" ..
+            "Errors: %5"
+        ), total, updated, hc_found, skipped, failed)
+    else
+        summary = T(_(
             "Metadata fetch complete.\n\n" ..
             "Books checked: %1\n" ..
             "Hardcover IDs stored: %2\n" ..
             "No Hardcover ID: %3\n" ..
             "Errors: %4"
-        ), total, updated, skipped, failed),
-    })
+        ), total, updated + hc_found, skipped, failed)
+    end
+
+    UIManager:show(InfoMessage:new{ text = summary })
 end
 
 return BookloreSync

@@ -150,6 +150,49 @@ function BookloreMetadataExtractor:getModified(doc_path)
 end
 
 --[[--
+Get highlights/annotations from an already-open DocSettings object.
+
+Used when the caller already holds the live in-memory DocSettings (e.g. at
+onCloseDocument time, before KOReader flushes to the .sdr sidecar).  This
+avoids the stale-read problem that arises when using getHighlights(doc_path),
+which opens the on-disk sidecar and therefore misses annotations that were
+added during the current session but not yet written to disk.
+
+@param doc_settings DocSettings object (already opened by the caller)
+@return table Array of highlights, empty table if nil or no annotations
+--]]
+function BookloreMetadataExtractor:getHighlightsFromDocSettings(doc_settings)
+    if not doc_settings then
+        return {}
+    end
+
+    local annotations = doc_settings:readSetting("annotations")
+    if not annotations or type(annotations) ~= "table" then
+        return {}
+    end
+
+    local highlights = {}
+    for _, annotation in ipairs(annotations) do
+        if annotation.text then
+            table.insert(highlights, {
+                text     = annotation.text,
+                note     = annotation.note,
+                datetime = annotation.datetime,
+                page     = annotation.page,
+                chapter  = annotation.chapter,
+                color    = annotation.color  or "yellow",
+                drawer   = annotation.drawer or "lighten",
+                pos0     = annotation.pos0,
+                pos1     = annotation.pos1,
+            })
+        end
+    end
+
+    self:log("dbg", "Found", #highlights, "highlights (from live doc_settings)")
+    return highlights
+end
+
+--[[--
 Get highlights for a document
 
 KOReader stores highlights in annotations array

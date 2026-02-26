@@ -2053,7 +2053,7 @@ function Database:getBookCacheById(id)
     end
 
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author
+        SELECT id, file_path, file_hash, book_id, title, author, hardcover_id
         FROM book_cache WHERE id = ? LIMIT 1
     ]])
     if not stmt then
@@ -2071,12 +2071,13 @@ function Database:getBookCacheById(id)
     local result = nil
     for row in stmt:rows() do
         result = {
-            id        = tonumber(row[1]),
-            file_path = row[2],
-            file_hash = row[3],
-            book_id   = row[4] and tonumber(row[4]) or nil,
-            title     = row[5],
-            author    = row[6],
+            id           = tonumber(row[1]),
+            file_path    = row[2],
+            file_hash    = row[3],
+            book_id      = row[4] and tonumber(row[4]) or nil,
+            title        = row[5],
+            author       = row[6],
+            hardcover_id = row[7] and tonumber(row[7]) or nil,
         }
         break
     end

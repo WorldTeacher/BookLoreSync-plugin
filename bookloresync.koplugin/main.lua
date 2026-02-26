@@ -254,7 +254,6 @@ function BookloreSync:init()
     self.booklore_username = self.settings:readSetting("booklore_username") or ""
     self.booklore_password = self.settings:readSetting("booklore_password") or ""
 
-    self.extended_sync_enabled              = self.settings:readSetting("extended_sync_enabled")              or false
     self.rating_sync_enabled                = self.settings:readSetting("rating_sync_enabled")                or false
     self.hardcover_rating_sync_enabled      = self.settings:readSetting("hardcover_rating_sync_enabled")      or false
     self.rating_sync_mode                   = self.settings:readSetting("rating_sync_mode")                   or "koreader_scaled"

@@ -1171,6 +1171,26 @@ function BookloreSync:xpointerToCfiPath(xpointer, spine, document, html_cache)
 end
 
 --[[--
+Build a mock EPUB CFI for a PDF page number.
+
+PDF files do not have an EPUB spine, so a true CFI cannot be computed.
+This function generates a synthetic CFI of the form:
+  epubcfi(/6/<page*2>!/4/2/1:0,/1:0)
+where <page*2> is an even step index derived from the 1-based page number.
+This gives Booklore enough information to identify the approximate location
+(page N) without breaking CFI parsing.
+
+@param page  number  1-based page number
+@return string       Synthetic CFI string
+--]]
+function BookloreSync:buildMockPdfCfi(page)
+    local page_num = tonumber(page) or 1
+    -- Even step: page 1 → /2, page 2 → /4, etc.
+    local spine_step = page_num * 2
+    return string.format("epubcfi(/6/%d!/4/2/1:0,/1:0)", spine_step)
+end
+
+--[[--
 Build an EPUB CFI range string from two KOReader xpointers.
 
 Produces the correct three-part range form:
@@ -1299,6 +1319,8 @@ appropriate API endpoint based on the notes_destination setting.
 Highlights (no note field) → POST /api/v1/annotations
 Notes with destination "in_book" → POST /api/v2/book-notes
 Notes with destination "in_booklore" → POST /api/v1/book-notes
+Notes with destination "both" → POST /api/v2/book-notes + POST /api/v1/book-notes
+PDF/CBZ highlights and notes → mock CFI (epubcfi(/6/<page*2>!/4/2/1:0,/1:0))
 
 @param doc_path        string      Full path to the document file
 @param book_id         number      Booklore book ID
@@ -1390,6 +1412,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
     -- Only attempt this for EPUB files where the document is still open.
     local spine = nil
     local is_epub = doc_path:lower():match("%.epub$") ~= nil
+    local is_pdf  = doc_path:lower():match("%.pdf$")  ~= nil
     if is_epub and document then
         spine = self:buildEpubSpineMap(document)
         if not spine then
@@ -1433,6 +1456,8 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
             ann_type = "highlight"
         elseif notes_dest == "in_book" then
             ann_type = "in_book_note"
+        elseif notes_dest == "both" then
+            ann_type = "both_note"
         else
             ann_type = "booklore_note"
         end
@@ -1450,9 +1475,22 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
             local ok, server_id
             local cfi  -- computed below and reused in payload
 
+            -- Build a CFI for this annotation.
+            -- For EPUB: use the full xpointer-based CFI via buildCfi.
+            -- For PDF: use a mock CFI anchored to the page number.
+            -- For other formats: no CFI available.
+            local function resolveCfi()
+                if is_epub and spine then
+                    return self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
+                elseif is_pdf and ann.page then
+                    return self:buildMockPdfCfi(ann.page)
+                end
+                return nil
+            end
+
             if not has_note then
                 -- ── Pure highlight ──────────────────────────────────────────────
-                cfi = self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
+                cfi = resolveCfi()
                 if not cfi then
                     self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, nil)
                     skipped_count = skipped_count + 1
@@ -1472,7 +1510,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
 
             elseif notes_dest == "in_book" then
                 -- ── In-book note (v2) ────────────────────────────────────────────
-                cfi = self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
+                cfi = resolveCfi()
                 if not cfi then
                     self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, nil)
                     skipped_count = skipped_count + 1
@@ -1489,6 +1527,40 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
                         self.booklore_username, self.booklore_password
                     )
                 end
+
+            elseif notes_dest == "both" then
+                -- ── Both: in-book note + Booklore web-UI note ───────────────────
+                cfi = resolveCfi()
+                local in_book_ok, in_book_id
+                local bl_ok, bl_id
+                if not queue_only then
+                    if cfi then
+                        in_book_ok, in_book_id = self.api:submitInBookNote(
+                            book_id, cfi, ann.note,
+                            {
+                                selected_text = ann.text,
+                                color         = self:colorToHex(ann.color),
+                                chapter_title = ann.chapter,
+                            },
+                            self.booklore_username, self.booklore_password
+                        )
+                        if not in_book_ok then
+                            self:logWarn("BookloreSync: 'Both' — in-book note failed:", in_book_id)
+                        end
+                    else
+                        self:logInfo("BookloreSync: 'Both' — no CFI available, skipping in-book note")
+                    end
+                    bl_ok, bl_id = self.api:submitBookloreNote(
+                        book_id, ann.note, ann.chapter,
+                        self.booklore_username, self.booklore_password
+                    )
+                    if not bl_ok then
+                        self:logWarn("BookloreSync: 'Both' — Booklore note failed:", bl_id)
+                    end
+                end
+                -- Treat the combined op as ok if at least one destination succeeded
+                ok = (in_book_ok or bl_ok) or false
+                server_id = in_book_id or bl_id
 
             else
                 -- ── Booklore (web-UI) note ───────────────────────────────────────

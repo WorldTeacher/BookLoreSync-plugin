@@ -3021,6 +3021,17 @@ function BookloreSync:onCloseDocument()
             self:logInfo("BookloreSync: ReaderAnnotation module not available — will fall back to doc_settings / sidecar")
         end
 
+        -- Capture bookmarks from the live ReaderBookmark module.
+        -- KOReader stores bookmarks in ReaderBookmark's in-memory table
+        -- (self.ui.bookmark.bookmarks) — same timing hazard as annotations.
+        local live_bookmarks = nil
+        if self.ui and self.ui.bookmark and self.ui.bookmark.bookmarks then
+            live_bookmarks = self.ui.bookmark.bookmarks
+            self:logInfo("BookloreSync: Captured", #live_bookmarks, "bookmarks from ReaderBookmark module")
+        else
+            self:logInfo("BookloreSync: ReaderBookmark module not available — will fall back to sidecar")
+        end
+
         if strategy == "on_session" then
             ann_synced_now, ann_queued_now, ann_failed_now =
                 self:syncHighlightsAndNotes(pre_file_path, pre_book_id, open_doc, live_settings, live_annotations)
@@ -3031,6 +3042,11 @@ function BookloreSync:onCloseDocument()
         ann_synced_now  = tonumber(ann_synced_now)  or 0
         ann_queued_now  = tonumber(ann_queued_now)  or 0
         ann_failed_now  = tonumber(ann_failed_now)  or 0
+
+        -- Sync bookmarks (same strategy gate as annotations)
+        if strategy == "on_session" or (strategy == "on_complete" and pre_end_progress and pre_end_progress >= 99) then
+            self:syncBookmarks(pre_file_path, pre_book_id, open_doc, live_bookmarks)
+        end
     end
 
     -- ── Step 5: Fire the combined sync (only if book_id is confirmed) ─────
@@ -3173,6 +3189,252 @@ function BookloreSync:onResume()
     end
     
     return false
+end
+
+--[[--
+Sync bookmarks for a document to Booklore.
+
+Reads the bookmark list from the live in-memory ReaderBookmark module
+(self.ui.bookmark.bookmarks) if available, otherwise falls back to the
+on-disk sidecar.  Each bookmark is deduplicated via synced_bookmarks
+and queued in pending_bookmarks when offline or no book_id is known.
+
+For EPUB files a full CFI is built from pos0/pos1 when available.
+For PDF files a mock CFI anchored to the page number is used.
+
+@param doc_path         string       Full path to the document file
+@param book_id          number|nil   Booklore book ID (nil = queue-only mode)
+@param document         object|nil   Live CREngine document (for EPUB CFI)
+@param live_bookmarks   table|nil    Raw bookmark array from ReaderBookmark.bookmarks
+@return integer synced_count, integer queued_count, integer failed_count
+--]]
+function BookloreSync:syncBookmarks(doc_path, book_id, document, live_bookmarks)
+    if not doc_path then
+        self:logWarn("BookloreSync: syncBookmarks called without doc_path")
+        return 0, 0, 0
+    end
+    if not self.highlights_notes_sync_enabled then
+        return 0, 0, 0
+    end
+    if self.booklore_username == "" or self.booklore_password == "" then
+        self:logWarn("BookloreSync: Bookmark sync skipped — credentials not configured")
+        return 0, 0, 0
+    end
+
+    local queue_only = (book_id == nil) or self.manual_sync_only
+
+    -- Resolve bookmark list: live module → sidecar fallback
+    local bookmarks
+    if live_bookmarks and type(live_bookmarks) == "table" then
+        bookmarks = live_bookmarks
+        self:logInfo(string.format("BookloreSync: Bookmarks from live ReaderBookmark module (%d)", #bookmarks))
+    else
+        bookmarks = self.metadata_extractor:getBookmarks(doc_path)
+        self:logInfo(string.format("BookloreSync: Bookmarks from on-disk sidecar (%d)", #bookmarks))
+    end
+
+    if not bookmarks or #bookmarks == 0 then
+        self:logInfo("BookloreSync: No bookmarks found for:", doc_path)
+        return 0, 0, 0
+    end
+
+    -- Build EPUB spine map for CFI resolution
+    local spine = nil
+    local html_cache = {}
+    local is_epub = doc_path:lower():match("%.epub$") ~= nil
+    local is_pdf  = doc_path:lower():match("%.pdf$")  ~= nil
+    if is_epub and document then
+        spine = self:buildEpubSpineMap(document)
+        if not spine then
+            self:logWarn("BookloreSync: Could not build EPUB spine map for bookmarks — will skip EPUB CFI")
+        end
+    end
+
+    -- Ensure book_cache_id
+    local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    if not book_cache_id then
+        self.db:saveBookCache(doc_path, "", nil, nil, nil, nil, nil)
+        book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    end
+    if not book_cache_id then
+        self:logWarn("BookloreSync: Could not obtain book_cache_id for bookmark sync")
+        return 0, 0, 0
+    end
+
+    local synced_count  = 0
+    local queued_count  = 0
+    local failed_count  = 0
+
+    for _, bm in ipairs(bookmarks) do
+        local datetime = bm.datetime or ""
+        if datetime == "" then
+            self:logWarn("BookloreSync: Skipping bookmark with no datetime")
+            goto bm_continue
+        end
+
+        -- Deduplicate
+        if self.db:isBookmarkSynced(book_cache_id, datetime) then
+            self:logInfo("BookloreSync: Bookmark already synced, skipping:", datetime)
+            goto bm_continue
+        end
+
+        local bm_ok, bm_err = pcall(function()
+            -- Resolve CFI
+            local cfi
+            if is_epub and spine and bm.pos0 and bm.pos1 then
+                cfi = self:buildCfi(bm.pos0, bm.pos1, spine, document, html_cache)
+            elseif is_epub and spine and bm.pos0 then
+                -- Single-position bookmark: use pos0 for both endpoints
+                cfi = self:buildCfi(bm.pos0, bm.pos0, spine, document, html_cache)
+            elseif is_pdf and bm.page then
+                cfi = self:buildMockPdfCfi(bm.page)
+            end
+
+            if not cfi then
+                self:logInfo("BookloreSync: No CFI for bookmark at:", datetime, "— queuing without CFI")
+                -- Queue with a page-based fallback so it can be retried later
+                local pending_payload = json.encode({
+                    datetime      = datetime,
+                    page          = bm.page,
+                    notes         = bm.notes,
+                    chapter       = bm.chapter,
+                    pos0          = bm.pos0,
+                    pos1          = bm.pos1,
+                })
+                self.db:addPendingBookmark(book_cache_id, book_id, datetime, pending_payload)
+                failed_count = failed_count + 1
+                return
+            end
+
+            local opts = {
+                chapter_title = bm.chapter,
+                notes         = bm.notes,
+            }
+
+            if queue_only then
+                local pending_payload = json.encode({
+                    datetime = datetime,
+                    cfi      = cfi,
+                    page     = bm.page,
+                    notes    = bm.notes,
+                    chapter  = bm.chapter,
+                    pos0     = bm.pos0,
+                    pos1     = bm.pos1,
+                })
+                self.db:addPendingBookmark(book_cache_id, book_id, datetime, pending_payload)
+                if self.manual_sync_only then
+                    queued_count = queued_count + 1
+                else
+                    failed_count = failed_count + 1
+                end
+                return
+            end
+
+            local ok, server_id = self.api:submitBookmark(
+                book_id, cfi, opts,
+                self.booklore_username, self.booklore_password
+            )
+
+            if ok then
+                self.db:markBookmarkSynced(book_cache_id, datetime, server_id)
+                synced_count = synced_count + 1
+            else
+                self:logWarn("BookloreSync: Failed to sync bookmark at:", datetime, "-", server_id)
+                failed_count = failed_count + 1
+                local pending_payload = json.encode({
+                    datetime = datetime,
+                    cfi      = cfi,
+                    page     = bm.page,
+                    notes    = bm.notes,
+                    chapter  = bm.chapter,
+                    pos0     = bm.pos0,
+                    pos1     = bm.pos1,
+                })
+                self.db:addPendingBookmark(book_cache_id, book_id, datetime, pending_payload)
+            end
+        end)
+
+        if not bm_ok then
+            self:logErr("BookloreSync: Unexpected error processing bookmark at:", datetime, "-", bm_err)
+            failed_count = failed_count + 1
+        end
+
+        ::bm_continue::
+    end
+
+    self:logInfo(string.format(
+        "BookloreSync: Bookmark sync complete — synced=%d queued=%d failed=%d",
+        synced_count, queued_count, failed_count
+    ))
+    return synced_count, queued_count, failed_count
+end
+
+--[[--
+Retry all pending bookmarks from the pending_bookmarks queue.
+
+@param silent boolean  Suppress UI feedback (default false)
+@return integer synced_count, integer failed_count
+--]]
+function BookloreSync:syncPendingBookmarks(silent)
+    silent = silent or false
+    local pending = self.db:getPendingBookmarks()
+    if not pending or #pending == 0 then return 0, 0 end
+
+    local synced_count = 0
+    local failed_count = 0
+
+    for _, row in ipairs(pending) do
+        local ok_dec, payload = pcall(function() return json.decode(row.payload) end)
+        if not ok_dec or not payload then
+            self:logWarn("BookloreSync: Cannot decode pending bookmark payload, skipping id:", row.id)
+            self.db:incrementBookmarkRetry(row.id)
+            failed_count = failed_count + 1
+            goto pb_continue
+        end
+
+        local cfi = payload.cfi
+        if not cfi then
+            self:logInfo("BookloreSync: Pending bookmark has no CFI, skipping id:", row.id)
+            self.db:incrementBookmarkRetry(row.id)
+            failed_count = failed_count + 1
+            goto pb_continue
+        end
+
+        local book_id = row.book_id
+        if not book_id then
+            -- Try to resolve book_id from cache
+            local cached_id = self.db:getBookIdByBookCacheId(row.book_cache_id)
+            if cached_id then
+                book_id = cached_id
+            else
+                self:logInfo("BookloreSync: No book_id for pending bookmark id:", row.id, "— deferring")
+                goto pb_continue
+            end
+        end
+
+        local ok, server_id = self.api:submitBookmark(
+            book_id, cfi,
+            { chapter_title = payload.chapter, notes = payload.notes },
+            self.booklore_username, self.booklore_password
+        )
+
+        if ok then
+            self.db:markBookmarkSynced(row.book_cache_id, row.datetime, server_id)
+            self.db:deletePendingBookmark(row.id)
+            synced_count = synced_count + 1
+        else
+            self.db:incrementBookmarkRetry(row.id)
+            failed_count = failed_count + 1
+        end
+
+        ::pb_continue::
+    end
+
+    self:logInfo(string.format(
+        "BookloreSync: Pending bookmark retry complete — synced=%d failed=%d",
+        synced_count, failed_count
+    ))
+    return synced_count, failed_count
 end
 
 --[[--
@@ -3645,6 +3907,11 @@ function BookloreSync:syncPendingSessions(silent)
     local ann_synced, ann_failed = self:syncPendingAnnotations(true)
     ann_synced = tonumber(ann_synced) or 0
     ann_failed = tonumber(ann_failed) or 0
+
+    -- ── Phase 2b: Bookmarks ───────────────────────────────────────────────
+    local bm_synced, bm_failed = self:syncPendingBookmarks(true)
+    bm_synced = tonumber(bm_synced) or 0
+    bm_failed = tonumber(bm_failed) or 0
 
     -- ── Phase 3: Sessions ─────────────────────────────────────────────────
     local pending_count = self.db:getPendingSessionCount()

@@ -589,6 +589,26 @@ function Settings:buildAnnotationsMenu(parent)
                 keep_menu_open = true,
             },
             {
+                text = _("Notes destination: Both"),
+                help_text = _("Send notes to both destinations: the in-book reader view (requires CFI position) and the Booklore book page. Useful to have notes visible both inline and in the web UI."),
+                enabled_func = function()
+                    return parent.highlights_notes_sync_enabled
+                end,
+                checked_func = function()
+                    return parent.notes_destination == "both"
+                end,
+                callback = function()
+                    parent.notes_destination = "both"
+                    parent.settings:saveSetting("notes_destination", parent.notes_destination)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = _("Notes destination: Both"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+            {
                 text = _("Upload on session end"),
                 help_text = _("Check for new highlights and notes each time a reading session ends. Only annotations not yet on the server will be sent."),
                 enabled_func = function()

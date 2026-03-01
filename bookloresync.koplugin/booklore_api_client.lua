@@ -844,10 +844,14 @@ function APIClient:_normalizeBookObject(book)
         end
     end
 
-    -- Normalise hardcover_id: accept both camelCase and snake_case from the API
+    -- Normalise hardcover_id: accept all known field names from the API.
+    -- The /api/v1/books/<id> endpoint returns metadata.hardcoverBookId (capital B).
+    -- Earlier endpoints used top-level hardcoverId or metadata.hardcoverId / hardcover_id.
     if not book.hardcover_id then
         if book.hardcoverId then
             book.hardcover_id = tonumber(book.hardcoverId)
+        elseif book.metadata and book.metadata.hardcoverBookId then
+            book.hardcover_id = tonumber(book.metadata.hardcoverBookId)
         elseif book.metadata and book.metadata.hardcoverId then
             book.hardcover_id = tonumber(book.metadata.hardcoverId)
         elseif book.metadata and book.metadata.hardcover_id then
@@ -933,7 +937,6 @@ function APIClient:submitRating(book_id, rating, username, password)
 end
 
 --[[--
-Submit a highlight (annotation) to Booklore.
 
 Endpoint: POST /api/v1/annotations
 Required body fields: bookId, cfi, text

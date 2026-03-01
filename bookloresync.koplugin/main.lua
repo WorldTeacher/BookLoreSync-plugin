@@ -14,15 +14,16 @@ local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local LuaSettings = require("luasettings")
 local NetworkMgr = require("ui/network/manager")
-local ProgressbarDialog = require("ui/widget/progressbardialog")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
 local ButtonDialog = require("ui/widget/buttondialog")
+local Menu = require("ui/widget/menu")
 local json = require("json")
 local Settings = require("booklore_settings")
 local Database = require("booklore_database")
 local APIClient = require("booklore_api_client")
+local HardcoverClient = require("hardcover_api_client")
 local Updater = require("booklore_updater")
 local FileLogger = require("booklore_file_logger")
 local MetadataExtractor = require("booklore_metadata_extractor")
@@ -271,6 +272,8 @@ function BookloreSync:init()
     
     self.api = APIClient:new()
     self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+
+    self.hc_api = HardcoverClient:new({ db = self.db })
     
     self.metadata_extractor = MetadataExtractor:new({secure_logs = self.secure_logs})
     self:logInfo("BookloreSync: Metadata extractor initialized")
@@ -657,7 +660,7 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
             if hc_id then
                 self:logInfo("BookloreSync: Syncing rating to Hardcover — hardcover_id:", hc_id,
                     "rating:", rating_scaled)
-                local hc_ok, hc_err = self.api:submitHardcoverRating(hc_id, rating_scaled, self.hardcover_token)
+                local hc_ok, hc_err = self.hc_api:submitRating(hc_id, rating_scaled, self.hardcover_token)
                 if hc_ok then
                     self:logInfo("BookloreSync: Hardcover rating synced successfully")
                 else
@@ -5907,88 +5910,185 @@ function BookloreSync:fetchAndStoreHardcoverIds()
     end
 
     -- Hardcover fallback: for books where Booklore returned no hardcover_id,
-    -- attempt to find the book on Hardcover directly (ISBN first, then title+author).
+    -- present search results one at a time for the user to confirm.
     local hc_found = 0
     self:logInfo("BookloreSync: Hardcover fallback — token set:", (self.hardcover_token ~= ""),
         "candidates:", #fallback_candidates)
-    if self.hardcover_token and self.hardcover_token ~= "" and #fallback_candidates > 0 then
-        self:logInfo("BookloreSync: Starting Hardcover fallback search for",
-            #fallback_candidates, "books")
 
-        local progress_dialog = ProgressbarDialog:new{
-            title = _("Searching Hardcover…"),
-            subtitle = T(_("%1 books to search"), #fallback_candidates),
-            progress_max = #fallback_candidates,
-        }
-        UIManager:close(booklore_msg)
-        progress_dialog:show()
+    UIManager:close(booklore_msg)
 
-        for i, cand in ipairs(fallback_candidates) do
-            local hc_id, hc_err
-
-            -- Step 1: try ISBN-13 then ISBN-10
-            local isbn = cand.isbn13 or cand.isbn10
-            if isbn and isbn ~= "" then
-                hc_id, hc_err = self.api:hardcoverFindBookByIsbn(isbn, self.hardcover_token)
-                if hc_id then
-                    self:logInfo("BookloreSync: Hardcover fallback — ISBN match →", hc_id)
-                else
-                    self:logInfo("BookloreSync: Hardcover fallback — ISBN lookup failed:", tostring(hc_err))
-                end
-            end
-
-            -- Step 2: title+author search if ISBN lookup yielded nothing
-            if not hc_id and cand.title and cand.title ~= "" then
-                hc_id, hc_err = self.api:hardcoverSearchBook(cand.title, cand.authors, self.hardcover_token)
-                if hc_id then
-                    self:logInfo("BookloreSync: Hardcover fallback — title/author match →", hc_id)
-                else
-                    self:logInfo("BookloreSync: Hardcover fallback — title/author search failed:", tostring(hc_err))
-                end
-            end
-
-            if hc_id then
-                local saved = self.db:updateHardcoverId(cand.file_hash, hc_id)
-                if saved then
-                    hc_found = hc_found + 1
-                else
-                    self:logWarn("BookloreSync: Hardcover fallback — failed to save hardcover_id", hc_id)
-                    failed = failed + 1
-                end
-            else
-                skipped = skipped + 1
-            end
-
-            progress_dialog:reportProgress(i)
-        end
-
-        progress_dialog:close()
-    else
-        -- No Hardcover token or no candidates — count all candidates as skipped
+    if not (self.hardcover_token and self.hardcover_token ~= "" and #fallback_candidates > 0) then
         skipped = skipped + #fallback_candidates
-    end
-
-    local summary
-    if hc_found > 0 then
-        summary = T(_(
-            "Metadata fetch complete.\n\n" ..
-            "Books checked: %1\n" ..
-            "Hardcover IDs stored (Booklore): %2\n" ..
-            "Hardcover IDs stored (fallback search): %3\n" ..
-            "No Hardcover ID found: %4\n" ..
-            "Errors: %5"
-        ), total, updated, hc_found, skipped, failed)
-    else
-        summary = T(_(
+        local summary = T(_(
             "Metadata fetch complete.\n\n" ..
             "Books checked: %1\n" ..
             "Hardcover IDs stored: %2\n" ..
             "No Hardcover ID: %3\n" ..
             "Errors: %4"
-        ), total, updated + hc_found, skipped, failed)
+        ), total, updated, skipped, failed)
+        UIManager:show(InfoMessage:new{ text = summary })
+        return
     end
 
-    UIManager:show(InfoMessage:new{ text = summary })
+    self:logInfo("BookloreSync: Starting Hardcover selector for",
+        #fallback_candidates, "books")
+
+    -- Throttle: 500 ms between Hardcover API requests (conservative rate limit)
+    local HC_REQUEST_DELAY = 0.5
+
+    -- Recursive callback: processes candidates[i], shows selector, advances on choice.
+    -- selector is forward-declared here so the closures inside process_next can reference it.
+    local selector
+    local process_next
+    process_next = function(i)
+        if i > #fallback_candidates then
+            -- All done — show summary
+            local summary
+            if hc_found > 0 then
+                summary = T(_(
+                    "Metadata fetch complete.\n\n" ..
+                    "Books checked: %1\n" ..
+                    "Hardcover IDs stored (Booklore): %2\n" ..
+                    "Hardcover IDs stored (manual match): %3\n" ..
+                    "No Hardcover ID found: %4\n" ..
+                    "Errors: %5"
+                ), total, updated, hc_found, skipped, failed)
+            else
+                summary = T(_(
+                    "Metadata fetch complete.\n\n" ..
+                    "Books checked: %1\n" ..
+                    "Hardcover IDs stored: %2\n" ..
+                    "No Hardcover ID: %3\n" ..
+                    "Errors: %4"
+                ), total, updated + hc_found, skipped, failed)
+            end
+            UIManager:show(InfoMessage:new{ text = summary })
+            return
+        end
+
+        local cand = fallback_candidates[i]
+        local n    = #fallback_candidates
+
+        -- Show a progress InfoMessage while searching
+        local searching_msg = InfoMessage:new{
+            text = T(_("Searching Hardcover…\n\n(%1 / %2)  %3"),
+                i, n, cand.title or ""),
+        }
+        UIManager:show(searching_msg)
+        UIManager:forceRePaint()
+
+        -- Step 1: ISBN-13 lookup (no selector needed — ISBNs are unambiguous)
+        local isbn = cand.isbn13
+        if isbn and isbn ~= "" then
+            local hc_id, isbn_err = self.hc_api:findBookByIsbn(isbn, self.hardcover_token)
+            if hc_id then
+                self:logInfo("BookloreSync: Hardcover ISBN match →", hc_id, "for", cand.title)
+                UIManager:close(searching_msg)
+                local saved = self.db:updateHardcoverId(cand.file_hash, hc_id)
+                if saved then
+                    hc_found = hc_found + 1
+                else
+                    failed = failed + 1
+                end
+                UIManager:scheduleIn(HC_REQUEST_DELAY, function()
+                    process_next(i + 1)
+                end)
+                return
+            else
+                self:logInfo("BookloreSync: ISBN-13 lookup failed, falling back to title search:", tostring(isbn_err))
+            end
+        end
+
+        -- Step 2: title+author search → present candidates to user
+        if not (cand.title and cand.title ~= "") then
+            UIManager:close(searching_msg)
+            self:logInfo("BookloreSync: No title for candidate, skipping")
+            skipped = skipped + 1
+            UIManager:scheduleIn(HC_REQUEST_DELAY, function()
+                process_next(i + 1)
+            end)
+            return
+        end
+
+        local candidates, search_err = self.hc_api:searchBook(
+            cand.title, cand.authors, self.hardcover_token)
+
+        UIManager:close(searching_msg)
+
+        if not candidates then
+            self:logInfo("BookloreSync: Hardcover search failed:", tostring(search_err))
+            skipped = skipped + 1
+            UIManager:scheduleIn(HC_REQUEST_DELAY, function()
+                process_next(i + 1)
+            end)
+            return
+        end
+
+        -- Build item_table for Menu: one entry per candidate + Skip entry
+        local item_table = {}
+        local selection_made = false  -- guard: close_callback fires after item selection too
+        for _, result in ipairs(candidates) do
+            local label = result.title
+            if result.year ~= "" then
+                label = label .. " (" .. result.year .. ")"
+            end
+            if result.author ~= "" then
+                label = label .. " - " .. result.author
+            end
+            table.insert(item_table, {
+                text        = label,
+                chosen_id   = result.id,
+            })
+        end
+        -- Skip entry (chosen_id == nil signals skip)
+        table.insert(item_table, { text = _("Skip this book") })
+
+        local book_label = cand.title or ""
+        if cand.authors and cand.authors ~= "" then
+            book_label = book_label .. " — " .. cand.authors
+        end
+
+        selector = Menu:new{
+            title                    = T(_("Match Hardcover book (%1/%2)"), i, n),
+            subtitle                 = book_label,
+            item_table               = item_table,
+            single_line              = false,
+            multilines_show_more_text = true,
+            fullscreen               = true,
+            onMenuSelect             = function(menu, item)
+                selection_made = true
+                UIManager:close(selector)
+                if item.chosen_id then
+                    self:logInfo("BookloreSync: User selected hardcover_id", item.chosen_id,
+                        "for", cand.title)
+                    local saved = self.db:updateHardcoverId(cand.file_hash, item.chosen_id)
+                    if saved then
+                        hc_found = hc_found + 1
+                    else
+                        failed = failed + 1
+                    end
+                    UIManager:scheduleIn(HC_REQUEST_DELAY, function()
+                        process_next(i + 1)
+                    end)
+                else
+                    -- Skip selected
+                    skipped = skipped + 1
+                    process_next(i + 1)
+                end
+            end,
+            close_callback = function()
+                -- Only treat as skip when user dismissed without picking
+                if not selection_made then
+                    skipped = skipped + 1
+                    process_next(i + 1)
+                end
+            end,
+        }
+        UIManager:show(selector)
+    end
+
+    -- Bootstrap the recursive chain
+    process_next(1)
 end
 
 return BookloreSync

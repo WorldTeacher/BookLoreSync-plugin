@@ -843,6 +843,21 @@ function APIClient:_normalizeBookObject(book)
             book.isbn13 = book.metadata.isbn13
         end
     end
+
+    -- Normalise hardcover_id: accept all known field names from the API.
+    -- The /api/v1/books/<id> endpoint returns metadata.hardcoverBookId (capital B).
+    -- Earlier endpoints used top-level hardcoverId or metadata.hardcoverId / hardcover_id.
+    if not book.hardcover_id then
+        if book.hardcoverId then
+            book.hardcover_id = tonumber(book.hardcoverId)
+        elseif book.metadata and book.metadata.hardcoverBookId then
+            book.hardcover_id = tonumber(book.metadata.hardcoverBookId)
+        elseif book.metadata and book.metadata.hardcoverId then
+            book.hardcover_id = tonumber(book.metadata.hardcoverId)
+        elseif book.metadata and book.metadata.hardcover_id then
+            book.hardcover_id = tonumber(book.metadata.hardcover_id)
+        end
+    end
     
     return book
 end
@@ -922,7 +937,6 @@ function APIClient:submitRating(book_id, rating, username, password)
 end
 
 --[[--
-Submit a highlight (annotation) to Booklore.
 
 Endpoint: POST /api/v1/annotations
 Required body fields: bookId, cfi, text
@@ -1118,6 +1132,57 @@ function APIClient:submitBookloreNote(book_id, content, title, username, passwor
 end
 
 --[[--
+<<<<<<< HEAD
+Fetch a single book's metadata from Booklore by its book ID.
+
+Used to pull fields like hardcoverId that may not have been present at match time.
+
+Endpoint: GET /api/v1/books/<book_id>
+
+@param book_id  number  Booklore book ID
+@param username string  Booklore username (Bearer token auth)
+@param password string  Booklore password (Bearer token auth)
+@return boolean success
+@return table|string  normalised book object on success, error message on failure
+--]]
+function APIClient:getBookById(book_id, username, password)
+    book_id = tonumber(book_id)
+    if not book_id then
+        return false, "Invalid book_id"
+    end
+
+    self:logInfo("BookloreSync API: Fetching metadata for book_id:", book_id)
+
+    local headers = {}
+    local token_ok, token = self:getOrRefreshBearerToken(username, password)
+    if token_ok then
+        headers["Authorization"] = "Bearer " .. token
+    end
+
+    local success, code, response = self:request("GET", "/api/v1/books/" .. tostring(book_id), nil, headers)
+
+    if not success and (code == 401 or code == 403) then
+        self:logWarn("BookloreSync API: Token rejected (" .. tostring(code) .. ") for getBookById, refreshing")
+        if self.db then self.db:deleteBearerToken(username) end
+        local refresh_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if refresh_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("GET", "/api/v1/books/" .. tostring(book_id), nil, headers)
+        else
+            return false, new_token or "Authentication failed"
+        end
+    end
+
+    if success and type(response) == "table" then
+        response = self:_normalizeBookObject(response)
+        self:logInfo("BookloreSync API: Got metadata for book_id:", book_id,
+            "hardcover_id:", tostring(response.hardcover_id))
+        return true, response
+    else
+        local err = (type(response) == "string" and response ~= "") and response
+                    or ("HTTP " .. tostring(code or "?"))
+        self:logWarn("BookloreSync API: getBookById failed:", err)
+=======
 Submit a bookmark to Booklore.
 
 Endpoint: POST /api/v1/bookmarks
@@ -1174,6 +1239,7 @@ function APIClient:submitBookmark(book_id, cfi, opts, username, password)
     else
         local err = (type(response) == "string" and response ~= "") and response or ("HTTP " .. tostring(code))
         self:logWarn("BookloreSync API: Failed to submit bookmark:", err)
+>>>>>>> origin/main
         return false, err
     end
 end

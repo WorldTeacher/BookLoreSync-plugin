@@ -263,6 +263,7 @@ function BookloreSync:init()
     self.highlights_notes_sync_enabled = self.settings:readSetting("highlights_notes_sync_enabled") or false
     self.notes_destination             = self.settings:readSetting("notes_destination")             or "in_book"
     self.upload_strategy               = self.settings:readSetting("upload_strategy")               or "on_session"
+    self.bookmarks_sync_enabled        = self.settings:readSetting("bookmarks_sync_enabled")        or false
 
     self.current_session = nil
     
@@ -1998,6 +1999,9 @@ function BookloreSync:addToMainMenu(menu_items)
             -- Annotations submenu
             Settings:buildAnnotationsMenu(self),
 
+            -- Bookmarks submenu
+            Settings:buildBookmarksMenu(self),
+
             -- ── Sync Triggers ────────────────────────────────────────────────
             {
                 text = _("── Sync Triggers ──"),
@@ -3337,7 +3341,7 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, live_bookmarks)
         self:logWarn("BookloreSync: syncBookmarks called without doc_path")
         return 0, 0, 0
     end
-    if not self.highlights_notes_sync_enabled then
+    if not self.bookmarks_sync_enabled then
         return 0, 0, 0
     end
     if self.booklore_username == "" or self.booklore_password == "" then
@@ -3546,6 +3550,13 @@ function BookloreSync:syncPendingBookmarks(silent)
             self.db:markBookmarkSynced(row.book_cache_id, row.datetime, server_id)
             self.db:deletePendingBookmark(row.id)
             synced_count = synced_count + 1
+        elseif type(server_id) == "string" and server_id:lower():find("already exists") then
+            -- Server reports a duplicate — treat as success so the item is
+            -- not retried indefinitely.
+            self.db:markBookmarkSynced(row.book_cache_id, row.datetime, nil)
+            self.db:deletePendingBookmark(row.id)
+            synced_count = synced_count + 1
+            self:logInfo("BookloreSync: Pending bookmark already on server, marking synced (id:", row.id, ")")
         else
             self.db:incrementBookmarkRetry(row.id)
             failed_count = failed_count + 1
@@ -3829,6 +3840,13 @@ function BookloreSync:syncPendingAnnotations(silent)
             self.db:markAnnotationSynced(row.book_cache_id, row.datetime, row.ann_type, server_id)
             self.db:deletePendingAnnotation(row.id)
             self:logInfo("BookloreSync: Pending annotation synced (id:", row.id, ")")
+        elseif type(server_id) == "string" and server_id:lower():find("already exists") then
+            -- Server reports a duplicate — treat as success so the item is
+            -- not retried indefinitely.
+            synced_count = synced_count + 1
+            self.db:markAnnotationSynced(row.book_cache_id, row.datetime, row.ann_type, nil)
+            self.db:deletePendingAnnotation(row.id)
+            self:logInfo("BookloreSync: Pending annotation already on server, marking synced (id:", row.id, ")")
         else
             failed_count = failed_count + 1
             self:logWarn("BookloreSync: Pending annotation retry failed (id:", row.id, "):", server_id)

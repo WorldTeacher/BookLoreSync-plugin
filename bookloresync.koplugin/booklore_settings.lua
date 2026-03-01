@@ -344,6 +344,48 @@ function Settings:showVersion(parent)
     })
 end
 
+function Settings:configureHardcoverToken(parent)
+    local token_file = (parent.plugin_dir or "") .. "/hardcover.token"
+
+    -- Try to read the token file
+    local f = io.open(token_file, "r")
+    if not f then
+        UIManager:show(InfoMessage:new{
+            text = T(_(
+                "No hardcover.token file found.\n\n" ..
+                "Create a file named hardcover.token in the plugin folder:\n%1\n\n" ..
+                "The file should contain only your Hardcover API token " ..
+                "(the JWT string from hardcover.app → Profile → API)."
+            ), token_file),
+        })
+        return
+    end
+
+    local token = f:read("*l") or ""
+    f:close()
+
+    -- Strip any surrounding whitespace / newlines
+    token = token:gsub("^%s+", ""):gsub("%s+$", "")
+
+    if token == "" then
+        UIManager:show(InfoMessage:new{
+            text = _("hardcover.token file is empty. Please paste your Hardcover API token into it."),
+            timeout = 4,
+        })
+        return
+    end
+
+    -- Persist and confirm
+    parent.hardcover_token = token
+    parent.settings:saveSetting("hardcover_token", token)
+    parent.settings:flush()
+
+    UIManager:show(InfoMessage:new{
+        text = _("Hardcover token loaded successfully."),
+        timeout = 3,
+    })
+end
+
 function Settings:buildAuthMenu(parent)
     return {
         text = _("Authentication"),
@@ -370,6 +412,14 @@ function Settings:buildAuthMenu(parent)
                 keep_menu_open = true,
                 callback = function()
                     self:configureBookloreAccount(parent)
+                end,
+            },
+            {
+                text = _("Configure Hardcover Account"),
+                help_text = _("Load your Hardcover API token from the hardcover.token file in the plugin folder. Create the file and paste your token into it (get it from hardcover.app → Profile → API), then tap here to load it."),
+                keep_menu_open = true,
+                callback = function()
+                    self:configureHardcoverToken(parent)
                 end,
             },
             {
@@ -450,9 +500,26 @@ function Settings:buildRatingMenu(parent)
                 keep_menu_open = true,
             },
             {
-                text = _("Hardcover rating (coming soon)"),
-                help_text = _("Sync rating to your Hardcover account. This feature is not yet implemented."),
-                enabled = false,
+                text = _("Hardcover rating sync"),
+                help_text = _("Also sync the rating to your Hardcover account (via Booklore's stored Hardcover book ID) when a session ends."),
+                enabled_func = function()
+                    return parent.rating_sync_enabled
+                end,
+                checked_func = function()
+                    return parent.hardcover_rating_sync_enabled
+                end,
+                callback = function()
+                    parent.hardcover_rating_sync_enabled = not parent.hardcover_rating_sync_enabled
+                    parent.settings:saveSetting("hardcover_rating_sync_enabled", parent.hardcover_rating_sync_enabled)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = parent.hardcover_rating_sync_enabled
+                            and _("Hardcover rating sync enabled")
+                            or  _("Hardcover rating sync disabled"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
             },
         },
     }
@@ -599,7 +666,6 @@ function Settings:exportSettings(parent)
         connect_network_on_suspend    = parent.connect_network_on_suspend,
         sync_mode                     = parent.sync_mode,
         manual_sync_only              = parent.manual_sync_only,
-        extended_sync_enabled         = parent.extended_sync_enabled,
         rating_sync_enabled           = parent.rating_sync_enabled,
         rating_sync_mode              = parent.rating_sync_mode,
         highlights_notes_sync_enabled = parent.highlights_notes_sync_enabled,

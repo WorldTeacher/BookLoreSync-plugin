@@ -419,6 +419,16 @@ Database.migrations = {
         ]],
     },
 
+    -- Migration 16: add hardcover_id column to book_cache
+    -- Stores the Hardcover integer book ID returned by the Booklore API,
+    -- so we can rate books on Hardcover without a lookup on every sync.
+    [16] = {
+        [[
+            ALTER TABLE book_cache ADD COLUMN hardcover_id INTEGER
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_book_cache_hardcover_id
+            ON book_cache(hardcover_id)
     -- Migration 16: Bookmark sync tables.
     -- pending_bookmarks: queue of bookmarks waiting to be uploaded.
     -- synced_bookmarks:  dedup log of bookmarks already on the server.
@@ -459,6 +469,15 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_synced_bookmarks_book_cache_id
             ON synced_bookmarks(book_cache_id)
+        ]],
+    },
+    [17] = {
+        [[
+            ALTER TABLE book_cache ADD COLUMN hardcover_id INTEGER
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_book_cache_hardcover_id
+            ON book_cache(hardcover_id)
         ]],
     },
 }
@@ -781,7 +800,7 @@ function Database:getBookByFilePath(file_path)
     file_path = tostring(file_path)
     
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13, hardcover_id
         FROM book_cache
         WHERE file_path = ?
     ]])
@@ -818,6 +837,7 @@ function Database:getBookByFilePath(file_path)
             last_accessed = row[7] and tonumber(row[7]) or nil,
             isbn10 = row[8] and tostring(row[8]) or nil,
             isbn13 = row[9] and tostring(row[9]) or nil,
+            hardcover_id = row[10] and tonumber(row[10]) or nil,
         }
         break
     end
@@ -828,7 +848,7 @@ end
 
 function Database:getBookByHash(file_hash)
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13, hardcover_id
         FROM book_cache
         WHERE file_hash = ?
         LIMIT 1
@@ -853,6 +873,7 @@ function Database:getBookByHash(file_hash)
             last_accessed = row[7] and tonumber(row[7]) or nil,
             isbn10 = row[8] and tostring(row[8]) or nil,
             isbn13 = row[9] and tostring(row[9]) or nil,
+            hardcover_id = row[10] and tonumber(row[10]) or nil,
         }
         break
     end
@@ -982,6 +1003,79 @@ function Database:updateBookId(file_hash, book_id)
     stmt:step()
     stmt:close()
     
+    return true
+end
+
+--[[--
+Return all book_cache rows that have a matched Booklore book_id.
+
+Used by the debug metadata-fetch action to know which books to query.
+
+@return table  Array of { id, file_path, file_hash, book_id, hardcover_id }
+--]]
+function Database:getAllMatchedBooks()
+    local stmt = self.conn:prepare([[
+        SELECT id, file_path, file_hash, book_id, hardcover_id
+        FROM book_cache
+        WHERE book_id IS NOT NULL
+        ORDER BY last_accessed DESC
+    ]])
+
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getAllMatchedBooks:", self.conn:errmsg())
+        return {}
+    end
+
+    local books = {}
+    for row in stmt:rows() do
+        table.insert(books, {
+            id           = tonumber(row[1]),
+            file_path    = tostring(row[2]),
+            file_hash    = tostring(row[3]),
+            book_id      = tonumber(row[4]),
+            hardcover_id = row[5] and tonumber(row[5]) or nil,
+        })
+    end
+
+    stmt:close()
+    return books
+end
+
+--[[--
+Store or clear the Hardcover book ID for a cached book.
+
+Called after a successful Booklore API response that includes a hardcover_id,
+so subsequent rating syncs can skip the lookup entirely.
+
+@param file_hash string   SHA-256 hash identifying the local file
+@param hardcover_id number|nil  Hardcover integer book ID (nil to clear)
+@return boolean true on success
+--]]
+function Database:updateHardcoverId(file_hash, hardcover_id)
+    if hardcover_id ~= nil then
+        hardcover_id = tonumber(hardcover_id)
+        if not hardcover_id or hardcover_id <= 0 then
+            logger.warn("BookloreSync Database: Invalid hardcover_id in updateHardcoverId, aborting")
+            return false
+        end
+    end
+
+    local stmt = self.conn:prepare([[
+        UPDATE book_cache
+        SET hardcover_id = ?, updated_at = CAST(strftime('%s', 'now') AS INTEGER)
+        WHERE file_hash = ?
+    ]])
+
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare updateHardcoverId statement:", self.conn:errmsg())
+        return false
+    end
+
+    stmt:bind(hardcover_id, file_hash)
+    stmt:step()
+    stmt:close()
+
+    logger.dbg("BookloreSync Database: hardcover_id updated to", hardcover_id, "for hash", file_hash)
     return true
 end
 
@@ -2027,7 +2121,7 @@ function Database:getBookCacheById(id)
     end
 
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author
+        SELECT id, file_path, file_hash, book_id, title, author, hardcover_id
         FROM book_cache WHERE id = ? LIMIT 1
     ]])
     if not stmt then
@@ -2045,12 +2139,13 @@ function Database:getBookCacheById(id)
     local result = nil
     for row in stmt:rows() do
         result = {
-            id        = tonumber(row[1]),
-            file_path = row[2],
-            file_hash = row[3],
-            book_id   = row[4] and tonumber(row[4]) or nil,
-            title     = row[5],
-            author    = row[6],
+            id           = tonumber(row[1]),
+            file_path    = row[2],
+            file_hash    = row[3],
+            book_id      = row[4] and tonumber(row[4]) or nil,
+            title        = row[5],
+            author       = row[6],
+            hardcover_id = row[7] and tonumber(row[7]) or nil,
         }
         break
     end
@@ -2942,6 +3037,32 @@ function Database:getRatingSyncHistory(book_cache_id)
     return rows
 end
 
+<<<<<<< HEAD
+--[[--
+Persist the Hardcover numeric user ID so it survives plugin restarts.
+
+Stored in plugin_settings under the key "hardcover_user_id".
+
+@param user_id number  The integer user ID returned by the Hardcover `me {}` query
+@return boolean success
+--]]
+function Database:saveHardcoverUserId(user_id)
+    user_id = tonumber(user_id)
+    if not user_id then
+        logger.err("BookloreSync Database: saveHardcoverUserId: invalid user_id")
+        return false
+    end
+    return self:savePluginSetting("hardcover_user_id", user_id)
+end
+
+--[[--
+Retrieve the cached Hardcover user ID, or nil if not yet stored.
+
+@return number|nil  Integer user ID, or nil
+--]]
+function Database:getHardcoverUserId()
+    return self:getPluginSetting("hardcover_user_id")
+=======
 -- ── Bookmark helpers ──────────────────────────────────────────────────────────
 
 --[[-- Return true if the bookmark identified by datetime has already been synced. --]]
@@ -3098,6 +3219,7 @@ function Database:incrementBookmarkRetry(id)
     local res = stmt:step()
     stmt:close()
     return res == sqlite3.DONE
+>>>>>>> origin/main
 end
 
 return Database

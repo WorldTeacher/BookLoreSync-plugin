@@ -419,7 +419,6 @@ Database.migrations = {
         ]],
     },
 
-<<<<<<< HEAD
     -- Migration 16: add hardcover_id column to book_cache
     -- Stores the Hardcover integer book ID returned by the Booklore API,
     -- so we can rate books on Hardcover without a lookup on every sync.
@@ -430,7 +429,6 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_book_cache_hardcover_id
             ON book_cache(hardcover_id)
-=======
     -- Migration 16: Bookmark sync tables.
     -- pending_bookmarks: queue of bookmarks waiting to be uploaded.
     -- synced_bookmarks:  dedup log of bookmarks already on the server.
@@ -471,7 +469,15 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_synced_bookmarks_book_cache_id
             ON synced_bookmarks(book_cache_id)
->>>>>>> origin/main
+        ]],
+    },
+    [17] = {
+        [[
+            ALTER TABLE book_cache ADD COLUMN hardcover_id INTEGER
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_book_cache_hardcover_id
+            ON book_cache(hardcover_id)
         ]],
     },
 }

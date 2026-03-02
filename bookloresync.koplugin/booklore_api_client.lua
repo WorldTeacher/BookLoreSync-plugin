@@ -1132,7 +1132,6 @@ function APIClient:submitBookloreNote(book_id, content, title, username, passwor
 end
 
 --[[--
-<<<<<<< HEAD
 Fetch a single book's metadata from Booklore by its book ID.
 
 Used to pull fields like hardcoverId that may not have been present at match time.
@@ -1182,7 +1181,11 @@ function APIClient:getBookById(book_id, username, password)
         local err = (type(response) == "string" and response ~= "") and response
                     or ("HTTP " .. tostring(code or "?"))
         self:logWarn("BookloreSync API: getBookById failed:", err)
-=======
+        return false, err
+    end
+end
+
+--[[--
 Submit a bookmark to Booklore.
 
 Endpoint: POST /api/v1/bookmarks
@@ -1239,7 +1242,6 @@ function APIClient:submitBookmark(book_id, cfi, opts, username, password)
     else
         local err = (type(response) == "string" and response ~= "") and response or ("HTTP " .. tostring(code))
         self:logWarn("BookloreSync API: Failed to submit bookmark:", err)
->>>>>>> origin/main
         return false, err
     end
 end

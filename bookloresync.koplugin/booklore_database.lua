@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 16,  -- Current database schema version
+    VERSION = 18,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -478,6 +478,21 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_book_cache_hardcover_id
             ON book_cache(hardcover_id)
+        ]],
+    },
+
+    -- Migration 18: Per-book tracking toggle.
+    -- tracking_enabled = 1 (default) means sessions are uploaded normally.
+    -- tracking_enabled = 0 means the book is excluded from all uploads;
+    -- any pending_sessions rows for this book are left in the queue but
+    -- skipped by getPendingSessions.
+    [18] = {
+        [[
+            ALTER TABLE book_cache ADD COLUMN tracking_enabled INTEGER NOT NULL DEFAULT 1
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_book_cache_tracking
+            ON book_cache(tracking_enabled)
         ]],
     },
 }
@@ -1193,13 +1208,19 @@ end
 
 function Database:getPendingSessions(limit)
     limit = limit or 100
-    
+
+    -- Join with book_cache so we can skip books where tracking_enabled = 0.
+    -- Sessions without a matching book_cache row (book_hash not yet cached)
+    -- are still returned — they're tracked by default.
     local stmt = self.conn:prepare([[
-        SELECT id, book_id, book_hash, book_title, koreader_book_id, book_type, start_time, end_time,
-               duration_seconds, start_progress, end_progress, progress_delta,
-               start_location, end_location, retry_count
-        FROM pending_sessions
-        ORDER BY created_at ASC
+        SELECT ps.id, ps.book_id, ps.book_hash, ps.book_title, ps.koreader_book_id,
+               ps.book_type, ps.start_time, ps.end_time,
+               ps.duration_seconds, ps.start_progress, ps.end_progress, ps.progress_delta,
+               ps.start_location, ps.end_location, ps.retry_count
+        FROM pending_sessions ps
+        LEFT JOIN book_cache bc ON bc.file_hash = ps.book_hash
+        WHERE (bc.tracking_enabled IS NULL OR bc.tracking_enabled = 1)
+        ORDER BY ps.created_at ASC
         LIMIT ?
     ]])
     
@@ -3037,7 +3058,6 @@ function Database:getRatingSyncHistory(book_cache_id)
     return rows
 end
 
-<<<<<<< HEAD
 --[[--
 Persist the Hardcover numeric user ID so it survives plugin restarts.
 
@@ -3062,7 +3082,6 @@ Retrieve the cached Hardcover user ID, or nil if not yet stored.
 --]]
 function Database:getHardcoverUserId()
     return self:getPluginSetting("hardcover_user_id")
-=======
 -- ── Bookmark helpers ──────────────────────────────────────────────────────────
 
 --[[-- Return true if the bookmark identified by datetime has already been synced. --]]
@@ -3219,7 +3238,66 @@ function Database:incrementBookmarkRetry(id)
     local res = stmt:step()
     stmt:close()
     return res == sqlite3.DONE
->>>>>>> origin/main
+-- ── Per-book tracking toggle ──────────────────────────────────────────────────
+
+--[[--
+Set the tracking_enabled flag for a book identified by its file path.
+
+@param file_path string   Absolute path to the book file
+@param enabled   boolean  true = track (default), false = skip uploads
+@return boolean success
+--]]
+function Database:setBookTracking(file_path, enabled)
+    if not file_path then return false end
+    local val = enabled and 1 or 0
+    local stmt = self.conn:prepare([[
+        UPDATE book_cache SET tracking_enabled = ? WHERE file_path = ?
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare setBookTracking:", self.conn:errmsg())
+        return false
+    end
+    local ok, err = stmt:bind(1, val)
+    if ok then ok, err = stmt:bind(2, file_path) end
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in setBookTracking:", err)
+        stmt:close()
+        return false
+    end
+    local res = stmt:step()
+    stmt:close()
+    if res ~= sqlite3.DONE then
+        logger.err("BookloreSync Database: setBookTracking step failed:", self.conn:errmsg())
+        return false
+    end
+    logger.info("BookloreSync Database: setBookTracking", file_path, "->", val)
+    return true
+end
+
+--[[--
+Return whether tracking is enabled for the given book file path.
+
+Returns true for unknown books (not yet in cache) — they will be tracked
+by default once their first session is recorded.
+
+@param file_path string  Absolute path to the book file
+@return boolean
+--]]
+function Database:isBookTrackingEnabled(file_path)
+    if not file_path then return true end
+    local stmt = self.conn:prepare([[
+        SELECT tracking_enabled FROM book_cache WHERE file_path = ?
+    ]])
+    if not stmt then return true end
+    local ok, err = stmt:bind(1, file_path)
+    if not ok then
+        stmt:close()
+        return true
+    end
+    local row = stmt:first_row()
+    stmt:close()
+    if not row then return true end  -- not in cache yet → track by default
+    return tonumber(row[1]) ~= 0
 end
 
 return Database

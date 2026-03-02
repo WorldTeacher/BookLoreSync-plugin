@@ -340,6 +340,19 @@ function BookloreSync:init()
                     self:fileDialogSyncRating(file)
                 end,
             },
+            {
+                text_func = function()
+                    if self.db and not self.db:isBookTrackingEnabled(file) then
+                        return _("Enable tracking")
+                    end
+                    return _("Disable tracking")
+                end,
+                callback = function()
+                    local fc = FileManager.instance and FileManager.instance.file_chooser
+                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
+                    self:fileDialogToggleTracking(file)
+                end,
+            },
         }
     end)
 
@@ -1889,7 +1902,49 @@ function BookloreSync:fileDialogSyncRating(file_path)
     self:syncKOReaderRating(file_path, book.book_id, nil)
 end
 
-function BookloreSync:addToMainMenu(menu_items)
+--[[--
+Toggle tracking for a book from the file manager long-press menu.
+
+When tracking is disabled the book's cache row is updated immediately
+(or created with tracking_enabled=0 if the book has never been opened).
+Pending sessions already in the queue are left untouched — they will be
+skipped by getPendingSessions until tracking is re-enabled.
+
+@param file_path string  Absolute path to the book file
+--]]
+function BookloreSync:fileDialogToggleTracking(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised"), timeout = 2 })
+        return
+    end
+
+    local currently_enabled = self.db:isBookTrackingEnabled(file_path)
+    local new_state = not currently_enabled
+
+    -- Ensure there is a cache row to update. If the book has never been opened,
+    -- saveBookCache creates one with defaults; setBookTracking then flips the flag.
+    local book = self.db:getBookByFilePath(file_path)
+    if not book then
+        local stem = file_path:match("([^/\\]+)%.[^%.]+$") or file_path:match("([^/\\]+)$")
+        self.db:saveBookCache(file_path, "", nil, stem, nil, nil, nil)
+    end
+
+    local ok = self.db:setBookTracking(file_path, new_state)
+    if ok then
+        UIManager:show(InfoMessage:new{
+            text = new_state
+                and T(_("Tracking enabled for:\n%1"), file_path:match("([^/\\]+)$") or file_path)
+                or  T(_("Tracking disabled for:\n%1\n\nSessions will not be uploaded."),
+                       file_path:match("([^/\\]+)$") or file_path),
+            timeout = 3,
+        })
+    else
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: failed to update tracking setting"),
+            timeout = 2,
+        })
+    end
+end
     local base_menu = {}
     
     table.insert(base_menu, {
@@ -2930,6 +2985,16 @@ function BookloreSync:endSession(options)
     local valid, reason = self:validateSession(duration_seconds, pages_read)
     if not valid then
         self:logInfo("BookloreSync: Session invalid -", reason)
+        self.current_session = nil
+        return
+    end
+
+    -- Per-book tracking check: if the user has disabled tracking for this
+    -- book, discard the session silently (don't add to pending_sessions).
+    if self.db and self.current_session.file_path
+       and not self.db:isBookTrackingEnabled(self.current_session.file_path) then
+        self:logInfo("BookloreSync: Tracking disabled for this book, discarding session:",
+                     self.current_session.file_path)
         self.current_session = nil
         return
     end

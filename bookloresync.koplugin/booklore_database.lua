@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 18,  -- Current database schema version
+    VERSION = 20,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -485,7 +485,7 @@ Database.migrations = {
     -- When a book is deleted from the file manager while offline (or while
     -- the Booklore server is unreachable), the deletion is queued here and
     -- retried on the next syncPendingSessions pass.
-    [18] = {
+    [20] = {
         [[
             CREATE TABLE IF NOT EXISTS pending_deletions (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,

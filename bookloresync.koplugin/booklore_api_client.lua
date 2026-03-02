@@ -1247,4 +1247,225 @@ function APIClient:submitBookmark(book_id, cfi, opts, username, password)
     end
 end
 
+-- ── Shelf sync API helpers ────────────────────────────────────────────────────
+
+--[[--
+Normalise a book object returned by the shelf endpoint.
+
+The shelf endpoint returns a slightly different shape from the rest of the API:
+  - authors live in `metadata.authors` (array of strings)
+  - file type is in `bookType` ("EPUB", "PDF") rather than `extension`
+  - ISBNs are nested under `metadata`
+
+This function promotes those fields to the top level so the rest of the
+plugin can use them uniformly.
+
+@param book table  Raw book object from the shelf API
+@return table  Normalised book object (same table, mutated in-place)
+--]]
+function APIClient:_normalizeShelfBookObject(book)
+    if not book or type(book) ~= "table" then return book end
+
+    if book.metadata and type(book.metadata) == "table" then
+        -- First author as scalar string
+        if book.metadata.authors and type(book.metadata.authors) == "table"
+           and #book.metadata.authors > 0 then
+            book.author = book.metadata.authors[1]
+        end
+        book.isbn10 = book.isbn10 or book.metadata.isbn10
+        book.isbn13 = book.isbn13 or book.metadata.isbn13
+    end
+
+    -- bookType → extension (lowercase)
+    if book.bookType and not book.extension then
+        book.extension = book.bookType:lower()
+    end
+
+    return book
+end
+
+--[[--
+Fetch all books in a given shelf.
+
+@param shelf_id  number  Shelf ID
+@param username  string
+@param password  string
+@return boolean success
+@return table|string  Array of normalised book objects, or error message
+--]]
+function APIClient:getBooksInShelf(shelf_id, username, password)
+    self:logInfo("BookloreSync API: getBooksInShelf — shelf_id:", shelf_id)
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password)
+    if not token_ok then
+        self:logErr("BookloreSync API: getBooksInShelf — auth failed:", token)
+        return false, "Authentication failed"
+    end
+
+    local headers = { ["Authorization"] = "Bearer " .. token }
+    local ok, code, response = self:request("GET", "/api/v1/shelves/" .. shelf_id .. "/books", nil, headers)
+
+    if not ok and (code == 401 or code == 403) then
+        self:logWarn("BookloreSync API: getBooksInShelf — token rejected, refreshing")
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            ok, code, response = self:request("GET", "/api/v1/shelves/" .. shelf_id .. "/books", nil, headers)
+        end
+    end
+
+    if ok and type(response) == "table" then
+        self:logInfo("BookloreSync API: getBooksInShelf — found", #response, "books")
+        for i, book in ipairs(response) do
+            response[i] = self:_normalizeShelfBookObject(book)
+        end
+        return true, response
+    end
+
+    local err_msg = (type(response) == "string" and response) or ("HTTP " .. tostring(code))
+    self:logWarn("BookloreSync API: getBooksInShelf failed:", err_msg)
+    return false, err_msg
+end
+
+--[[--
+Find an existing shelf by name (case-insensitive), or create it if absent.
+
+@param name      string  Shelf name to find or create
+@param username  string
+@param password  string
+@return boolean success
+@return number|string  shelf_id on success, error message on failure
+--]]
+function APIClient:getOrCreateShelf(name, username, password)
+    self:logInfo("BookloreSync API: getOrCreateShelf — name:", name)
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password)
+    if not token_ok then
+        self:logErr("BookloreSync API: getOrCreateShelf — auth failed:", token)
+        return false, token
+    end
+
+    local headers = { ["Authorization"] = "Bearer " .. token }
+    local ok, code, response = self:request("GET", "/api/v1/shelves", nil, headers)
+
+    if not ok and (code == 401 or code == 403) then
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            ok, code, response = self:request("GET", "/api/v1/shelves", nil, headers)
+        end
+    end
+
+    if not ok or type(response) ~= "table" then
+        local err_msg = (type(response) == "string" and response) or ("HTTP " .. tostring(code))
+        self:logWarn("BookloreSync API: getOrCreateShelf — could not list shelves:", err_msg)
+        return false, err_msg
+    end
+
+    -- Search for existing shelf (case-insensitive)
+    local name_lower = name:lower()
+    for _, shelf in ipairs(response) do
+        if shelf.name and shelf.name:lower() == name_lower then
+            self:logInfo("BookloreSync API: Found existing shelf:", shelf.name, "id:", shelf.id)
+            return true, tonumber(shelf.id)
+        end
+    end
+
+    -- Create it
+    self:logInfo("BookloreSync API: Shelf not found, creating:", name)
+    local body = json.encode({ name = name, icon = "📚", iconType = "PRIME_NG" })
+    local create_headers = {
+        ["Authorization"] = "Bearer " .. token,
+        ["Content-Type"]  = "application/json",
+    }
+    local c_ok, c_code, c_resp = self:request("POST", "/api/v1/shelves", body, create_headers)
+
+    if c_ok and c_code == 201 and type(c_resp) == "table" and c_resp.id then
+        self:logInfo("BookloreSync API: Created shelf:", name, "id:", c_resp.id)
+        return true, tonumber(c_resp.id)
+    end
+
+    local c_err = (type(c_resp) == "string" and c_resp) or ("HTTP " .. tostring(c_code))
+    self:logWarn("BookloreSync API: Shelf creation failed:", c_err)
+    return false, c_err
+end
+
+--[[--
+Download a book file from Booklore to a local path.
+
+Uses streaming download (ltn12 sink.file) to avoid loading the entire
+file into memory.
+
+@param book_id   number  Booklore book ID
+@param save_path string  Absolute destination path
+@param username  string
+@param password  string
+@return boolean success
+@return string|nil  Error message on failure, nil on success
+--]]
+function APIClient:downloadBook(book_id, save_path, username, password)
+    self:logInfo("BookloreSync API: downloadBook — id:", book_id, "->", save_path)
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password)
+    if not token_ok then
+        self:logErr("BookloreSync API: downloadBook — auth failed:", token)
+        return false, "Authentication failed"
+    end
+
+    local url = self.server_url .. "/api/v1/books/" .. book_id .. "/download"
+    local http_client = url:match("^https://") and https or http
+
+    local file, open_err = io.open(save_path, "wb")
+    if not file then
+        self:logErr("BookloreSync API: downloadBook — cannot open file:", open_err)
+        return false, "Cannot create file: " .. tostring(open_err)
+    end
+
+    local req_args = {
+        url     = url,
+        method  = "GET",
+        headers = { ["Authorization"] = "Bearer " .. token },
+        sink    = ltn12.sink.file(file),
+    }
+    http_client.TIMEOUT = self.timeout
+
+    local res, code, _ = http_client.request(req_args)
+
+    -- Retry on 401/403
+    if type(code) == "number" and (code == 401 or code == 403) then
+        self:logWarn("BookloreSync API: downloadBook — token rejected, refreshing")
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            -- Re-open file (sink may be in bad state after partial write)
+            file:close()
+            file, open_err = io.open(save_path, "wb")
+            if file then
+                req_args.headers = { ["Authorization"] = "Bearer " .. new_token }
+                req_args.sink    = ltn12.sink.file(file)
+                res, code, _     = http_client.request(req_args)
+            end
+        end
+    end
+
+    if not code then
+        os.remove(save_path)
+        local err_msg = "Network error: " .. tostring(res)
+        self:logErr("BookloreSync API: downloadBook failed:", err_msg)
+        return false, err_msg
+    end
+
+    if type(code) == "number" and code >= 200 and code < 300 then
+        self:logInfo("BookloreSync API: downloadBook — success")
+        return true, nil
+    end
+
+    os.remove(save_path)
+    local err_msg = "HTTP " .. tostring(code) .. ": download failed"
+    self:logErr("BookloreSync API: downloadBook failed:", err_msg)
+    return false, err_msg
+end
+
 return APIClient

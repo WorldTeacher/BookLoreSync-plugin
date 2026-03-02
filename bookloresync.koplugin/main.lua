@@ -37,6 +37,10 @@ local BookloreSync = WidgetContainer:extend{
     is_doc_only = false,
 }
 
+-- Guard flag: ensure FileManager deletion hooks are only applied once per session.
+-- Declared at module level so all plugin instances share the same flag.
+local booklore_fm_patched = false
+
 --[[--
 Redact URLs from log message for secure logging
 
@@ -239,6 +243,25 @@ function BookloreSync:init()
     self.manual_sync_only              = self.settings:readSetting("manual_sync_only")              or false
     self.sync_mode                     = self.settings:readSetting("sync_mode") -- "automatic", "manual", or "custom"
 
+    -- Shelf sync settings
+    self.booklore_shelf_name         = self.settings:readSetting("booklore_shelf_name")  or "KOReader"
+    self.shelf_id                    = self.settings:readSetting("shelf_id")
+    self.download_dir                = self.settings:readSetting("download_dir")
+                                       or self:_detectDefaultDownloadDir()
+    self.auto_sync_shelf_on_resume   = self.settings:readSetting("auto_sync_shelf_on_resume")
+    if self.auto_sync_shelf_on_resume == nil then
+        self.auto_sync_shelf_on_resume = false  -- Default disabled
+    end
+    self.delete_removed_shelf_books  = self.settings:readSetting("delete_removed_shelf_books")
+    if self.delete_removed_shelf_books == nil then
+        self.delete_removed_shelf_books = false  -- Default disabled for safety
+    end
+
+    -- Resume/wake-sync state (not persisted — reset each session)
+    self.last_auto_sync_time  = 0     -- unix timestamp of last auto-sync (cooldown guard)
+    self.needs_wake_sync      = false -- flagged by onResume; consumed by onNetworkConnected
+    self.wake_sync_scheduled  = false -- prevents duplicate scheduled wake syncs
+
     -- Migrate old settings to new preset system if needed
     if not self.sync_mode then
         if self.manual_sync_only then
@@ -345,6 +368,55 @@ function BookloreSync:init()
     end)
 
     self:registerDispatcherActions()
+
+    -- Patch FileManager deletion methods to notify Booklore when a book is
+    -- deleted from the file browser.  Applied once per session via the module-
+    -- level guard flag so multiple plugin reloads don't stack the patch.
+    local booklore_self = self
+    local ok_fm, FileManagerMod = pcall(require, "apps/filemanager/filemanager")
+    if ok_fm and FileManagerMod and not booklore_fm_patched then
+        booklore_fm_patched = true
+
+        -- Single-file deletion
+        local orig_deleteFile = FileManagerMod.deleteFile
+        FileManagerMod.deleteFile = function(fm_self, file, is_file)
+            local hash, stem, book_id = nil, nil, nil
+            if is_file then
+                hash, stem, book_id = booklore_self:preDeleteHook(file)
+            end
+            local result = orig_deleteFile(fm_self, file, is_file)
+            if hash and stem then
+                UIManager:scheduleIn(0.5, function()
+                    booklore_self:notifyBookloreOnDeletion(hash, stem, book_id)
+                end)
+            end
+            return result
+        end
+
+        -- Bulk-select deletion
+        local orig_deleteSelectedFiles = FileManagerMod.deleteSelectedFiles
+        FileManagerMod.deleteSelectedFiles = function(fm_self)
+            local to_sync = {}
+            for _, file in ipairs(fm_self.selected_files or {}) do
+                local resolved = require("ffi/util").realpath(file)
+                local h, s, b = booklore_self:preDeleteHook(resolved)
+                if h then
+                    table.insert(to_sync, { hash = h, stem = s, book_id = b })
+                end
+            end
+            local result = orig_deleteSelectedFiles(fm_self)
+            local delay = 0.5
+            for _, item in ipairs(to_sync) do
+                UIManager:scheduleIn(delay, function()
+                    booklore_self:notifyBookloreOnDeletion(item.hash, item.stem, item.book_id)
+                end)
+                delay = delay + 0.5
+            end
+            return result
+        end
+
+        self:logInfo("BookloreSync: FileManager deletion hooks installed")
+    end
 end
 
 function BookloreSync:onExit()
@@ -388,6 +460,27 @@ function BookloreSync:registerDispatcherActions()
         title = _("Test Booklore Connection"),
         general = true,
     })
+    Dispatcher:registerAction("booklore_sync_shelf", {
+        category = "none",
+        event = "SyncBookloreShelf",
+        title = _("Sync from Booklore Shelf"),
+        general = true,
+    })
+end
+
+function BookloreSync:onSyncBookloreShelf()
+    if not (self.booklore_username and self.booklore_username ~= "" and
+            self.booklore_password and self.booklore_password ~= "") then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore credentials not configured"),
+            timeout = 2,
+        })
+        return true
+    end
+    UIManager:scheduleIn(0.1, function()
+        self:syncFromBookloreShelf(false)
+    end)
+    return true
 end
 
 function BookloreSync:onToggleBookloreSync()
@@ -2104,6 +2197,139 @@ function BookloreSync:addToMainMenu(menu_items)
     })
 
     table.insert(base_menu, {
+        text = _("Shelf Sync"),
+        sub_item_table = {
+            {
+                text = _("Sync from Booklore Shelf"),
+                help_text = _("Download books from your Booklore shelf into the local download directory. Books already present are skipped."),
+                callback = function()
+                    self:onSyncBookloreShelf()
+                end,
+            },
+            {
+                text = _("Auto-sync shelf on wake"),
+                help_text = _("Automatically pull the Booklore shelf 15 seconds after the device wakes from suspend, once WiFi is connected."),
+                checked_func = function()
+                    return self.auto_sync_shelf_on_resume
+                end,
+                callback = function()
+                    self.auto_sync_shelf_on_resume = not self.auto_sync_shelf_on_resume
+                    self.settings:saveSetting("auto_sync_shelf_on_resume", self.auto_sync_shelf_on_resume)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.auto_sync_shelf_on_resume
+                            and _("Auto-sync shelf on wake enabled")
+                            or  _("Auto-sync shelf on wake disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text = _("Delete removed shelf books"),
+                help_text = _("When syncing, delete local files (in the download directory) whose BookID is no longer on the Booklore shelf. Disabled by default for safety."),
+                checked_func = function()
+                    return self.delete_removed_shelf_books
+                end,
+                callback = function()
+                    self.delete_removed_shelf_books = not self.delete_removed_shelf_books
+                    self.settings:saveSetting("delete_removed_shelf_books", self.delete_removed_shelf_books)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.delete_removed_shelf_books
+                            and _("Delete removed shelf books enabled — local files not on shelf will be removed during sync")
+                            or  _("Delete removed shelf books disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text_func = function()
+                    return T(_("Shelf name: %1"), self.booklore_shelf_name)
+                end,
+                help_text = _("Name of the Booklore shelf to sync. The shelf is created automatically if it does not exist."),
+                callback = function()
+                    local dialog
+                    dialog = InputDialog:new{
+                        title   = _("Booklore shelf name"),
+                        input   = self.booklore_shelf_name,
+                        buttons = {{
+                            {
+                                text     = _("Cancel"),
+                                callback = function() UIManager:close(dialog) end,
+                            },
+                            {
+                                text     = _("Save"),
+                                is_enter_default = true,
+                                callback = function()
+                                    local val = dialog:getInputText()
+                                    if val and val ~= "" then
+                                        self.booklore_shelf_name = val
+                                        self.settings:saveSetting("booklore_shelf_name", val)
+                                        -- Invalidate cached shelf_id so it is re-resolved
+                                        self.shelf_id = nil
+                                        self.settings:saveSetting("shelf_id", nil)
+                                        self.settings:flush()
+                                    end
+                                    UIManager:close(dialog)
+                                end,
+                            },
+                        }},
+                    }
+                    UIManager:show(dialog)
+                    dialog:onShowKeyboard()
+                end,
+            },
+            {
+                text_func = function()
+                    return T(_("Download dir: %1"), self.download_dir)
+                end,
+                help_text = _("Local directory where shelf books are downloaded. Detected automatically from device type; override here if needed."),
+                callback = function()
+                    local dialog
+                    dialog = InputDialog:new{
+                        title   = _("Download directory"),
+                        input   = self.download_dir,
+                        buttons = {{
+                            {
+                                text     = _("Cancel"),
+                                callback = function() UIManager:close(dialog) end,
+                            },
+                            {
+                                text     = _("Reset"),
+                                callback = function()
+                                    self.download_dir = self:_detectDefaultDownloadDir()
+                                    self.settings:saveSetting("download_dir", self.download_dir)
+                                    self.settings:flush()
+                                    UIManager:close(dialog)
+                                    UIManager:show(InfoMessage:new{
+                                        text = T(_("Reset to: %1"), self.download_dir),
+                                        timeout = 2,
+                                    })
+                                end,
+                            },
+                            {
+                                text     = _("Save"),
+                                is_enter_default = true,
+                                callback = function()
+                                    local val = dialog:getInputText()
+                                    if val and val ~= "" then
+                                        self.download_dir = val
+                                        self.settings:saveSetting("download_dir", val)
+                                        self.settings:flush()
+                                    end
+                                    UIManager:close(dialog)
+                                end,
+                            },
+                        }},
+                    }
+                    UIManager:show(dialog)
+                    dialog:onShowKeyboard()
+                end,
+            },
+        },
+    })
+
+    table.insert(base_menu, {
         text = _("Manage Sessions"),
         sub_item_table = {
             {
@@ -3338,24 +3564,96 @@ function BookloreSync:onResume()
     if not self.is_enabled then
         return false
     end
-    
+
     self:logInfo("BookloreSync: Device resuming")
-    
-    if not self.manual_sync_only then
-        self:logInfo("BookloreSync: Attempting background sync on resume")
-        self:syncPendingSessions(true)
-        
-        if NetworkMgr:isConnected() then
-            self:logInfo("BookloreSync: Network available, checking for unmatched books")
-            self:resolveUnmatchedBooks(true) -- silent mode
+
+    -- Cooldown guard: skip auto-sync if we ran one less than 5 minutes ago.
+    -- Prevents hammering the server on rapid suspend/resume cycles (e.g. when
+    -- the user is navigating menus with sleep-timer enabled).
+    local now = os.time()
+    if self.last_auto_sync_time and (now - self.last_auto_sync_time) < 300 then
+        self:logInfo("BookloreSync: Skipping resume auto-sync (cooldown active, last run",
+                     (now - self.last_auto_sync_time), "s ago)")
+    else
+        self.last_auto_sync_time = now
+
+        if not self.manual_sync_only then
+            self:logInfo("BookloreSync: Attempting background sync on resume")
+            self:syncPendingSessions(true)
+
+            -- Flag a deferred wake-sync so the shelf can be updated once the
+            -- network is fully up.  If WiFi is already connected, schedule it
+            -- directly; otherwise onNetworkConnected will pick it up.
+            if self.auto_sync_shelf_on_resume then
+                self.needs_wake_sync = true
+                if NetworkMgr:isConnected() then
+                    self:logInfo("BookloreSync: WiFi already connected on resume, scheduling delayed wake sync")
+                    self:_scheduleWakeSync()
+                end
+            end
+
+            self:logInfo("BookloreSync: Checking for unmatched books")
+            self:resolveUnmatchedBooks(true)
         end
     end
-    
+
     if self.ui and self.ui.document then
         self:logInfo("BookloreSync: Book is open, starting new session")
         self:startSession()
     end
-    
+
+    return false
+end
+
+--[[--
+Schedule a deferred shelf sync 15 seconds after wake.
+
+The delay avoids colliding with KOReader's own post-wake network
+activity (DNS, time sync, etc.).  A module-level flag prevents
+duplicate timers from stacking up.
+--]]
+function BookloreSync:_scheduleWakeSync()
+    if not self.needs_wake_sync then return end
+    if self.wake_sync_scheduled then
+        self:logInfo("BookloreSync: Wake sync already scheduled, skipping duplicate")
+        return
+    end
+
+    self.wake_sync_scheduled = true
+    self:logInfo("BookloreSync: Scheduling wake sync in 15 seconds")
+
+    UIManager:scheduleIn(15, function()
+        self.wake_sync_scheduled = false
+
+        if not self.needs_wake_sync then return end
+        if not self.is_enabled then
+            self:logInfo("BookloreSync: Wake sync cancelled (plugin disabled)")
+            self.needs_wake_sync = false
+            return
+        end
+        if not NetworkMgr:isConnected() then
+            self:logInfo("BookloreSync: Wake sync postponed (network disconnected)")
+            return
+        end
+
+        self.needs_wake_sync = false
+        self:logInfo("BookloreSync: Running delayed wake sync")
+        self:syncFromBookloreShelf(true)
+    end)
+end
+
+--[[--
+Handler for when the network becomes available.
+
+If a wake-triggered sync was deferred because WiFi wasn't ready at
+resume time, kick it off now that we're connected.
+--]]
+function BookloreSync:onNetworkConnected()
+    if not self.is_enabled then return false end
+    if not self.needs_wake_sync then return false end
+
+    self:logInfo("BookloreSync: Network connected with wake sync pending — scheduling")
+    self:_scheduleWakeSync()
     return false
 end
 
@@ -3620,6 +3918,484 @@ function BookloreSync:syncPendingBookmarks(silent)
 
     self:logInfo(string.format(
         "BookloreSync: Pending bookmark retry complete — synced=%d failed=%d",
+        synced_count, failed_count
+    ))
+    return synced_count, failed_count
+end
+
+--[[--
+Detect a sensible default download directory for the current device.
+
+Resolution order:
+  1. KOReader's configured home directory (G_reader_settings "home_dir")
+  2. Device.home_dir (set by KOReader at startup for the current platform)
+  3. /mnt/onboard/Books  — Kobo internal storage
+  4. /sdcard/Books       — Android
+  5. /Books              — generic fallback
+
+The result is always a "Books" subdirectory so downloaded shelf files
+don't litter the root of the user's home.
+
+@return string  Absolute path (directory may not yet exist)
+--]]
+function BookloreSync:_detectDefaultDownloadDir()
+    local lfs = require("libs/libkoreader-lfs")
+
+    -- Prefer the user's explicitly configured KOReader home dir.
+    -- G_reader_settings is a KOReader global (not a require-able module).
+    local koreader_home
+    if G_reader_settings and G_reader_settings.readSetting then
+        koreader_home = G_reader_settings:readSetting("home_dir")
+    end
+    if not koreader_home then
+        -- Fall back to the device-level default (set by KOReader platform code)
+        local ok_dev, Device = pcall(require, "device")
+        if ok_dev and Device and Device.home_dir then
+            koreader_home = Device.home_dir
+        end
+    end
+    if koreader_home and lfs.attributes(koreader_home, "mode") == "directory" then
+        return koreader_home .. "/Books"
+    end
+
+    -- Last resort: well-known platform paths
+    if lfs.attributes("/mnt/onboard", "mode") == "directory" then
+        return "/mnt/onboard/Books"
+    elseif lfs.attributes("/sdcard", "mode") == "directory" then
+        return "/sdcard/Books"
+    else
+        return "/Books"
+    end
+end
+
+--[[--
+Download all books from the configured Booklore shelf into `download_dir`.
+
+This is the "pull" side of two-way shelf sync.  On the "push" side, books
+deleted locally are removed from the shelf via notifyBookloreOnDeletion.
+
+New books on the shelf are downloaded; books already present locally are
+skipped (their cache entry is created/updated if missing).
+
+When `delete_removed_shelf_books` is true, local files in `download_dir`
+whose BookID is no longer on the shelf are deleted.
+
+@param silent boolean  Suppress UI messages (default: auto from context)
+@param on_complete function|nil  Optional callback(success, message)
+--]]
+function BookloreSync:syncFromBookloreShelf(silent, on_complete)
+    if silent == nil then silent = (self.ui and self.ui.document and true or false) end
+
+    if self.sync_in_progress then
+        self:logWarn("BookloreSync: Sync already in progress, skipping duplicate call")
+        local msg = _("Sync already in progress")
+        if not silent and not self.silent_messages then
+            UIManager:show(InfoMessage:new{ text = msg, timeout = 2 })
+        end
+        if on_complete then on_complete(false, msg) end
+        return false, msg
+    end
+
+    if not self.booklore_username or self.booklore_username == "" or
+       not self.booklore_password or self.booklore_password == "" then
+        local msg = _("Booklore credentials not configured. Please configure your Booklore account first.")
+        if not silent and not self.silent_messages then
+            UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
+        end
+        if on_complete then on_complete(false, msg) end
+        return false, msg
+    end
+
+    -- Ensure download directory exists
+    local lfs = require("libs/libkoreader-lfs")
+    if lfs.attributes(self.download_dir, "mode") ~= "directory" then
+        local ok_mkdir = lfs.mkdir(self.download_dir)
+        if not ok_mkdir then
+            local msg = T(_("Cannot create download directory: %1"), self.download_dir)
+            self:logErr("BookloreSync: syncFromBookloreShelf —", msg)
+            if not silent and not self.silent_messages then
+                UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
+            end
+            if on_complete then on_complete(false, msg) end
+            return false, msg
+        end
+    end
+
+    self.sync_in_progress = true
+    self:logInfo("BookloreSync: syncFromBookloreShelf — starting")
+
+    local info_msg
+    if not silent and not self.silent_messages then
+        info_msg = InfoMessage:new{
+            text = _("Syncing books from Booklore shelf..."),
+            timeout = 0,
+        }
+        UIManager:show(info_msg)
+    end
+
+    AsyncTask:new(function()
+        return pcall(function()
+            -- Ensure we have the shelf ID
+            local shelf_ok, shelf_id = self.api:getOrCreateShelf(
+                self.booklore_shelf_name, self.booklore_username, self.booklore_password)
+            if not shelf_ok then error(shelf_id or "Failed to get/create shelf") end
+
+            if shelf_id ~= self.shelf_id then
+                self.shelf_id = shelf_id
+                self.settings:saveSetting("shelf_id", self.shelf_id)
+                self.settings:flush()
+            end
+
+            -- Fetch book list
+            local books_ok, books = self.api:getBooksInShelf(
+                shelf_id, self.booklore_username, self.booklore_password)
+            if not books_ok then error(books or "Failed to retrieve books from shelf") end
+
+            if type(books) ~= "table" or #books == 0 then
+                return true, _("Shelf is empty — no books to sync")
+            end
+
+            local downloaded = 0
+            local skipped    = 0
+            local deleted    = 0
+            local errors     = 0
+            local total      = #books
+
+            self.db:beginTransaction()
+            local ok_loop, err_loop = pcall(function()
+                local shelf_book_ids = {}
+
+                for i, book in ipairs(books) do
+                    local book_id = tonumber(book.id)
+                    if not book_id then goto book_continue end
+
+                    shelf_book_ids[book_id] = true
+
+                    local filename = self:_generateFilename(book)
+                    local filepath = self.download_dir .. "/" .. filename
+
+                    -- Notify UI (throttled)
+                    if i % 10 == 0 or i == total then
+                        UIManager:scheduleIn(0, function()
+                            if info_msg then
+                                info_msg.text = T(_("Syncing shelf: %1 / %2"), i, total)
+                                UIManager:forceRePaint()
+                            end
+                        end)
+                    end
+
+                    if lfs.attributes(filepath, "mode") == "file" then
+                        -- Already present — ensure cache entry exists
+                        if not self.db:getBookByFilePath(filepath) then
+                            local hash = self:calculateBookHash(filepath)
+                            self.db:saveBookCache(filepath, hash, book_id,
+                                book.title, book.author, book.isbn10, book.isbn13)
+                        end
+                        skipped = skipped + 1
+                    else
+                        -- Download
+                        local dl_ok, dl_err = self.api:downloadBook(
+                            book_id, filepath, self.booklore_username, self.booklore_password)
+                        if dl_ok then
+                            local hash = self:calculateBookHash(filepath)
+                            self.db:saveBookCache(filepath, hash, book_id,
+                                book.title, book.author, book.isbn10, book.isbn13)
+                            downloaded = downloaded + 1
+                        else
+                            self:logWarn("BookloreSync: Download failed for book:", book.title, dl_err)
+                            errors = errors + 1
+                        end
+                    end
+
+                    ::book_continue::
+                end
+
+                -- Bidirectional sync: remove local files no longer on shelf
+                if self.delete_removed_shelf_books then
+                    for entry in lfs.dir(self.download_dir) do
+                        local local_id = entry:match("^BookID_(%d+)%.[%a]+$")
+                        if local_id then
+                            local lid = tonumber(local_id)
+                            if lid and not shelf_book_ids[lid] then
+                                local fp = self.download_dir .. "/" .. entry
+                                UIManager:scheduleIn(0, function()
+                                    if info_msg then
+                                        info_msg.text = T(_("Removing: BookID %1"), lid)
+                                        UIManager:forceRePaint()
+                                    end
+                                end)
+                                if os.remove(fp) then
+                                    deleted = deleted + 1
+                                else
+                                    errors = errors + 1
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+
+            if ok_loop then
+                self.db:commit()
+            else
+                self.db:rollback()
+                self:logErr("BookloreSync: syncFromBookloreShelf — loop error, rolled back:", err_loop)
+                error(err_loop)
+            end
+
+            return true, T(
+                _("Sync complete!\n\nDownloaded: %1\nSkipped: %2\nDeleted: %3\nErrors: %4"),
+                downloaded, skipped, deleted, errors
+            )
+        end)
+    end,
+    function(success, result_ok, inner_ok, message)
+        if info_msg then UIManager:close(info_msg) end
+        self.sync_in_progress = false
+
+        local final_ok  = success and result_ok and inner_ok
+        local final_msg = final_ok and message
+                          or T(_("Sync failed: %1"), tostring(message or "unknown error"))
+
+        if not silent and not self.silent_messages then
+            UIManager:show(InfoMessage:new{ text = final_msg, timeout = 5 })
+        end
+
+        if final_ok then
+            local ok_fm, FM = pcall(require, "apps/filemanager/filemanager")
+            if ok_fm and FM and FM.instance then
+                FM.instance:reinit(self.download_dir)
+            end
+        end
+
+        if on_complete then on_complete(final_ok, final_msg) end
+    end):submit()
+
+    return true
+end
+
+--[[--
+Generate a stable filename for a shelf book download.
+
+Format: "BookID_{id}.{extension}" — avoids filesystem-unsafe characters
+while keeping filenames predictable for the bidirectional deletion sweep.
+
+@param book table  Book object from Booklore API
+@return string
+--]]
+function BookloreSync:_generateFilename(book)
+    local extension = (book.extension or "epub"):lower()
+    return "BookID_" .. tostring(book.id) .. "." .. extension
+end
+
+Called from the patched FileManager.deleteFile / deleteSelectedFiles so we can
+read the file contents (to compute the hash) while the file still exists.
+
+Supported formats: EPUB, PDF, CBZ, CBR.  Other formats are ignored.
+
+@param filepath string  Full path to the file about to be deleted
+@return hash string|nil, stem string|nil, book_id number|nil
+--]]
+function BookloreSync:preDeleteHook(filepath)
+    if not filepath then return nil, nil, nil end
+
+    -- Support common ebook formats
+    local stem = filepath:match("([^/\\]+)%.[Ee][Pp][Uu][Bb]$")
+              or filepath:match("([^/\\]+)%.[Pp][Dd][Ff]$")
+              or filepath:match("([^/\\]+)%.[Cc][Bb][Zz]$")
+              or filepath:match("([^/\\]+)%.[Cc][Bb][Rr]$")
+    if not stem then return nil, nil, nil end
+
+    self:logInfo("BookloreSync: preDeleteHook for:", filepath)
+
+    local book_id = nil
+    if self.db then
+        local cached = self.db:getBookByFilePath(filepath)
+        if cached then
+            if cached.book_id then
+                book_id = tonumber(cached.book_id)
+                self:logInfo("BookloreSync: preDeleteHook — cached book_id:", book_id)
+            else
+                self:logInfo("BookloreSync: preDeleteHook — cached book has no book_id (never synced)")
+            end
+        else
+            self:logInfo("BookloreSync: preDeleteHook — book not in cache")
+        end
+    end
+
+    local hash = self:calculateBookHash(filepath)
+    if not hash then
+        self:logWarn("BookloreSync: preDeleteHook — could not compute hash for:", filepath)
+        return nil, nil, nil
+    end
+
+    return hash, stem, book_id
+end
+
+--[[--
+Notify Booklore that a book has been deleted locally.
+
+Removes the book from the configured Booklore shelf.  If offline or the
+server is unreachable the deletion is queued in pending_deletions and
+retried on the next syncPendingSessions() run.
+
+All errors are swallowed so a network failure never surfaces as a user-
+visible error during file deletion.
+
+@param hash           string      MD5 hash of the deleted file
+@param stem           string      Filename stem (used for title-based fallback search)
+@param cached_book_id number|nil  Booklore book ID if known
+@param from_queue     boolean     True when called from syncPendingDeletions (skip re-queue on failure)
+--]]
+function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_queue)
+    from_queue = from_queue or false
+
+    if not self.is_enabled then return end
+    if self.booklore_username == "" or self.booklore_password == "" then return end
+
+    -- If offline, queue immediately rather than attempting the async call
+    if not from_queue and not NetworkMgr:isConnected() then
+        self:logWarn("BookloreSync: notifyBookloreOnDeletion — offline, queuing deletion")
+        if self.db then self.db:savePendingDeletion(hash, stem, cached_book_id) end
+        return
+    end
+
+    local booklore_self = self
+
+    AsyncTask:new(function()
+        return pcall(function()
+            self:logInfo("BookloreSync: notifyBookloreOnDeletion — hash:", hash, "stem:", stem, "cached_book_id:", tostring(cached_book_id))
+
+            local book_id = cached_book_id
+
+            -- Fallback: search by title if we don't have a cached book_id
+            if not book_id then
+                self:logInfo("BookloreSync: notifyBookloreOnDeletion — no cached book_id, searching by title")
+                local ok1, resp1 = self.api:searchBooksWithAuth(stem, self.booklore_username, self.booklore_password)
+                if ok1 and type(resp1) == "table" and resp1[1] and resp1[1].id then
+                    book_id = tonumber(resp1[1].id)
+                else
+                    -- Try the part after "Author - " prefix if present
+                    local title_part = stem:match("^.+ %- (.+)$")
+                    if title_part then
+                        local ok2, resp2 = self.api:searchBooksWithAuth(title_part, self.booklore_username, self.booklore_password)
+                        if ok2 and type(resp2) == "table" and resp2[1] and resp2[1].id then
+                            book_id = tonumber(resp2[1].id)
+                        end
+                    end
+                end
+            end
+
+            if not book_id then
+                self:logWarn("BookloreSync: notifyBookloreOnDeletion — book not found on server, skipping shelf removal")
+                return true
+            end
+
+            -- Get bearer token and remove book from shelf
+            local token_ok, token = self.api:getOrRefreshBearerToken(self.booklore_username, self.booklore_password, false)
+            if not token_ok then error(token or "Failed to obtain auth token") end
+
+            local payload = string.format('{"bookIds":[%d],"shelvesToRemoveFrom":[]}', book_id)
+            local headers = {
+                ["Authorization"] = "Bearer " .. token,
+                ["Content-Type"]  = "application/json",
+            }
+            -- Endpoint: DELETE /api/v1/books/{id} or unassign from shelf — use book delete endpoint
+            local ok, code, resp = self.api:request("DELETE", "/api/v1/books/" .. book_id, nil, headers)
+
+            if ok or code == 204 then
+                self:logInfo("BookloreSync: notifyBookloreOnDeletion — book removed from Booklore, id:", book_id)
+                return true
+            else
+                error(tostring(code) .. ": " .. tostring(resp))
+            end
+        end)
+    end,
+    function(success, result_ok, err)
+        if not success or not result_ok then
+            self:logWarn("BookloreSync: notifyBookloreOnDeletion failed:", tostring(err))
+            if not from_queue and booklore_self.db then
+                self:logInfo("BookloreSync: notifyBookloreOnDeletion — queuing for retry")
+                booklore_self.db:savePendingDeletion(hash, stem, cached_book_id)
+            end
+        end
+    end):submit()
+end
+
+--[[--
+Retry all pending deletions from the pending_deletions queue.
+
+Called automatically during syncPendingSessions() as Phase 2c.
+Deletions that have been retried more than 10 times are dropped.
+
+@param silent boolean  Suppress UI feedback (default false)
+@return integer synced_count, integer failed_count
+--]]
+function BookloreSync:syncPendingDeletions(silent)
+    silent = silent or false
+
+    if not self.db then return 0, 0 end
+
+    local deletions = self.db:getPendingDeletions()
+    if not deletions or #deletions == 0 then return 0, 0 end
+
+    self:logInfo("BookloreSync: syncPendingDeletions — retrying", #deletions, "queued deletion(s)")
+
+    local synced_count = 0
+    local failed_count = 0
+
+    -- Cache token once for the whole batch
+    local token_ok, token = self.api:getOrRefreshBearerToken(self.booklore_username, self.booklore_password, false)
+
+    for _, deletion in ipairs(deletions) do
+        -- Drop stale entries that have exceeded the retry limit
+        if deletion.retry_count > 10 then
+            self:logWarn("BookloreSync: syncPendingDeletions — dropping stale deletion (>10 retries), hash:", deletion.file_hash)
+            self.db:removePendingDeletion(deletion.id)
+            goto del_continue
+        end
+
+        local book_id = deletion.book_id
+        if not book_id and deletion.file_hash then
+            local ok_bh, book_data = self.api:getBookByHash(deletion.file_hash)
+            if ok_bh and book_data and book_data.id then
+                book_id = tonumber(book_data.id)
+            end
+        end
+
+        if not book_id then
+            -- Can't find the book — nothing to remove; silently discard
+            self:logInfo("BookloreSync: syncPendingDeletions — book_id unknown, discarding deletion id:", deletion.id)
+            self.db:removePendingDeletion(deletion.id)
+            synced_count = synced_count + 1
+            goto del_continue
+        end
+
+        if not token_ok then
+            self:logWarn("BookloreSync: syncPendingDeletions — no auth token, skipping")
+            self.db:incrementDeletionRetry(deletion.id)
+            failed_count = failed_count + 1
+            goto del_continue
+        end
+
+        local headers = {
+            ["Authorization"] = "Bearer " .. token,
+            ["Content-Type"]  = "application/json",
+        }
+        local ok, code, _ = self.api:request("DELETE", "/api/v1/books/" .. book_id, nil, headers)
+        if ok or code == 204 then
+            self.db:removePendingDeletion(deletion.id)
+            synced_count = synced_count + 1
+        else
+            self.db:incrementDeletionRetry(deletion.id)
+            failed_count = failed_count + 1
+        end
+
+        ::del_continue::
+    end
+
+    self:logInfo(string.format(
+        "BookloreSync: syncPendingDeletions complete — synced=%d failed=%d",
         synced_count, failed_count
     ))
     return synced_count, failed_count
@@ -4127,6 +4903,11 @@ function BookloreSync:syncPendingSessions(silent)
     local bm_synced, bm_failed = self:syncPendingBookmarks(true)
     bm_synced = tonumber(bm_synced) or 0
     bm_failed = tonumber(bm_failed) or 0
+
+    -- ── Phase 2c: Deletions ───────────────────────────────────────────────
+    local del_synced, del_failed = self:syncPendingDeletions(true)
+    del_synced = tonumber(del_synced) or 0
+    del_failed = tonumber(del_failed) or 0
 
     -- ── Phase 3: Sessions ─────────────────────────────────────────────────
     local pending_count = self.db:getPendingSessionCount()

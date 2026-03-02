@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 19,  -- Current database schema version
+    VERSION = 20,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -517,6 +517,28 @@ Database.migrations = {
         [[
             CREATE INDEX IF NOT EXISTS idx_synced_bookmarks_book_cache_id
             ON synced_bookmarks(book_cache_id)
+        ]],
+    },
+
+    -- Migration 18: Pending deletions queue.
+    -- When a book is deleted from the file manager while offline (or while
+    -- the Booklore server is unreachable), the deletion is queued here and
+    -- retried on the next syncPendingSessions pass.
+    [20] = {
+        [[
+            CREATE TABLE IF NOT EXISTS pending_deletions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_hash   TEXT    NOT NULL,
+                stem        TEXT    NOT NULL,
+                book_id     INTEGER,
+                retry_count INTEGER DEFAULT 0,
+                created_at  INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(file_hash)
+            )
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_deletions_file_hash
+            ON pending_deletions(file_hash)
         ]],
     },
 }
@@ -3315,6 +3337,123 @@ function Database:incrementBookmarkRetry(id)
     local ok, err = pcall(function() stmt:bind(id) end)
     if not ok then
         logger.err("BookloreSync Database: Bind failed in incrementBookmarkRetry:", err)
+        stmt:close()
+        return false
+    end
+    local res = stmt:step()
+    stmt:close()
+    return res == SQ3.DONE or res == SQ3.OK
+end
+
+-- ── Deletion helpers ──────────────────────────────────────────────────────────
+
+--[[--
+Queue a book deletion for offline retry.
+Called when the device is offline or the Booklore server is unreachable
+at the time of deletion, so the shelf-removal can be retried later.
+
+@param file_hash  string   MD5 hash of the deleted file
+@param stem       string   Filename without extension (used as title fallback)
+@param book_id    number|nil  Booklore book ID if known
+@return boolean success
+--]]
+function Database:savePendingDeletion(file_hash, stem, book_id)
+    file_hash = tostring(file_hash or "")
+    stem      = tostring(stem      or "")
+    if file_hash == "" then
+        logger.warn("BookloreSync Database: Cannot save pending deletion with empty file_hash")
+        return false
+    end
+    if book_id ~= nil then
+        book_id = tonumber(book_id)
+        if not book_id then
+            logger.warn("BookloreSync Database: Invalid book_id in savePendingDeletion, setting NULL")
+            book_id = nil
+        end
+    end
+    local stmt = self.conn:prepare([[
+        INSERT OR IGNORE INTO pending_deletions (file_hash, stem, book_id)
+        VALUES (?, ?, ?)
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare savePendingDeletion:", self.conn:errmsg())
+        return false
+    end
+    local ok, err = pcall(function() stmt:bind(file_hash, stem, book_id) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in savePendingDeletion:", err)
+        stmt:close()
+        return false
+    end
+    local res = stmt:step()
+    stmt:close()
+    if res ~= SQ3.DONE and res ~= SQ3.OK then
+        logger.err("BookloreSync Database: savePendingDeletion step failed:", self.conn:errmsg())
+        return false
+    end
+    logger.info("BookloreSync Database: Saved pending deletion for hash:", file_hash)
+    return true
+end
+
+--[[-- Return all pending deletions, oldest first. --]]
+function Database:getPendingDeletions()
+    local rows = {}
+    local stmt = self.conn:prepare([[
+        SELECT id, file_hash, stem, book_id, retry_count
+        FROM pending_deletions
+        ORDER BY created_at ASC
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getPendingDeletions:", self.conn:errmsg())
+        return rows
+    end
+    for row in stmt:rows() do
+        table.insert(rows, {
+            id          = tonumber(row[1]),
+            file_hash   = tostring(row[2]),
+            stem        = tostring(row[3]),
+            book_id     = row[4] and tonumber(row[4]) or nil,
+            retry_count = tonumber(row[5]) or 0,
+        })
+    end
+    stmt:close()
+    return rows
+end
+
+--[[-- Remove a pending deletion by id after successful server sync. --]]
+function Database:removePendingDeletion(deletion_id)
+    if not deletion_id then return false end
+    local stmt = self.conn:prepare("DELETE FROM pending_deletions WHERE id = ?")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare removePendingDeletion:", self.conn:errmsg())
+        return false
+    end
+    local ok, err = pcall(function() stmt:bind(deletion_id) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in removePendingDeletion:", err)
+        stmt:close()
+        return false
+    end
+    local res = stmt:step()
+    stmt:close()
+    return res == SQ3.DONE or res == SQ3.OK
+end
+
+--[[-- Increment retry_count for a pending deletion. --]]
+function Database:incrementDeletionRetry(deletion_id)
+    if not deletion_id then return false end
+    local stmt = self.conn:prepare([[
+        UPDATE pending_deletions
+        SET retry_count = retry_count + 1
+        WHERE id = ?
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare incrementDeletionRetry:", self.conn:errmsg())
+        return false
+    end
+    local ok, err = pcall(function() stmt:bind(deletion_id) end)
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in incrementDeletionRetry:", err)
         stmt:close()
         return false
     end

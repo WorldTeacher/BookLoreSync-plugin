@@ -3862,15 +3862,39 @@ end
 --[[--
 Detect a sensible default download directory for the current device.
 
-Tries well-known locations in order:
-  /mnt/onboard/Books  — Kobo internal storage
-  /sdcard/Books       — Android
-  /Books              — generic fallback
+Resolution order:
+  1. KOReader's configured home directory (G_reader_settings "home_dir")
+  2. Device.home_dir (set by KOReader at startup for the current platform)
+  3. /mnt/onboard/Books  — Kobo internal storage
+  4. /sdcard/Books       — Android
+  5. /Books              — generic fallback
+
+The result is always a "Books" subdirectory so downloaded shelf files
+don't litter the root of the user's home.
 
 @return string  Absolute path (directory may not yet exist)
 --]]
 function BookloreSync:_detectDefaultDownloadDir()
     local lfs = require("libs/libkoreader-lfs")
+
+    -- Prefer the user's explicitly configured KOReader home dir.
+    -- G_reader_settings is a KOReader global (not a require-able module).
+    local koreader_home
+    if G_reader_settings and G_reader_settings.readSetting then
+        koreader_home = G_reader_settings:readSetting("home_dir")
+    end
+    if not koreader_home then
+        -- Fall back to the device-level default (set by KOReader platform code)
+        local ok_dev, Device = pcall(require, "device")
+        if ok_dev and Device and Device.home_dir then
+            koreader_home = Device.home_dir
+        end
+    end
+    if koreader_home and lfs.attributes(koreader_home, "mode") == "directory" then
+        return koreader_home .. "/Books"
+    end
+
+    -- Last resort: well-known platform paths
     if lfs.attributes("/mnt/onboard", "mode") == "directory" then
         return "/mnt/onboard/Books"
     elseif lfs.attributes("/sdcard", "mode") == "directory" then

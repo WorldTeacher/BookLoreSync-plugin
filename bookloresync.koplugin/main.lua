@@ -490,6 +490,7 @@ function BookloreSync:viewSessionDetails()
     local sessions    = tonumber(self.db:getPendingSessionCount())    or 0
     local annotations = tonumber(self.db:getPendingAnnotationCount()) or 0
     local ratings     = tonumber(self.db:getPendingRatingCount())     or 0
+    local bookmarks   = tonumber(self.db:getPendingBookmarkCount())   or 0
 
     local total     = tonumber(stats.total)     or 0
     local matched   = tonumber(stats.matched)   or 0
@@ -503,8 +504,9 @@ function BookloreSync:viewSessionDetails()
             "Pending uploads\n" ..
             "  Sessions: %4\n" ..
             "  Annotations: %5\n" ..
-            "  Ratings: %6"
-        ), total, matched, unmatched, sessions, annotations, ratings),
+            "  Ratings: %6\n" ..
+            "  Bookmarks: %7"
+        ), total, matched, unmatched, sessions, annotations, ratings, bookmarks),
     })
 end
 
@@ -1416,7 +1418,8 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
         -- with defaults applied for any absent optional fields.
         annotations = {}
         for _, ann in ipairs(live_annotations) do
-            if ann.text then
+            -- Bookmarks share the same array but lack pos0/color — skip them
+            if ann.text and ann.pos0 then
                 table.insert(annotations, {
                     text     = ann.text,
                     note     = ann.note,
@@ -2109,7 +2112,8 @@ function BookloreSync:addToMainMenu(menu_items)
                     local sessions     = tonumber(self.db:getPendingSessionCount())     or 0
                     local annotations  = tonumber(self.db:getPendingAnnotationCount())  or 0
                     local ratings      = tonumber(self.db:getPendingRatingCount())      or 0
-                    local total = sessions + annotations + ratings
+                    local bookmarks    = tonumber(self.db:getPendingBookmarkCount())    or 0
+                    local total = sessions + annotations + ratings + bookmarks
                     if total == 0 then
                         return _("Sync Pending Now")
                     end
@@ -2117,15 +2121,17 @@ function BookloreSync:addToMainMenu(menu_items)
                     if sessions    > 0 then table.insert(parts, T(_("%1 S"),  sessions))    end
                     if annotations > 0 then table.insert(parts, T(_("%1 A"),  annotations)) end
                     if ratings     > 0 then table.insert(parts, T(_("%1 R"),  ratings))     end
+                    if bookmarks   > 0 then table.insert(parts, T(_("%1 B"),  bookmarks))   end
                     return T(_("Sync Pending Now (%1)"), table.concat(parts, ", "))
                 end,
-                help_text = _("Manually upload all pending items that failed to sync previously — reading sessions, annotations (highlights and notes), and ratings. Items are cached locally when the network is unavailable."),
+                help_text = _("Manually upload all pending items that failed to sync previously — reading sessions, annotations (highlights and notes), ratings, and bookmarks. Items are cached locally when the network is unavailable."),
                 enabled_func = function()
                     if not self.db then return false end
                     local sessions     = tonumber(self.db:getPendingSessionCount())     or 0
                     local annotations  = tonumber(self.db:getPendingAnnotationCount())  or 0
                     local ratings      = tonumber(self.db:getPendingRatingCount())      or 0
-                    return (sessions + annotations + ratings) > 0
+                    local bookmarks    = tonumber(self.db:getPendingBookmarkCount())    or 0
+                    return (sessions + annotations + ratings + bookmarks) > 0
                 end,
                 callback = function()
                     self:syncPendingSessions()
@@ -2190,20 +2196,23 @@ function BookloreSync:addToMainMenu(menu_items)
                     local s = tonumber(self.db:getPendingSessionCount())    or 0
                     local a = tonumber(self.db:getPendingAnnotationCount()) or 0
                     local r = tonumber(self.db:getPendingRatingCount())     or 0
-                    if (s + a + r) == 0 then return _("Clear Pending...") end
+                    local b = tonumber(self.db:getPendingBookmarkCount())   or 0
+                    if (s + a + r + b) == 0 then return _("Clear Pending...") end
                     local parts = {}
                     if s > 0 then table.insert(parts, T(_("%1 S"), s)) end
                     if a > 0 then table.insert(parts, T(_("%1 A"), a)) end
                     if r > 0 then table.insert(parts, T(_("%1 R"), r)) end
+                    if b > 0 then table.insert(parts, T(_("%1 B"), b)) end
                     return T(_("Clear Pending... (%1)"), table.concat(parts, ", "))
                 end,
-                help_text = _("Choose which types of pending items to delete from the local queue: sessions, annotations (highlights/notes), and/or ratings."),
+                help_text = _("Choose which types of pending items to delete from the local queue: sessions, annotations (highlights/notes), ratings, and/or bookmarks."),
                 enabled_func = function()
                     if not self.db then return false end
                     local s = tonumber(self.db:getPendingSessionCount())    or 0
                     local a = tonumber(self.db:getPendingAnnotationCount()) or 0
                     local r = tonumber(self.db:getPendingRatingCount())     or 0
-                    return (s + a + r) > 0
+                    local b = tonumber(self.db:getPendingBookmarkCount())   or 0
+                    return (s + a + r + b) > 0
                 end,
                 callback = function()
                     self:showClearPendingDialog()
@@ -3006,6 +3015,21 @@ function BookloreSync:onCloseDocument()
 
     self:logInfo("BookloreSync: Document closing")
 
+    -- DEBUG: dump entire doc_settings to log
+    if self.ui and self.ui.doc_settings then
+        local ok_dump, dump_str = pcall(function()
+            local json = require("json")
+            return json.encode(self.ui.doc_settings.data)
+        end)
+        if ok_dump then
+            self:logInfo("BookloreSync: [DEBUG] doc_settings.data =", dump_str)
+        else
+            self:logInfo("BookloreSync: [DEBUG] doc_settings dump failed:", dump_str)
+        end
+    else
+        self:logInfo("BookloreSync: [DEBUG] doc_settings is nil at close")
+    end
+
     local pre_file_path = self.current_session and self.current_session.file_path
     local pre_file_hash = self.current_session and self.current_session.file_hash
     local pre_book_id   = self.current_session and self.current_session.book_id
@@ -3149,15 +3173,31 @@ function BookloreSync:onCloseDocument()
             self:logInfo("BookloreSync: ReaderAnnotation module not available — will fall back to doc_settings / sidecar")
         end
 
-        -- Capture bookmarks from the live ReaderBookmark module.
-        -- KOReader stores bookmarks in ReaderBookmark's in-memory table
-        -- (self.ui.bookmark.bookmarks) — same timing hazard as annotations.
+        -- Derive bookmarks from the same live annotations array.
+        -- KOReader stores both highlights and bookmarks in a single "annotations"
+        -- array (in doc_settings and in self.ui.annotation.annotations).
+        -- Bookmarks are entries without pos0/color/drawer; their "page" field
+        -- is the XPointer position (same format as pos0 on highlights).
         local live_bookmarks = nil
-        if self.ui and self.ui.bookmark and self.ui.bookmark.bookmarks then
-            live_bookmarks = self.ui.bookmark.bookmarks
-            self:logInfo("BookloreSync: Captured", #live_bookmarks, "bookmarks from ReaderBookmark module")
-        else
-            self:logInfo("BookloreSync: ReaderBookmark module not available — will fall back to sidecar")
+        if live_annotations then
+            live_bookmarks = {}
+            for _, ann in ipairs(live_annotations) do
+                if not ann.pos0 and not ann.color then
+                    table.insert(live_bookmarks, {
+                        pos0     = ann.page,  -- XPointer string doubles as pos0
+                        pageno   = ann.pageno,
+                        notes    = ann.text,
+                        datetime = ann.datetime,
+                        chapter  = ann.chapter,
+                    })
+                end
+            end
+            if #live_bookmarks > 0 then
+                self:logInfo("BookloreSync: Derived", #live_bookmarks, "bookmarks from live annotations array")
+            else
+                self:logInfo("BookloreSync: No bookmarks found in live annotations array — will fall back to doc_settings / sidecar")
+                live_bookmarks = nil
+            end
         end
 
         if strategy == "on_session" then
@@ -3173,7 +3213,7 @@ function BookloreSync:onCloseDocument()
 
         -- Sync bookmarks (same strategy gate as annotations)
         if strategy == "on_session" or (strategy == "on_complete" and pre_end_progress and pre_end_progress >= 99) then
-            self:syncBookmarks(pre_file_path, pre_book_id, open_doc, live_bookmarks)
+            self:syncBookmarks(pre_file_path, pre_book_id, open_doc, live_settings, live_bookmarks)
         end
     end
 
@@ -3333,10 +3373,11 @@ For PDF files a mock CFI anchored to the page number is used.
 @param doc_path         string       Full path to the document file
 @param book_id          number|nil   Booklore book ID (nil = queue-only mode)
 @param document         object|nil   Live CREngine document (for EPUB CFI)
+@param doc_settings     table|nil    Live in-memory DocSettings object (fallback when live_bookmarks is absent)
 @param live_bookmarks   table|nil    Raw bookmark array from ReaderBookmark.bookmarks
 @return integer synced_count, integer queued_count, integer failed_count
 --]]
-function BookloreSync:syncBookmarks(doc_path, book_id, document, live_bookmarks)
+function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, live_bookmarks)
     if not doc_path then
         self:logWarn("BookloreSync: syncBookmarks called without doc_path")
         return 0, 0, 0
@@ -3351,14 +3392,27 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, live_bookmarks)
 
     local queue_only = (book_id == nil) or self.manual_sync_only
 
-    -- Resolve bookmark list: live module → sidecar fallback
+    -- Resolve bookmark list: live module → live doc_settings → on-disk sidecar
     local bookmarks
-    if live_bookmarks and type(live_bookmarks) == "table" then
+    if live_bookmarks and type(live_bookmarks) == "table" and #live_bookmarks > 0 then
         bookmarks = live_bookmarks
         self:logInfo(string.format("BookloreSync: Bookmarks from live ReaderBookmark module (%d)", #bookmarks))
     else
-        bookmarks = self.metadata_extractor:getBookmarks(doc_path)
-        self:logInfo(string.format("BookloreSync: Bookmarks from on-disk sidecar (%d)", #bookmarks))
+        -- Try live doc_settings first (avoids I/O), fall back to opening sidecar
+        -- directly if doc_settings doesn't have the bookmarks key populated.
+        if doc_settings then
+            bookmarks = self.metadata_extractor:getBookmarksFromDocSettings(doc_settings)
+            if #bookmarks > 0 then
+                self:logInfo(string.format("BookloreSync: Bookmarks from live in-memory doc_settings (%d)", #bookmarks))
+            else
+                self:logInfo("BookloreSync: doc_settings had no bookmarks — falling back to on-disk sidecar")
+                bookmarks = self.metadata_extractor:getBookmarks(doc_path)
+                self:logInfo(string.format("BookloreSync: Bookmarks from on-disk sidecar (%d)", #bookmarks))
+            end
+        else
+            bookmarks = self.metadata_extractor:getBookmarks(doc_path)
+            self:logInfo(string.format("BookloreSync: Bookmarks from on-disk sidecar (%d)", #bookmarks))
+        end
     end
 
     if not bookmarks or #bookmarks == 0 then
@@ -3435,8 +3489,7 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, live_bookmarks)
             end
 
             local opts = {
-                chapter_title = bm.chapter,
-                notes         = bm.notes,
+                title = bm.chapter,
             }
 
             if queue_only then
@@ -3542,7 +3595,7 @@ function BookloreSync:syncPendingBookmarks(silent)
 
         local ok, server_id = self.api:submitBookmark(
             book_id, cfi,
-            { chapter_title = payload.chapter, notes = payload.notes },
+            { title = payload.chapter },
             self.booklore_username, self.booklore_password
         )
 
@@ -3873,11 +3926,13 @@ function BookloreSync:showClearPendingDialog()
     local s_count = tonumber(self.db:getPendingSessionCount())    or 0
     local a_count = tonumber(self.db:getPendingAnnotationCount()) or 0
     local r_count = tonumber(self.db:getPendingRatingCount())     or 0
+    local b_count = tonumber(self.db:getPendingBookmarkCount())   or 0
 
     local sel = {
         sessions    = s_count > 0,
         annotations = a_count > 0,
         ratings     = r_count > 0,
+        bookmarks   = b_count > 0,
     }
 
     local dialog
@@ -3887,7 +3942,7 @@ function BookloreSync:showClearPendingDialog()
             return T(_("%1 %2 (%3)"), check, label, count)
         end
 
-        local any_selected = sel.sessions or sel.annotations or sel.ratings
+        local any_selected = sel.sessions or sel.annotations or sel.ratings or sel.bookmarks
 
         local buttons = {}
 
@@ -3927,6 +3982,18 @@ function BookloreSync:showClearPendingDialog()
             }})
         end
 
+        if b_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.bookmarks, _("Bookmarks"), b_count),
+                callback = function()
+                    sel.bookmarks = not sel.bookmarks
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
         table.insert(buttons, {
             {
                 text = _("Clear Selected"),
@@ -3937,6 +4004,7 @@ function BookloreSync:showClearPendingDialog()
                     if sel.sessions    then self.db:clearPendingSessions();    table.insert(cleared, _("Sessions"))    end
                     if sel.annotations then self.db:clearPendingAnnotations(); table.insert(cleared, _("Annotations")) end
                     if sel.ratings     then self.db:clearPendingRatings();     table.insert(cleared, _("Ratings"))     end
+                    if sel.bookmarks   then self.db:clearPendingBookmarks();   table.insert(cleared, _("Bookmarks"))   end
                     if #cleared > 0 then
                         UIManager:show(InfoMessage:new{
                             text = T(_("Cleared: %1"), table.concat(cleared, ", ")),

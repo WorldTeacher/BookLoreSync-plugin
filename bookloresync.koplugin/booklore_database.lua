@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 16,  -- Current database schema version
+    VERSION = 19,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -419,20 +419,16 @@ Database.migrations = {
         ]],
     },
 
-    -- Migration 16: add hardcover_id column to book_cache
-    -- Stores the Hardcover integer book ID returned by the Booklore API,
-    -- so we can rate books on Hardcover without a lookup on every sync.
-    [16] = {
-        [[
-            ALTER TABLE book_cache ADD COLUMN hardcover_id INTEGER
-        ]],
-        [[
-            CREATE INDEX IF NOT EXISTS idx_book_cache_hardcover_id
-            ON book_cache(hardcover_id)
-    -- Migration 16: Bookmark sync tables.
+    -- Migration 16: placeholder (no-op).
+    -- The original migration 16 content was lost in a merge conflict; its
+    -- substance (hardcover_id column + bookmark tables) is applied safely by
+    -- migrations 17, 18, and 19 using IF NOT EXISTS guards.
+    [16] = {},
+
+    -- Migration 17: Bookmark sync tables.
     -- pending_bookmarks: queue of bookmarks waiting to be uploaded.
     -- synced_bookmarks:  dedup log of bookmarks already on the server.
-    [16] = {
+    [17] = {
         [[
             CREATE TABLE IF NOT EXISTS pending_bookmarks (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -471,13 +467,56 @@ Database.migrations = {
             ON synced_bookmarks(book_cache_id)
         ]],
     },
-    [17] = {
+    -- Migration 18: Add hardcover_id column to book_cache.
+    -- Stores the Hardcover integer book ID returned by the Booklore API,
+    -- so we can rate books on Hardcover without a lookup on every sync.
+    -- NOTE: SQL is intentionally empty; the ALTER TABLE is performed in the
+    -- migration hook below so we can guard against duplicates on dev databases
+    -- that already received this column before the migration was formalised.
+    [18] = {},
+
+    -- Migration 19: Ensure bookmark sync tables exist.
+    -- The bookmark tables were originally in migration 16, then renumbered to
+    -- migration 17.  Databases already at version 17 (hardcover_id) skipped
+    -- that slot and never received the tables.  Using IF NOT EXISTS makes this
+    -- safe for all databases regardless of prior history.
+    [19] = {
         [[
-            ALTER TABLE book_cache ADD COLUMN hardcover_id INTEGER
+            CREATE TABLE IF NOT EXISTS pending_bookmarks (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL,
+                book_id       INTEGER,
+                datetime      TEXT    NOT NULL,
+                payload       TEXT    NOT NULL,
+                retry_count   INTEGER DEFAULT 0,
+                last_retry_at INTEGER,
+                created_at    INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(book_cache_id, datetime),
+                FOREIGN KEY(book_cache_id) REFERENCES book_cache(id)
+            )
         ]],
         [[
-            CREATE INDEX IF NOT EXISTS idx_book_cache_hardcover_id
-            ON book_cache(hardcover_id)
+            CREATE INDEX IF NOT EXISTS idx_pending_bookmarks_book_cache_id
+            ON pending_bookmarks(book_cache_id)
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_bookmarks_created_at
+            ON pending_bookmarks(created_at)
+        ]],
+        [[
+            CREATE TABLE IF NOT EXISTS synced_bookmarks (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER NOT NULL,
+                datetime      TEXT    NOT NULL,
+                server_id     INTEGER,
+                synced_at     INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(book_cache_id, datetime),
+                FOREIGN KEY(book_cache_id) REFERENCES book_cache(id)
+            )
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_synced_bookmarks_book_cache_id
+            ON synced_bookmarks(book_cache_id)
         ]],
     },
 }
@@ -486,6 +525,33 @@ Database.migrations = {
 -- Each receives the Database instance; return true on success, false on failure
 -- (non-fatal: schema version is still recorded, migration is not retried).
 Database.migration_hooks = {
+    -- Migration 17: Add hardcover_id to book_cache if not already present.
+    -- Guarded via PRAGMA table_info because older SQLite lacks
+    -- "ALTER TABLE ... ADD COLUMN IF NOT EXISTS" (requires SQLite 3.37+).
+    [18] = function(db)
+        local has_col = false
+        local info = db.conn:prepare("PRAGMA table_info(book_cache)")
+        if info then
+            for row in info:rows() do
+                if row[2] == "hardcover_id" then
+                    has_col = true
+                    break
+                end
+            end
+            info:close()
+        end
+        if not has_col then
+            local res = db.conn:exec("ALTER TABLE book_cache ADD COLUMN hardcover_id INTEGER")
+            if res ~= SQ3.OK then
+                logger.err("BookloreSync Database: Migration 17 hook: failed to add hardcover_id:", db.conn:errmsg())
+                return false
+            end
+        else
+            logger.info("BookloreSync Database: Migration 17 hook: hardcover_id already exists, skipping ALTER")
+        end
+        db.conn:exec("CREATE INDEX IF NOT EXISTS idx_book_cache_hardcover_id ON book_cache(hardcover_id)")
+        return true
+    end,
     -- Migration 10: copy all settings from booklore.lua into plugin_settings,
     -- then delete the LuaSettings file so it is no longer used.
     [10] = function(db)
@@ -2825,6 +2891,31 @@ function Database:clearPendingRatings()
     return result == SQ3.OK
 end
 
+function Database:getPendingBookmarkCount()
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_bookmarks")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getPendingBookmarkCount:", self.conn:errmsg())
+        return 0
+    end
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
+    stmt:close()
+    return count
+end
+
+--[[--
+Delete all rows from the pending_bookmarks queue.
+
+@return boolean success
+--]]
+function Database:clearPendingBookmarks()
+    local result = self.conn:exec("DELETE FROM pending_bookmarks")
+    return result == SQ3.OK
+end
+
 function Database:getPluginSetting(key)
     if not key then return nil end
     key = tostring(key)
@@ -3037,7 +3128,6 @@ function Database:getRatingSyncHistory(book_cache_id)
     return rows
 end
 
-<<<<<<< HEAD
 --[[--
 Persist the Hardcover numeric user ID so it survives plugin restarts.
 
@@ -3062,7 +3152,8 @@ Retrieve the cached Hardcover user ID, or nil if not yet stored.
 --]]
 function Database:getHardcoverUserId()
     return self:getPluginSetting("hardcover_user_id")
-=======
+end
+
 -- ── Bookmark helpers ──────────────────────────────────────────────────────────
 
 --[[-- Return true if the bookmark identified by datetime has already been synced. --]]
@@ -3076,16 +3167,19 @@ function Database:isBookmarkSynced(book_cache_id, datetime)
         logger.err("BookloreSync Database: Failed to prepare isBookmarkSynced:", self.conn:errmsg())
         return false
     end
-    local ok, err = stmt:bind(1, book_cache_id)
-    if ok then ok, err = stmt:bind(2, datetime) end
+    local ok, err = pcall(function() stmt:bind(book_cache_id, datetime) end)
     if not ok then
         logger.err("BookloreSync Database: Bind failed in isBookmarkSynced:", err)
         stmt:close()
         return false
     end
-    local row = stmt:first_row()
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
     stmt:close()
-    return row and tonumber(row[1]) and tonumber(row[1]) > 0
+    return count > 0
 end
 
 --[[-- Mark a bookmark as synced (insert into synced_bookmarks). --]]
@@ -3102,9 +3196,7 @@ function Database:markBookmarkSynced(book_cache_id, datetime, server_id)
         logger.err("BookloreSync Database: Failed to prepare markBookmarkSynced:", self.conn:errmsg())
         return false
     end
-    local ok, err = stmt:bind(1, book_cache_id)
-    if ok then ok, err = stmt:bind(2, datetime) end
-    if ok then ok, err = stmt:bind(3, server_id or 0) end
+    local ok, err = pcall(function() stmt:bind(book_cache_id, datetime, server_id or 0) end)
     if not ok then
         logger.err("BookloreSync Database: Bind failed in markBookmarkSynced:", err)
         stmt:close()
@@ -3112,7 +3204,7 @@ function Database:markBookmarkSynced(book_cache_id, datetime, server_id)
     end
     local res = stmt:step()
     stmt:close()
-    return res == sqlite3.DONE
+    return res == SQ3.DONE or res == SQ3.OK
 end
 
 --[[-- Add a bookmark to the pending queue for retry. --]]
@@ -3121,31 +3213,41 @@ function Database:addPendingBookmark(book_cache_id, book_id, datetime, payload)
         logger.err("BookloreSync Database: addPendingBookmark called with missing args")
         return false
     end
-    if type(book_cache_id) ~= "number" then
+    book_cache_id = tonumber(book_cache_id)
+    -- book_id is nullable: nil means the Booklore ID is not yet known
+    book_id = book_id and tonumber(book_id) or nil
+    if not book_cache_id then
         logger.err("BookloreSync Database: addPendingBookmark: non-numeric book_cache_id")
         return false
     end
+
     local stmt = self.conn:prepare([[
-        INSERT OR IGNORE INTO pending_bookmarks
-            (book_cache_id, book_id, datetime, payload)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO pending_bookmarks
+            (book_cache_id, book_id, datetime, payload, retry_count, created_at)
+        VALUES (?, ?, ?, ?, 0, CAST(strftime('%s', 'now') AS INTEGER))
+        ON CONFLICT(book_cache_id, datetime) DO UPDATE SET
+            book_id       = excluded.book_id,
+            payload       = excluded.payload,
+            retry_count   = 0,
+            last_retry_at = NULL
     ]])
     if not stmt then
         logger.err("BookloreSync Database: Failed to prepare addPendingBookmark:", self.conn:errmsg())
         return false
     end
-    local ok, err = stmt:bind(1, book_cache_id)
-    if ok then ok, err = stmt:bind(2, book_id) end
-    if ok then ok, err = stmt:bind(3, datetime) end
-    if ok then ok, err = stmt:bind(4, payload) end
+
+    local ok, err = pcall(function()
+        stmt:bind(book_cache_id, book_id, tostring(datetime), tostring(payload))
+    end)
     if not ok then
         logger.err("BookloreSync Database: Bind failed in addPendingBookmark:", err)
         stmt:close()
         return false
     end
-    local res = stmt:step()
+
+    local result = stmt:step()
     stmt:close()
-    if res ~= sqlite3.DONE then
+    if result ~= SQ3.DONE and result ~= SQ3.OK then
         logger.err("BookloreSync Database: addPendingBookmark step failed:", self.conn:errmsg())
         return false
     end
@@ -3186,7 +3288,7 @@ function Database:deletePendingBookmark(id)
         logger.err("BookloreSync Database: Failed to prepare deletePendingBookmark:", self.conn:errmsg())
         return false
     end
-    local ok, err = stmt:bind(1, id)
+    local ok, err = pcall(function() stmt:bind(id) end)
     if not ok then
         logger.err("BookloreSync Database: Bind failed in deletePendingBookmark:", err)
         stmt:close()
@@ -3194,7 +3296,7 @@ function Database:deletePendingBookmark(id)
     end
     local res = stmt:step()
     stmt:close()
-    return res == sqlite3.DONE
+    return res == SQ3.DONE or res == SQ3.OK
 end
 
 --[[-- Increment retry_count and update last_retry_at for a pending bookmark. --]]
@@ -3210,7 +3312,7 @@ function Database:incrementBookmarkRetry(id)
         logger.err("BookloreSync Database: Failed to prepare incrementBookmarkRetry:", self.conn:errmsg())
         return false
     end
-    local ok, err = stmt:bind(1, id)
+    local ok, err = pcall(function() stmt:bind(id) end)
     if not ok then
         logger.err("BookloreSync Database: Bind failed in incrementBookmarkRetry:", err)
         stmt:close()
@@ -3218,8 +3320,8 @@ function Database:incrementBookmarkRetry(id)
     end
     local res = stmt:step()
     stmt:close()
-    return res == sqlite3.DONE
->>>>>>> origin/main
+    return res == SQ3.DONE or res == SQ3.OK
 end
 
 return Database
+

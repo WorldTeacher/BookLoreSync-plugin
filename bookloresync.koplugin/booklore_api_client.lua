@@ -1210,11 +1210,12 @@ function APIClient:submitBookmark(book_id, cfi, opts, username, password)
     end
 
     local body_tbl = {
-        bookId = tonumber(book_id),
-        cfi    = cfi,
+        bookId      = tonumber(book_id),
+        cfi         = cfi,
+        positionMs  = nil,
+        trackIndex  = nil,
+        title       = (opts.title and opts.title ~= "") and opts.title or nil,
     }
-    if opts.chapter_title and opts.chapter_title ~= "" then body_tbl.chapterTitle = opts.chapter_title end
-    if opts.notes         and opts.notes ~= ""         then body_tbl.notes        = opts.notes        end
 
     local body = json.encode(body_tbl)
     local headers = {

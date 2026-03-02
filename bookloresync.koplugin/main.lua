@@ -243,6 +243,11 @@ function BookloreSync:init()
     self.manual_sync_only              = self.settings:readSetting("manual_sync_only")              or false
     self.sync_mode                     = self.settings:readSetting("sync_mode") -- "automatic", "manual", or "custom"
 
+    -- Resume/wake-sync state (not persisted — reset each session)
+    self.last_auto_sync_time  = 0     -- unix timestamp of last auto-sync (cooldown guard)
+    self.needs_wake_sync      = false -- flagged by onResume; consumed by onNetworkConnected
+    self.wake_sync_scheduled  = false -- prevents duplicate scheduled wake syncs
+
     -- Migrate old settings to new preset system if needed
     if not self.sync_mode then
         if self.manual_sync_only then
@@ -3347,24 +3352,94 @@ function BookloreSync:onResume()
     if not self.is_enabled then
         return false
     end
-    
+
     self:logInfo("BookloreSync: Device resuming")
-    
-    if not self.manual_sync_only then
-        self:logInfo("BookloreSync: Attempting background sync on resume")
-        self:syncPendingSessions(true)
-        
-        if NetworkMgr:isConnected() then
-            self:logInfo("BookloreSync: Network available, checking for unmatched books")
-            self:resolveUnmatchedBooks(true) -- silent mode
+
+    -- Cooldown guard: skip auto-sync if we ran one less than 5 minutes ago.
+    -- Prevents hammering the server on rapid suspend/resume cycles (e.g. when
+    -- the user is navigating menus with sleep-timer enabled).
+    local now = os.time()
+    if self.last_auto_sync_time and (now - self.last_auto_sync_time) < 300 then
+        self:logInfo("BookloreSync: Skipping resume auto-sync (cooldown active, last run",
+                     (now - self.last_auto_sync_time), "s ago)")
+    else
+        self.last_auto_sync_time = now
+
+        if not self.manual_sync_only then
+            self:logInfo("BookloreSync: Attempting background sync on resume")
+            self:syncPendingSessions(true)
+
+            -- Flag a deferred wake-sync so the shelf can be updated once the
+            -- network is fully up.  If WiFi is already connected, schedule it
+            -- directly; otherwise onNetworkConnected will pick it up.
+            self.needs_wake_sync = true
+            if NetworkMgr:isConnected() then
+                self:logInfo("BookloreSync: WiFi already connected on resume, scheduling delayed wake sync")
+                self:_scheduleWakeSync()
+            end
+
+            self:logInfo("BookloreSync: Checking for unmatched books")
+            self:resolveUnmatchedBooks(true)
         end
     end
-    
+
     if self.ui and self.ui.document then
         self:logInfo("BookloreSync: Book is open, starting new session")
         self:startSession()
     end
-    
+
+    return false
+end
+
+--[[--
+Schedule a deferred shelf sync 15 seconds after wake.
+
+The delay avoids colliding with KOReader's own post-wake network
+activity (DNS, time sync, etc.).  A module-level flag prevents
+duplicate timers from stacking up.
+--]]
+function BookloreSync:_scheduleWakeSync()
+    if not self.needs_wake_sync then return end
+    if self.wake_sync_scheduled then
+        self:logInfo("BookloreSync: Wake sync already scheduled, skipping duplicate")
+        return
+    end
+
+    self.wake_sync_scheduled = true
+    self:logInfo("BookloreSync: Scheduling wake sync in 15 seconds")
+
+    UIManager:scheduleIn(15, function()
+        self.wake_sync_scheduled = false
+
+        if not self.needs_wake_sync then return end
+        if not self.is_enabled then
+            self:logInfo("BookloreSync: Wake sync cancelled (plugin disabled)")
+            self.needs_wake_sync = false
+            return
+        end
+        if not NetworkMgr:isConnected() then
+            self:logInfo("BookloreSync: Wake sync postponed (network disconnected)")
+            return
+        end
+
+        self.needs_wake_sync = false
+        self:logInfo("BookloreSync: Running delayed wake sync")
+        self:syncPendingSessions(true)
+    end)
+end
+
+--[[--
+Handler for when the network becomes available.
+
+If a wake-triggered sync was deferred because WiFi wasn't ready at
+resume time, kick it off now that we're connected.
+--]]
+function BookloreSync:onNetworkConnected()
+    if not self.is_enabled then return false end
+    if not self.needs_wake_sync then return false end
+
+    self:logInfo("BookloreSync: Network connected with wake sync pending — scheduling")
+    self:_scheduleWakeSync()
     return false
 end
 

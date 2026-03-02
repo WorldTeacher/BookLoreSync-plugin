@@ -247,7 +247,7 @@ function BookloreSync:init()
     self.booklore_shelf_name         = self.settings:readSetting("booklore_shelf_name")  or "KOReader"
     self.shelf_id                    = self.settings:readSetting("shelf_id")
     self.download_dir                = self.settings:readSetting("download_dir")
-                                       or require("datastorage"):getDataDir() .. "/sideloaded"
+                                       or self:_detectDefaultDownloadDir()
     self.auto_sync_shelf_on_resume   = self.settings:readSetting("auto_sync_shelf_on_resume")
     if self.auto_sync_shelf_on_resume == nil then
         self.auto_sync_shelf_on_resume = false  -- Default disabled
@@ -2235,6 +2235,90 @@ function BookloreSync:addToMainMenu(menu_items)
                     })
                 end,
             },
+            {
+                text_func = function()
+                    return T(_("Shelf name: %1"), self.booklore_shelf_name)
+                end,
+                help_text = _("Name of the Booklore shelf to sync. The shelf is created automatically if it does not exist."),
+                callback = function()
+                    local dialog
+                    dialog = InputDialog:new{
+                        title   = _("Booklore shelf name"),
+                        input   = self.booklore_shelf_name,
+                        buttons = {{
+                            {
+                                text     = _("Cancel"),
+                                callback = function() UIManager:close(dialog) end,
+                            },
+                            {
+                                text     = _("Save"),
+                                is_enter_default = true,
+                                callback = function()
+                                    local val = dialog:getInputText()
+                                    if val and val ~= "" then
+                                        self.booklore_shelf_name = val
+                                        self.settings:saveSetting("booklore_shelf_name", val)
+                                        -- Invalidate cached shelf_id so it is re-resolved
+                                        self.shelf_id = nil
+                                        self.settings:saveSetting("shelf_id", nil)
+                                        self.settings:flush()
+                                    end
+                                    UIManager:close(dialog)
+                                end,
+                            },
+                        }},
+                    }
+                    UIManager:show(dialog)
+                    dialog:onShowKeyboard()
+                end,
+            },
+            {
+                text_func = function()
+                    return T(_("Download dir: %1"), self.download_dir)
+                end,
+                help_text = _("Local directory where shelf books are downloaded. Detected automatically from device type; override here if needed."),
+                callback = function()
+                    local dialog
+                    dialog = InputDialog:new{
+                        title   = _("Download directory"),
+                        input   = self.download_dir,
+                        buttons = {{
+                            {
+                                text     = _("Cancel"),
+                                callback = function() UIManager:close(dialog) end,
+                            },
+                            {
+                                text     = _("Reset"),
+                                callback = function()
+                                    self.download_dir = self:_detectDefaultDownloadDir()
+                                    self.settings:saveSetting("download_dir", self.download_dir)
+                                    self.settings:flush()
+                                    UIManager:close(dialog)
+                                    UIManager:show(InfoMessage:new{
+                                        text = T(_("Reset to: %1"), self.download_dir),
+                                        timeout = 2,
+                                    })
+                                end,
+                            },
+                            {
+                                text     = _("Save"),
+                                is_enter_default = true,
+                                callback = function()
+                                    local val = dialog:getInputText()
+                                    if val and val ~= "" then
+                                        self.download_dir = val
+                                        self.settings:saveSetting("download_dir", val)
+                                        self.settings:flush()
+                                    end
+                                    UIManager:close(dialog)
+                                end,
+                            },
+                        }},
+                    }
+                    UIManager:show(dialog)
+                    dialog:onShowKeyboard()
+                end,
+            },
         },
     })
 
@@ -3773,6 +3857,27 @@ function BookloreSync:syncPendingBookmarks(silent)
         synced_count, failed_count
     ))
     return synced_count, failed_count
+end
+
+--[[--
+Detect a sensible default download directory for the current device.
+
+Tries well-known locations in order:
+  /mnt/onboard/Books  — Kobo internal storage
+  /sdcard/Books       — Android
+  /Books              — generic fallback
+
+@return string  Absolute path (directory may not yet exist)
+--]]
+function BookloreSync:_detectDefaultDownloadDir()
+    local lfs = require("libs/libkoreader-lfs")
+    if lfs.attributes("/mnt/onboard", "mode") == "directory" then
+        return "/mnt/onboard/Books"
+    elseif lfs.attributes("/sdcard", "mode") == "directory" then
+        return "/sdcard/Books"
+    else
+        return "/Books"
+    end
 end
 
 --[[--

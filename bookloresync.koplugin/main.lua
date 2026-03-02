@@ -3813,6 +3813,7 @@ function BookloreSync:syncPendingAnnotations(silent)
 
     local synced_count = 0
     local failed_count = 0
+    local skipped_count = 0
 
     for _, row in ipairs(pending) do
         self:logInfo("BookloreSync: Retrying pending annotation — id:", row.id,
@@ -3832,6 +3833,7 @@ function BookloreSync:syncPendingAnnotations(silent)
             book_id = bc and bc.book_id or nil
             if not book_id then
                 self:logInfo("BookloreSync: book_id still unknown for pending annotation id:", row.id, "— will retry later")
+                skipped_count = skipped_count + 1
                 goto continue_ann
             end
             self:logInfo("BookloreSync: Resolved book_id", book_id, "for pending annotation id:", row.id)
@@ -3847,6 +3849,7 @@ function BookloreSync:syncPendingAnnotations(silent)
             local cfi = payload.cfi
             if not cfi or cfi == "" then
                 self:logInfo("BookloreSync: Skipping pending highlight (no CFI available) — id:", row.id)
+                skipped_count = skipped_count + 1
                 goto continue_ann
             end
             ok, server_id = self.api:submitHighlight(
@@ -3863,6 +3866,7 @@ function BookloreSync:syncPendingAnnotations(silent)
             local cfi = payload.cfi
             if not cfi or cfi == "" then
                 self:logInfo("BookloreSync: Skipping pending in-book note (no CFI available) — id:", row.id)
+                skipped_count = skipped_count + 1
                 goto continue_ann
             end
             ok, server_id = self.api:submitInBookNote(
@@ -3909,8 +3913,8 @@ function BookloreSync:syncPendingAnnotations(silent)
         ::continue_ann::
     end
 
-    self:logInfo("BookloreSync: Pending annotations sync complete — synced:", synced_count, "failed:", failed_count)
-    return synced_count, failed_count
+    self:logInfo("BookloreSync: Pending annotations sync complete — synced:", synced_count, "failed:", failed_count, "skipped:", skipped_count)
+    return synced_count, failed_count, skipped_count
 end
 
 --[[--
@@ -4114,9 +4118,10 @@ function BookloreSync:syncPendingSessions(silent)
 
     -- ── Phase 2: Annotations ──────────────────────────────────────────────
     -- Same warm-cache benefit as Phase 1.
-    local ann_synced, ann_failed = self:syncPendingAnnotations(true)
-    ann_synced = tonumber(ann_synced) or 0
-    ann_failed = tonumber(ann_failed) or 0
+    local ann_synced, ann_failed, ann_skipped = self:syncPendingAnnotations(true)
+    ann_synced  = tonumber(ann_synced)  or 0
+    ann_failed  = tonumber(ann_failed)  or 0
+    ann_skipped = tonumber(ann_skipped) or 0
 
     -- ── Phase 2b: Bookmarks ───────────────────────────────────────────────
     local bm_synced, bm_failed = self:syncPendingBookmarks(true)
@@ -4139,11 +4144,22 @@ function BookloreSync:syncPendingSessions(silent)
                     parts[#parts + 1] = T(_("R: %1 synced"), ratings_synced)
                 end
             end
-            if ann_synced + ann_failed > 0 then
-                if ann_failed > 0 then
+            if ann_synced + ann_failed + ann_skipped > 0 then
+                if ann_failed > 0 and ann_skipped > 0 then
+                    parts[#parts + 1] = T(_("A: %1 synced, %2 failed, %3 skipped"), ann_synced, ann_failed, ann_skipped)
+                elseif ann_failed > 0 then
                     parts[#parts + 1] = T(_("A: %1 synced, %2 failed"), ann_synced, ann_failed)
+                elseif ann_skipped > 0 then
+                    parts[#parts + 1] = T(_("A: %1 synced, %2 skipped"), ann_synced, ann_skipped)
                 else
                     parts[#parts + 1] = T(_("A: %1 synced"), ann_synced)
+                end
+            end
+            if bm_synced + bm_failed > 0 then
+                if bm_failed > 0 then
+                    parts[#parts + 1] = T(_("B: %1 synced, %2 failed"), bm_synced, bm_failed)
+                else
+                    parts[#parts + 1] = T(_("B: %1 synced"), bm_synced)
                 end
             end
             local msg = #parts > 0 and table.concat(parts, "\n") or _("No pending items to sync")
@@ -4227,11 +4243,22 @@ function BookloreSync:syncPendingSessions(silent)
                 parts[#parts + 1] = T(_("R: %1 synced"), ratings_synced)
             end
         end
-        if ann_synced + ann_failed > 0 then
-            if ann_failed > 0 then
+        if ann_synced + ann_failed + ann_skipped > 0 then
+            if ann_failed > 0 and ann_skipped > 0 then
+                parts[#parts + 1] = T(_("A: %1 synced, %2 failed, %3 skipped"), ann_synced, ann_failed, ann_skipped)
+            elseif ann_failed > 0 then
                 parts[#parts + 1] = T(_("A: %1 synced, %2 failed"), ann_synced, ann_failed)
+            elseif ann_skipped > 0 then
+                parts[#parts + 1] = T(_("A: %1 synced, %2 skipped"), ann_synced, ann_skipped)
             else
                 parts[#parts + 1] = T(_("A: %1 synced"), ann_synced)
+            end
+        end
+        if bm_synced + bm_failed > 0 then
+            if bm_failed > 0 then
+                parts[#parts + 1] = T(_("B: %1 synced, %2 failed"), bm_synced, bm_failed)
+            else
+                parts[#parts + 1] = T(_("B: %1 synced"), bm_synced)
             end
         end
         if #parts > 0 then

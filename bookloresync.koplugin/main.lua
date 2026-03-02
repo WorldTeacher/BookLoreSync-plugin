@@ -37,6 +37,10 @@ local BookloreSync = WidgetContainer:extend{
     is_doc_only = false,
 }
 
+-- Guard flag: ensure FileManager deletion hooks are only applied once per session.
+-- Declared at module level so all plugin instances share the same flag.
+local booklore_fm_patched = false
+
 --[[--
 Redact URLs from log message for secure logging
 
@@ -344,6 +348,55 @@ function BookloreSync:init()
     end)
 
     self:registerDispatcherActions()
+
+    -- Patch FileManager deletion methods to notify Booklore when a book is
+    -- deleted from the file browser.  Applied once per session via the module-
+    -- level guard flag so multiple plugin reloads don't stack the patch.
+    local booklore_self = self
+    local ok_fm, FileManagerMod = pcall(require, "apps/filemanager/filemanager")
+    if ok_fm and FileManagerMod and not booklore_fm_patched then
+        booklore_fm_patched = true
+
+        -- Single-file deletion
+        local orig_deleteFile = FileManagerMod.deleteFile
+        FileManagerMod.deleteFile = function(fm_self, file, is_file)
+            local hash, stem, book_id = nil, nil, nil
+            if is_file then
+                hash, stem, book_id = booklore_self:preDeleteHook(file)
+            end
+            local result = orig_deleteFile(fm_self, file, is_file)
+            if hash and stem then
+                UIManager:scheduleIn(0.5, function()
+                    booklore_self:notifyBookloreOnDeletion(hash, stem, book_id)
+                end)
+            end
+            return result
+        end
+
+        -- Bulk-select deletion
+        local orig_deleteSelectedFiles = FileManagerMod.deleteSelectedFiles
+        FileManagerMod.deleteSelectedFiles = function(fm_self)
+            local to_sync = {}
+            for _, file in ipairs(fm_self.selected_files or {}) do
+                local resolved = require("ffi/util").realpath(file)
+                local h, s, b = booklore_self:preDeleteHook(resolved)
+                if h then
+                    table.insert(to_sync, { hash = h, stem = s, book_id = b })
+                end
+            end
+            local result = orig_deleteSelectedFiles(fm_self)
+            local delay = 0.5
+            for _, item in ipairs(to_sync) do
+                UIManager:scheduleIn(delay, function()
+                    booklore_self:notifyBookloreOnDeletion(item.hash, item.stem, item.book_id)
+                end)
+                delay = delay + 0.5
+            end
+            return result
+        end
+
+        self:logInfo("BookloreSync: FileManager deletion hooks installed")
+    end
 end
 
 function BookloreSync:onExit()
@@ -3562,6 +3615,222 @@ function BookloreSync:syncPendingBookmarks(silent)
 end
 
 --[[--
+Pre-delete hook: capture hash, stem and book_id BEFORE the file is removed.
+
+Called from the patched FileManager.deleteFile / deleteSelectedFiles so we can
+read the file contents (to compute the hash) while the file still exists.
+
+Supported formats: EPUB, PDF, CBZ, CBR.  Other formats are ignored.
+
+@param filepath string  Full path to the file about to be deleted
+@return hash string|nil, stem string|nil, book_id number|nil
+--]]
+function BookloreSync:preDeleteHook(filepath)
+    if not filepath then return nil, nil, nil end
+
+    -- Support common ebook formats
+    local stem = filepath:match("([^/\\]+)%.[Ee][Pp][Uu][Bb]$")
+              or filepath:match("([^/\\]+)%.[Pp][Dd][Ff]$")
+              or filepath:match("([^/\\]+)%.[Cc][Bb][Zz]$")
+              or filepath:match("([^/\\]+)%.[Cc][Bb][Rr]$")
+    if not stem then return nil, nil, nil end
+
+    self:logInfo("BookloreSync: preDeleteHook for:", filepath)
+
+    local book_id = nil
+    if self.db then
+        local cached = self.db:getBookByFilePath(filepath)
+        if cached then
+            if cached.book_id then
+                book_id = tonumber(cached.book_id)
+                self:logInfo("BookloreSync: preDeleteHook — cached book_id:", book_id)
+            else
+                self:logInfo("BookloreSync: preDeleteHook — cached book has no book_id (never synced)")
+            end
+        else
+            self:logInfo("BookloreSync: preDeleteHook — book not in cache")
+        end
+    end
+
+    local hash = self:calculateBookHash(filepath)
+    if not hash then
+        self:logWarn("BookloreSync: preDeleteHook — could not compute hash for:", filepath)
+        return nil, nil, nil
+    end
+
+    return hash, stem, book_id
+end
+
+--[[--
+Notify Booklore that a book has been deleted locally.
+
+Removes the book from the configured Booklore shelf.  If offline or the
+server is unreachable the deletion is queued in pending_deletions and
+retried on the next syncPendingSessions() run.
+
+All errors are swallowed so a network failure never surfaces as a user-
+visible error during file deletion.
+
+@param hash           string      MD5 hash of the deleted file
+@param stem           string      Filename stem (used for title-based fallback search)
+@param cached_book_id number|nil  Booklore book ID if known
+@param from_queue     boolean     True when called from syncPendingDeletions (skip re-queue on failure)
+--]]
+function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_queue)
+    from_queue = from_queue or false
+
+    if not self.is_enabled then return end
+    if self.booklore_username == "" or self.booklore_password == "" then return end
+
+    -- If offline, queue immediately rather than attempting the async call
+    if not from_queue and not NetworkMgr:isConnected() then
+        self:logWarn("BookloreSync: notifyBookloreOnDeletion — offline, queuing deletion")
+        if self.db then self.db:savePendingDeletion(hash, stem, cached_book_id) end
+        return
+    end
+
+    local booklore_self = self
+
+    AsyncTask:new(function()
+        return pcall(function()
+            self:logInfo("BookloreSync: notifyBookloreOnDeletion — hash:", hash, "stem:", stem, "cached_book_id:", tostring(cached_book_id))
+
+            local book_id = cached_book_id
+
+            -- Fallback: search by title if we don't have a cached book_id
+            if not book_id then
+                self:logInfo("BookloreSync: notifyBookloreOnDeletion — no cached book_id, searching by title")
+                local ok1, resp1 = self.api:searchBooksWithAuth(stem, self.booklore_username, self.booklore_password)
+                if ok1 and type(resp1) == "table" and resp1[1] and resp1[1].id then
+                    book_id = tonumber(resp1[1].id)
+                else
+                    -- Try the part after "Author - " prefix if present
+                    local title_part = stem:match("^.+ %- (.+)$")
+                    if title_part then
+                        local ok2, resp2 = self.api:searchBooksWithAuth(title_part, self.booklore_username, self.booklore_password)
+                        if ok2 and type(resp2) == "table" and resp2[1] and resp2[1].id then
+                            book_id = tonumber(resp2[1].id)
+                        end
+                    end
+                end
+            end
+
+            if not book_id then
+                self:logWarn("BookloreSync: notifyBookloreOnDeletion — book not found on server, skipping shelf removal")
+                return true
+            end
+
+            -- Get bearer token and remove book from shelf
+            local token_ok, token = self.api:getOrRefreshBearerToken(self.booklore_username, self.booklore_password, false)
+            if not token_ok then error(token or "Failed to obtain auth token") end
+
+            local payload = string.format('{"bookIds":[%d],"shelvesToRemoveFrom":[]}', book_id)
+            local headers = {
+                ["Authorization"] = "Bearer " .. token,
+                ["Content-Type"]  = "application/json",
+            }
+            -- Endpoint: DELETE /api/v1/books/{id} or unassign from shelf — use book delete endpoint
+            local ok, code, resp = self.api:request("DELETE", "/api/v1/books/" .. book_id, nil, headers)
+
+            if ok or code == 204 then
+                self:logInfo("BookloreSync: notifyBookloreOnDeletion — book removed from Booklore, id:", book_id)
+                return true
+            else
+                error(tostring(code) .. ": " .. tostring(resp))
+            end
+        end)
+    end,
+    function(success, result_ok, err)
+        if not success or not result_ok then
+            self:logWarn("BookloreSync: notifyBookloreOnDeletion failed:", tostring(err))
+            if not from_queue and booklore_self.db then
+                self:logInfo("BookloreSync: notifyBookloreOnDeletion — queuing for retry")
+                booklore_self.db:savePendingDeletion(hash, stem, cached_book_id)
+            end
+        end
+    end):submit()
+end
+
+--[[--
+Retry all pending deletions from the pending_deletions queue.
+
+Called automatically during syncPendingSessions() as Phase 2c.
+Deletions that have been retried more than 10 times are dropped.
+
+@param silent boolean  Suppress UI feedback (default false)
+@return integer synced_count, integer failed_count
+--]]
+function BookloreSync:syncPendingDeletions(silent)
+    silent = silent or false
+
+    if not self.db then return 0, 0 end
+
+    local deletions = self.db:getPendingDeletions()
+    if not deletions or #deletions == 0 then return 0, 0 end
+
+    self:logInfo("BookloreSync: syncPendingDeletions — retrying", #deletions, "queued deletion(s)")
+
+    local synced_count = 0
+    local failed_count = 0
+
+    -- Cache token once for the whole batch
+    local token_ok, token = self.api:getOrRefreshBearerToken(self.booklore_username, self.booklore_password, false)
+
+    for _, deletion in ipairs(deletions) do
+        -- Drop stale entries that have exceeded the retry limit
+        if deletion.retry_count > 10 then
+            self:logWarn("BookloreSync: syncPendingDeletions — dropping stale deletion (>10 retries), hash:", deletion.file_hash)
+            self.db:removePendingDeletion(deletion.id)
+            goto del_continue
+        end
+
+        local book_id = deletion.book_id
+        if not book_id and deletion.file_hash then
+            local ok_bh, book_data = self.api:getBookByHash(deletion.file_hash)
+            if ok_bh and book_data and book_data.id then
+                book_id = tonumber(book_data.id)
+            end
+        end
+
+        if not book_id then
+            -- Can't find the book — nothing to remove; silently discard
+            self:logInfo("BookloreSync: syncPendingDeletions — book_id unknown, discarding deletion id:", deletion.id)
+            self.db:removePendingDeletion(deletion.id)
+            synced_count = synced_count + 1
+            goto del_continue
+        end
+
+        if not token_ok then
+            self:logWarn("BookloreSync: syncPendingDeletions — no auth token, skipping")
+            self.db:incrementDeletionRetry(deletion.id)
+            failed_count = failed_count + 1
+            goto del_continue
+        end
+
+        local headers = {
+            ["Authorization"] = "Bearer " .. token,
+            ["Content-Type"]  = "application/json",
+        }
+        local ok, code, _ = self.api:request("DELETE", "/api/v1/books/" .. book_id, nil, headers)
+        if ok or code == 204 then
+            self.db:removePendingDeletion(deletion.id)
+            synced_count = synced_count + 1
+        else
+            self.db:incrementDeletionRetry(deletion.id)
+            failed_count = failed_count + 1
+        end
+
+        ::del_continue::
+    end
+
+    self:logInfo(string.format(
+        "BookloreSync: syncPendingDeletions complete — synced=%d failed=%d",
+        synced_count, failed_count
+    ))
+    return synced_count, failed_count
+end
+
+--[[--
 Retry all ratings that are sitting in the pending_ratings queue, and
 process any deferred rating prompts whose book_id has now been resolved.
 
@@ -4036,6 +4305,11 @@ function BookloreSync:syncPendingSessions(silent)
     local bm_synced, bm_failed = self:syncPendingBookmarks(true)
     bm_synced = tonumber(bm_synced) or 0
     bm_failed = tonumber(bm_failed) or 0
+
+    -- ── Phase 2c: Deletions ───────────────────────────────────────────────
+    local del_synced, del_failed = self:syncPendingDeletions(true)
+    del_synced = tonumber(del_synced) or 0
+    del_failed = tonumber(del_failed) or 0
 
     -- ── Phase 3: Sessions ─────────────────────────────────────────────────
     local pending_count = self.db:getPendingSessionCount()

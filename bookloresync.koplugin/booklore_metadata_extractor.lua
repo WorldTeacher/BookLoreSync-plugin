@@ -173,7 +173,8 @@ function BookloreMetadataExtractor:getHighlightsFromDocSettings(doc_settings)
 
     local highlights = {}
     for _, annotation in ipairs(annotations) do
-        if annotation.text then
+        -- Bookmarks share the same array but lack pos0/color — skip them here
+        if annotation.text and annotation.pos0 then
             table.insert(highlights, {
                 text     = annotation.text,
                 note     = annotation.note,
@@ -222,7 +223,8 @@ function BookloreMetadataExtractor:getHighlights(doc_path)
     
     local highlights = {}
     for _, annotation in ipairs(annotations) do
-        if annotation.text then
+        -- Bookmarks share the same array but lack pos0/color — skip them here
+        if annotation.text and annotation.pos0 then
             table.insert(highlights, {
                 text = annotation.text,
                 note = annotation.note,
@@ -277,8 +279,45 @@ function BookloreMetadataExtractor:getNotes(doc_path)
     return notes
 end
 
---[[--
-Get bookmarks for a document
+--[[--Get bookmarks from a live in-memory DocSettings object.
+
+Used when the caller already holds the live DocSettings (e.g. at
+onCloseDocument time, before KOReader flushes to the .sdr sidecar).
+
+@param doc_settings DocSettings object (already opened by the caller)
+@return table Array of bookmarks, empty table if nil or none
+--]]
+function BookloreMetadataExtractor:getBookmarksFromDocSettings(doc_settings)
+    if not doc_settings then
+        return {}
+    end
+
+    -- KOReader stores bookmarks in the same "annotations" array as highlights.
+    -- Bookmarks are distinguished by the absence of pos0/color/drawer.
+    local annotations = doc_settings:readSetting("annotations")
+    if not annotations or type(annotations) ~= "table" then
+        return {}
+    end
+
+    local result = {}
+    for _, entry in ipairs(annotations) do
+        if not entry.pos0 and not entry.color then
+            table.insert(result, {
+                -- entry.page is the XPointer string (same format as pos0 on highlights)
+                pos0     = entry.page,
+                pageno   = entry.pageno,
+                notes    = entry.text,   -- bookmark "text" is the auto-generated chapter label
+                datetime = entry.datetime,
+                chapter  = entry.chapter,
+            })
+        end
+    end
+
+    self:log("dbg", "Found", #result, "bookmarks (from live doc_settings)")
+    return result
+end
+
+--[[Get bookmarks for a document
 
 KOReader stores bookmarks in bookmarks array
 Each bookmark contains:
@@ -296,24 +335,28 @@ function BookloreMetadataExtractor:getBookmarks(doc_path)
     if not doc_settings then
         return {}
     end
-    
-    local bookmarks = doc_settings:readSetting("bookmarks")
-    if not bookmarks or type(bookmarks) ~= "table" then
+
+    -- KOReader stores bookmarks in the same "annotations" array as highlights.
+    -- Bookmarks are distinguished by the absence of pos0/color/drawer.
+    local annotations = doc_settings:readSetting("annotations")
+    if not annotations or type(annotations) ~= "table" then
         return {}
     end
-    
+
     local result = {}
-    for _, bookmark in ipairs(bookmarks) do
-        table.insert(result, {
-            page = bookmark.page,
-            notes = bookmark.notes,
-            datetime = bookmark.datetime,
-            chapter = bookmark.chapter,
-            pos0 = bookmark.pos0,
-            pos1 = bookmark.pos1,
-        })
+    for _, entry in ipairs(annotations) do
+        if not entry.pos0 and not entry.color then
+            table.insert(result, {
+                -- entry.page is the XPointer string (same format as pos0 on highlights)
+                pos0     = entry.page,
+                pageno   = entry.pageno,
+                notes    = entry.text,   -- bookmark "text" is the auto-generated chapter label
+                datetime = entry.datetime,
+                chapter  = entry.chapter,
+            })
+        end
     end
-    
+
     self:log("dbg", "Found", #result, "bookmarks")
     return result
 end

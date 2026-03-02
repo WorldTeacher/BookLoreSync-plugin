@@ -609,6 +609,10 @@ function Settings:buildAnnotationsMenu(parent)
                 keep_menu_open = true,
             },
             {
+                text = _("── Sync Trigger ──"),
+                enabled = false,
+            },
+            {
                 text = _("Upload on session end"),
                 help_text = _("Check for new highlights and notes each time a reading session ends. Only annotations not yet on the server will be sent."),
                 enabled_func = function()
@@ -652,6 +656,33 @@ function Settings:buildAnnotationsMenu(parent)
     }
 end
 
+function Settings:buildBookmarksMenu(parent)
+    return {
+        text = _("Bookmarks"),
+        help_text = _("Configure syncing of KOReader bookmarks (reading position markers) to Booklore."),
+        sub_item_table = {
+            {
+                text = _("Sync bookmarks"),
+                help_text = _("Upload KOReader bookmarks to Booklore. Bookmarks are deduplicated — already-synced entries are skipped."),
+                checked_func = function()
+                    return parent.bookmarks_sync_enabled
+                end,
+                callback = function()
+                    parent.bookmarks_sync_enabled = not parent.bookmarks_sync_enabled
+                    parent.settings:saveSetting("bookmarks_sync_enabled", parent.bookmarks_sync_enabled)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = parent.bookmarks_sync_enabled
+                            and _("Bookmark sync enabled")
+                            or  _("Bookmark sync disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+        },
+    }
+end
+
 function Settings:exportSettings(parent)
     local export_data = {
         is_enabled                    = parent.is_enabled,
@@ -671,6 +702,7 @@ function Settings:exportSettings(parent)
         highlights_notes_sync_enabled = parent.highlights_notes_sync_enabled,
         notes_destination             = parent.notes_destination,
         upload_strategy               = parent.upload_strategy,
+        bookmarks_sync_enabled        = parent.bookmarks_sync_enabled,
         auto_update_check             = parent.auto_update_check,
     }
 

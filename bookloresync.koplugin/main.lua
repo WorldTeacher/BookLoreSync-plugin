@@ -32,6 +32,36 @@ local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+-- AsyncTask: use the native KOReader background-thread implementation when
+-- available (KOReader >= ~2024); fall back to a UIManager-scheduled shim that
+-- keeps the same API but runs the worker on the main thread via a deferred
+-- 0-second timer.  Both paths call callback(ok, ...) on the UI thread.
+local AsyncTask
+do
+    local ok, mod = pcall(require, "ui/task")
+    if ok then
+        AsyncTask = mod
+    else
+        AsyncTask = {
+            new = function(_, background_func, callback_func)
+                return {
+                    submit = function(_self)
+                        UIManager:scheduleIn(0.01, function()
+                            local results = { pcall(background_func) }
+                            local task_ok = table.remove(results, 1)
+                            if callback_func then
+                                UIManager:nextTick(function()
+                                    callback_func(task_ok, table.unpack(results))
+                                end)
+                            end
+                        end)
+                    end
+                }
+            end
+        }
+    end
+end
+
 local BookloreSync = WidgetContainer:extend{
     name = "booklore",
     is_doc_only = false,
@@ -3241,21 +3271,6 @@ function BookloreSync:onCloseDocument()
 
     self:logInfo("BookloreSync: Document closing")
 
-    -- DEBUG: dump entire doc_settings to log
-    if self.ui and self.ui.doc_settings then
-        local ok_dump, dump_str = pcall(function()
-            local json = require("json")
-            return json.encode(self.ui.doc_settings.data)
-        end)
-        if ok_dump then
-            self:logInfo("BookloreSync: [DEBUG] doc_settings.data =", dump_str)
-        else
-            self:logInfo("BookloreSync: [DEBUG] doc_settings dump failed:", dump_str)
-        end
-    else
-        self:logInfo("BookloreSync: [DEBUG] doc_settings is nil at close")
-    end
-
     local pre_file_path = self.current_session and self.current_session.file_path
     local pre_file_hash = self.current_session and self.current_session.file_hash
     local pre_book_id   = self.current_session and self.current_session.book_id
@@ -4022,7 +4037,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     end
 
     self.sync_in_progress = true
-    self:logInfo("BookloreSync: syncFromBookloreShelf — starting")
+    self:logInfo("BookloreSync: syncFromBookloreShelf — starting AsyncTask sync")
 
     local info_msg
     if not silent and not self.silent_messages then
@@ -4034,6 +4049,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     end
 
     AsyncTask:new(function()
+        -- Worker: runs on background thread (or deferred on main thread in fallback)
         return pcall(function()
             -- Ensure we have the shelf ID
             local shelf_ok, shelf_id = self.api:getOrCreateShelf(
@@ -4074,15 +4090,17 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                     local filename = self:_generateFilename(book)
                     local filepath = self.download_dir .. "/" .. filename
 
-                    -- Notify UI (throttled)
-                    if i % 10 == 0 or i == total then
-                        UIManager:scheduleIn(0, function()
-                            if info_msg then
-                                info_msg.text = T(_("Syncing shelf: %1 / %2"), i, total)
-                                UIManager:forceRePaint()
+                    -- Update progress UI safely from background thread
+                    UIManager:scheduleIn(0, function()
+                        if info_msg then
+                            if lfs.attributes(filepath, "mode") == "file" then
+                                info_msg.text = T(_("Skipping: %1 (%2 of %3)"), book.title or "Unknown", i, total)
+                            else
+                                info_msg.text = T(_("Downloading: %1 (%2 of %3)"), book.title or "Unknown", i, total)
                             end
-                        end)
-                    end
+                            UIManager:forceRePaint()
+                        end
+                    end)
 
                     if lfs.attributes(filepath, "mode") == "file" then
                         -- Already present — ensure cache entry exists
@@ -4149,13 +4167,21 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             )
         end)
     end,
-    function(success, result_ok, inner_ok, message)
+    function(task_ok, inner_ok, message)
+        -- Callback: always runs on the UI thread
         if info_msg then UIManager:close(info_msg) end
         self.sync_in_progress = false
 
-        local final_ok  = success and result_ok and inner_ok
-        local final_msg = final_ok and message
-                          or T(_("Sync failed: %1"), tostring(message or "unknown error"))
+        local final_ok  = task_ok and inner_ok
+        local final_msg
+        if final_ok then
+            final_msg = message
+        else
+            local err_str = (type(message) == "string" and message)
+                         or (type(inner_ok) == "string" and inner_ok)
+                         or "unknown error"
+            final_msg = T(_("Sync failed: %1"), err_str)
+        end
 
         if not silent and not self.silent_messages then
             UIManager:show(InfoMessage:new{ text = final_msg, timeout = 5 })
@@ -4188,6 +4214,7 @@ function BookloreSync:_generateFilename(book)
     return "BookID_" .. tostring(book.id) .. "." .. extension
 end
 
+--[[--
 Called from the patched FileManager.deleteFile / deleteSelectedFiles so we can
 read the file contents (to compute the hash) while the file still exists.
 
@@ -4235,9 +4262,12 @@ end
 --[[--
 Notify Booklore that a book has been deleted locally.
 
-Removes the book from the configured Booklore shelf.  If offline or the
-server is unreachable the deletion is queued in pending_deletions and
-retried on the next syncPendingSessions() run.
+Unassigns the book from the configured Booklore shelf via
+POST /api/v1/books/shelves with shelvesToUnassign=[shelf_id].
+The book record itself is NOT deleted from Booklore.
+
+If offline or the server is unreachable the operation is queued in
+pending_deletions and retried on the next syncPendingSessions() run.
 
 All errors are swallowed so a network failure never surfaces as a user-
 visible error during file deletion.
@@ -4262,8 +4292,8 @@ function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_
 
     local booklore_self = self
 
-    AsyncTask:new(function()
-        return pcall(function()
+    UIManager:scheduleIn(0, function()
+        local ok, err = pcall(function()
             self:logInfo("BookloreSync: notifyBookloreOnDeletion — hash:", hash, "stem:", stem, "cached_book_id:", tostring(cached_book_id))
 
             local book_id = cached_book_id
@@ -4288,45 +4318,50 @@ function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_
 
             if not book_id then
                 self:logWarn("BookloreSync: notifyBookloreOnDeletion — book not found on server, skipping shelf removal")
-                return true
+                return
             end
 
-            -- Get bearer token and remove book from shelf
+            -- Get bearer token and unassign book from shelf
             local token_ok, token = self.api:getOrRefreshBearerToken(self.booklore_username, self.booklore_password, false)
             if not token_ok then error(token or "Failed to obtain auth token") end
 
-            local payload = string.format('{"bookIds":[%d],"shelvesToRemoveFrom":[]}', book_id)
+            local shelf_id = self.shelf_id
+            if not shelf_id then error("No shelf_id configured — cannot unassign book from shelf") end
+
             local headers = {
                 ["Authorization"] = "Bearer " .. token,
                 ["Content-Type"]  = "application/json",
             }
-            -- Endpoint: DELETE /api/v1/books/{id} or unassign from shelf — use book delete endpoint
-            local ok, code, resp = self.api:request("DELETE", "/api/v1/books/" .. book_id, nil, headers)
+            local body = {
+                bookIds           = json.util.InitArray({ book_id }),
+                shelvesToAssign   = json.util.InitArray({}),
+                shelvesToUnassign = json.util.InitArray({ shelf_id }),
+            }
+            local req_ok, code, resp = self.api:request("POST", "/api/v1/books/shelves", body, headers)
 
-            if ok or code == 204 then
-                self:logInfo("BookloreSync: notifyBookloreOnDeletion — book removed from Booklore, id:", book_id)
-                return true
+            if req_ok or code == 200 then
+                self:logInfo("BookloreSync: notifyBookloreOnDeletion — book unassigned from shelf, id:", book_id)
             else
                 error(tostring(code) .. ": " .. tostring(resp))
             end
         end)
-    end,
-    function(success, result_ok, err)
-        if not success or not result_ok then
+        if not ok then
             self:logWarn("BookloreSync: notifyBookloreOnDeletion failed:", tostring(err))
             if not from_queue and booklore_self.db then
                 self:logInfo("BookloreSync: notifyBookloreOnDeletion — queuing for retry")
                 booklore_self.db:savePendingDeletion(hash, stem, cached_book_id)
             end
         end
-    end):submit()
+    end)
 end
 
 --[[--
-Retry all pending deletions from the pending_deletions queue.
+Retry all pending shelf-unassignments from the pending_deletions queue.
 
 Called automatically during syncPendingSessions() as Phase 2c.
-Deletions that have been retried more than 10 times are dropped.
+Each entry unassigns the book from the configured shelf via
+POST /api/v1/books/shelves.  The book record itself is NOT deleted.
+Entries retried more than 10 times are dropped.
 
 @param silent boolean  Suppress UI feedback (default false)
 @return integer synced_count, integer failed_count
@@ -4378,12 +4413,25 @@ function BookloreSync:syncPendingDeletions(silent)
             goto del_continue
         end
 
+        local shelf_id = self.shelf_id
+        if not shelf_id then
+            self:logWarn("BookloreSync: syncPendingDeletions — no shelf_id configured, cannot unassign book, skipping")
+            self.db:incrementDeletionRetry(deletion.id)
+            failed_count = failed_count + 1
+            goto del_continue
+        end
+
         local headers = {
             ["Authorization"] = "Bearer " .. token,
             ["Content-Type"]  = "application/json",
         }
-        local ok, code, _ = self.api:request("DELETE", "/api/v1/books/" .. book_id, nil, headers)
-        if ok or code == 204 then
+        local body = {
+            bookIds           = json.util.InitArray({ book_id }),
+            shelvesToAssign   = json.util.InitArray({}),
+            shelvesToUnassign = json.util.InitArray({ shelf_id }),
+        }
+        local ok, code, _ = self.api:request("POST", "/api/v1/books/shelves", body, headers)
+        if ok or code == 200 then
             self.db:removePendingDeletion(deletion.id)
             synced_count = synced_count + 1
         else

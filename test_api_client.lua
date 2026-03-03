@@ -217,6 +217,27 @@ function APIClient:_normalizeBookObject(book)
     return book
 end
 
+function APIClient:_normalizeShelfBookObject(book)
+    if not book or type(book) ~= "table" then return book end
+
+    if book.metadata and type(book.metadata) == "table" then
+        -- First author as scalar string
+        if book.metadata.authors and type(book.metadata.authors) == "table"
+           and #book.metadata.authors > 0 then
+            book.author = book.metadata.authors[1]
+        end
+        book.isbn10 = book.isbn10 or book.metadata.isbn10
+        book.isbn13 = book.isbn13 or book.metadata.isbn13
+    end
+
+    -- bookType → extension (lowercase)
+    if book.bookType and not book.extension then
+        book.extension = book.bookType:lower()
+    end
+
+    return book
+end
+
 -- ── Test harness ─────────────────────────────────────────────────────────────
 
 local pass, fail = 0, 0
@@ -400,6 +421,75 @@ local book5 = { id = 5, metadata = { isbn13 = "9780743273565" } }
 local norm5 = client:_normalizeBookObject(book5)
 check("partial metadata: isbn13 promoted", norm5.isbn13, "9780743273565")
 check("partial metadata: isbn10 nil",      norm5.isbn10, nil)
+
+-- ── _normalizeShelfBookObject ─────────────────────────────────────────────────
+
+print("\n=== _normalizeShelfBookObject ===")
+
+-- nil / non-table passthrough
+check("nil input → nil",
+    client:_normalizeShelfBookObject(nil), nil)
+check("string input → string",
+    client:_normalizeShelfBookObject("hello"), "hello")
+
+-- author promoted from metadata.authors[1]
+local sb1 = { id = 1, metadata = { authors = { "Frank Herbert", "Other" } } }
+local ns1 = client:_normalizeShelfBookObject(sb1)
+check("first author promoted",         ns1.author, "Frank Herbert")
+check("original id preserved",         ns1.id, 1)
+
+-- empty authors array → no author promoted
+local sb2 = { id = 2, metadata = { authors = {} } }
+local ns2 = client:_normalizeShelfBookObject(sb2)
+check("empty authors → author nil",    ns2.author, nil)
+
+-- no authors key → no author promoted
+local sb3 = { id = 3, metadata = { isbn10 = "0451524934" } }
+local ns3 = client:_normalizeShelfBookObject(sb3)
+check("no authors key → author nil",   ns3.author, nil)
+
+-- isbn10 / isbn13 promoted from metadata
+local sb4 = { id = 4, metadata = { isbn10 = "0451524934", isbn13 = "9780451524935" } }
+local ns4 = client:_normalizeShelfBookObject(sb4)
+check("isbn10 promoted from metadata", ns4.isbn10, "0451524934")
+check("isbn13 promoted from metadata", ns4.isbn13, "9780451524935")
+
+-- existing isbn10/isbn13 are NOT overwritten
+local sb5 = {
+    id = 5, isbn10 = "kept10", isbn13 = "kept13",
+    metadata = { isbn10 = "ignored10", isbn13 = "ignored13" }
+}
+local ns5 = client:_normalizeShelfBookObject(sb5)
+check("existing isbn10 not overwritten", ns5.isbn10, "kept10")
+check("existing isbn13 not overwritten", ns5.isbn13, "kept13")
+
+-- bookType → extension (lowercase), when extension absent
+local sb6 = { id = 6, bookType = "EPUB" }
+local ns6 = client:_normalizeShelfBookObject(sb6)
+check("bookType EPUB → extension epub", ns6.extension, "epub")
+
+local sb7 = { id = 7, bookType = "PDF" }
+local ns7 = client:_normalizeShelfBookObject(sb7)
+check("bookType PDF → extension pdf",   ns7.extension, "pdf")
+
+-- bookType does NOT overwrite existing extension
+local sb8 = { id = 8, bookType = "EPUB", extension = "pdf" }
+local ns8 = client:_normalizeShelfBookObject(sb8)
+check("existing extension not overwritten", ns8.extension, "pdf")
+
+-- no metadata at all → safe, no crash
+local sb9 = { id = 9, title = "Bare Book" }
+local ns9 = client:_normalizeShelfBookObject(sb9)
+check("no metadata → author nil",     ns9.author, nil)
+check("no metadata → isbn10 nil",     ns9.isbn10, nil)
+check("no metadata → isbn13 nil",     ns9.isbn13, nil)
+check("no metadata → no crash",       ns9.id,     9)
+
+-- metadata is a non-table → safe, no crash
+local sb10 = { id = 10, metadata = "string_meta" }
+local ns10 = client:_normalizeShelfBookObject(sb10)
+check("metadata string → no crash",   ns10.id, 10)
+check("metadata string → author nil", ns10.author, nil)
 
 -- ── Results ───────────────────────────────────────────────────────────────────
 

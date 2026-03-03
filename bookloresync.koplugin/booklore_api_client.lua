@@ -1375,7 +1375,7 @@ function APIClient:getOrCreateShelf(name, username, password)
 
     -- Create it
     self:logInfo("BookloreSync API: Shelf not found, creating:", name)
-    local body = json.encode({ name = name, icon = "📚", iconType = "PRIME_NG" })
+   local body = json.encode({ name = name, icon = "pi pi-shield", iconType = "PRIME_NG", publicShelf = true })
     local create_headers = {
         ["Authorization"] = "Bearer " .. token,
         ["Content-Type"]  = "application/json",

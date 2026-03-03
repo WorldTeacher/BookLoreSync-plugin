@@ -3462,5 +3462,56 @@ function Database:incrementDeletionRetry(deletion_id)
     return res == SQ3.DONE or res == SQ3.OK
 end
 
+--[[--
+Begins a SQLite transaction.
+@return boolean true on success
+--]]
+function Database:beginTransaction()
+    if not self.conn then
+        logger.err("BookloreSync Database: beginTransaction called with no connection")
+        return false
+    end
+    local ok, err = pcall(function() self.conn:exec("BEGIN") end)
+    if not ok then
+        logger.err("BookloreSync Database: beginTransaction failed:", err)
+        return false
+    end
+    return true
+end
+
+--[[--
+Commits the current SQLite transaction.
+@return boolean true on success
+--]]
+function Database:commit()
+    if not self.conn then
+        logger.err("BookloreSync Database: commit called with no connection")
+        return false
+    end
+    local ok, err = pcall(function() self.conn:exec("COMMIT") end)
+    if not ok then
+        logger.err("BookloreSync Database: commit failed:", err)
+        return false
+    end
+    return true
+end
+
+--[[--
+Rolls back the current SQLite transaction.
+@return boolean true on success
+--]]
+function Database:rollback()
+    if not self.conn then
+        logger.err("BookloreSync Database: rollback called with no connection")
+        return false
+    end
+    local ok, err = pcall(function() self.conn:exec("ROLLBACK") end)
+    if not ok then
+        logger.err("BookloreSync Database: rollback failed:", err)
+        return false
+    end
+    return true
+end
+
 return Database
 

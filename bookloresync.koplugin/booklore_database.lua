@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 20,  -- Current database schema version
+    VERSION = 21,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -541,6 +541,11 @@ Database.migrations = {
             ON pending_deletions(file_hash)
         ]],
     },
+
+    -- Migration 21: Per-book tracking toggle.
+    -- Add tracking_enabled column to book_cache to allow skipping specific
+    -- books from session/annotation/rating uploads. Defaults to 1 (enabled).
+    [21] = {},
 }
 
 -- Post-migration hooks: Lua functions run after the SQL transaction commits.
@@ -572,6 +577,31 @@ Database.migration_hooks = {
             logger.info("BookloreSync Database: Migration 17 hook: hardcover_id already exists, skipping ALTER")
         end
         db.conn:exec("CREATE INDEX IF NOT EXISTS idx_book_cache_hardcover_id ON book_cache(hardcover_id)")
+        return true
+    end,
+    -- Migration 21: Add tracking_enabled to book_cache if not already present.
+    -- Default value is 1 (enabled). This allows per-book opt-out of syncing.
+    [21] = function(db)
+        local has_col = false
+        local info = db.conn:prepare("PRAGMA table_info(book_cache)")
+        if info then
+            for row in info:rows() do
+                if row[2] == "tracking_enabled" then
+                    has_col = true
+                    break
+                end
+            end
+            info:close()
+        end
+        if not has_col then
+            local res = db.conn:exec("ALTER TABLE book_cache ADD COLUMN tracking_enabled INTEGER DEFAULT 1")
+            if res ~= SQ3.OK then
+                logger.err("BookloreSync Database: Migration 21 hook: failed to add tracking_enabled:", db.conn:errmsg())
+                return false
+            end
+        else
+            logger.info("BookloreSync Database: Migration 21 hook: tracking_enabled already exists, skipping ALTER")
+        end
         return true
     end,
     -- Migration 10: copy all settings from booklore.lua into plugin_settings,
@@ -3511,6 +3541,61 @@ function Database:rollback()
         return false
     end
     return true
+end
+
+-- ── Per-book tracking toggle ──────────────────────────────────────────────────
+
+--[[--
+Set the tracking_enabled flag for a book identified by its file path.
+
+@param file_path string   Absolute path to the book file
+@param enabled   boolean  true = track (default), false = skip uploads
+@return boolean success
+--]]
+function Database:setBookTracking(file_path, enabled)
+    if not file_path then return false end
+    local val = enabled and 1 or 0
+    local stmt = self.conn:prepare([[
+        UPDATE book_cache SET tracking_enabled = ? WHERE file_path = ?
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare setBookTracking:", self.conn:errmsg())
+        return false
+    end
+    local ok, err = stmt:bind(1, val)
+    if ok then ok, err = stmt:bind(2, file_path) end
+    if not ok then
+        logger.err("BookloreSync Database: Bind failed in setBookTracking:", err)
+        stmt:close()
+        return false
+    end
+    local res = stmt:step()
+    stmt:close()
+    return res == SQ3.DONE or res == SQ3.OK
+end
+
+--[[--
+Check if tracking is enabled for a book identified by its file path.
+Returns true if the book is not yet in book_cache (default = enabled).
+
+@param file_path string  Absolute path to the book file
+@return boolean  true = track, false = skip
+--]]
+function Database:isBookTrackingEnabled(file_path)
+    if not file_path then return true end
+    local stmt = self.conn:prepare([[
+        SELECT tracking_enabled FROM book_cache WHERE file_path = ?
+    ]])
+    if not stmt then return true end
+    local ok, err = stmt:bind(1, file_path)
+    if not ok then
+        stmt:close()
+        return true
+    end
+    local row = stmt:first_row()
+    stmt:close()
+    if not row then return true end  -- not in cache yet → track by default
+    return tonumber(row[1]) ~= 0
 end
 
 return Database

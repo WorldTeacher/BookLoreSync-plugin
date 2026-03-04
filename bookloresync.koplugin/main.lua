@@ -2128,100 +2128,102 @@ function BookloreSync:addToMainMenu(menu_items)
             -- Bookmarks submenu
             Settings:buildBookmarksMenu(self),
 
-            -- ── Sync Triggers ────────────────────────────────────────────────
+            -- Sync Triggers submenu
             {
-                text = _("── Sync Triggers ──"),
-                enabled = false,
-            },
-            {
-                text = _("Automatic (sync on suspend + WiFi)"),
-                help_text = _("Automatically sync sessions when device suspends. Enables WiFi and attempts connection before syncing."),
-                checked_func = function()
-                    return self.sync_mode == "automatic"
-                end,
-                callback = function()
-                    self:setSyncMode("automatic")
-                    UIManager:show(InfoMessage:new{
-                        text = _("Sync mode set to Automatic"),
-                        timeout = 2,
-                    })
-                end,
-                keep_menu_open = true,
-            },
-            {
-                text = _("Manual only (cache everything)"),
-                help_text = _("Cache all sessions and prevent automatic syncing. Use 'Sync Pending Now' when ready to upload."),
-                checked_func = function()
-                    return self.sync_mode == "manual"
-                end,
-                callback = function()
-                    self:setSyncMode("manual")
-                    UIManager:show(InfoMessage:new{
-                        text = _("Sync mode set to Manual only"),
-                        timeout = 2,
-                    })
-                end,
-                keep_menu_open = true,
-            },
-            {
-                text = _("Custom"),
-                help_text = _("Configure individual sync options manually."),
-                checked_func = function()
-                    return self.sync_mode == "custom"
-                end,
-                callback = function()
-                    self:setSyncMode("custom")
-                    UIManager:show(InfoMessage:new{
-                        text = _("Sync mode set to Custom"),
-                        timeout = 2,
-                    })
-                end,
-                keep_menu_open = true,
-            },
-            {
-                text = _("Custom Options:"),
-                enabled_func = function()
-                    return self.sync_mode == "custom"
-                end,
-                enabled = false,
-            },
-            {
-                text = _("  Auto-sync on suspend"),
-                help_text = _("Automatically sync the current reading session and all pending sessions when the device suspends."),
-                enabled_func = function()
-                    return self.sync_mode == "custom"
-                end,
-                checked_func = function()
-                    return self.force_push_session_on_suspend
-                end,
-                callback = function()
-                    self.force_push_session_on_suspend = not self.force_push_session_on_suspend
-                    self.settings:saveSetting("force_push_session_on_suspend", self.force_push_session_on_suspend)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.force_push_session_on_suspend and _("Auto-sync on suspend enabled") or _("Auto-sync on suspend disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("  Connect WiFi on suspend"),
-                help_text = _("Automatically enable WiFi and attempt to connect when the device suspends. Waits up to 15 seconds for connection."),
-                enabled_func = function()
-                    return self.sync_mode == "custom"
-                end,
-                checked_func = function()
-                    return self.connect_network_on_suspend
-                end,
-                callback = function()
-                    self.connect_network_on_suspend = not self.connect_network_on_suspend
-                    self.settings:saveSetting("connect_network_on_suspend", self.connect_network_on_suspend)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.connect_network_on_suspend and _("Connect WiFi on suspend enabled") or _("Connect WiFi on suspend disabled"),
-                        timeout = 2,
-                    })
-                end,
+                text = _("Sync Triggers"),
+                help_text = _("Choose when sessions are automatically synced to the server."),
+                sub_item_table = {
+                    {
+                        text = _("Automatic (sync on suspend + WiFi)"),
+                        help_text = _("Automatically sync sessions when device suspends. Enables WiFi and attempts connection before syncing."),
+                        checked_func = function()
+                            return self.sync_mode == "automatic"
+                        end,
+                        callback = function()
+                            self:setSyncMode("automatic")
+                            UIManager:show(InfoMessage:new{
+                                text = _("Sync mode set to Automatic"),
+                                timeout = 2,
+                            })
+                        end,
+                        keep_menu_open = true,
+                    },
+                    {
+                        text = _("Manual only (cache everything)"),
+                        help_text = _("Cache all sessions and prevent automatic syncing. Use 'Sync Pending Now' when ready to upload."),
+                        checked_func = function()
+                            return self.sync_mode == "manual"
+                        end,
+                        callback = function()
+                            self:setSyncMode("manual")
+                            UIManager:show(InfoMessage:new{
+                                text = _("Sync mode set to Manual only"),
+                                timeout = 2,
+                            })
+                        end,
+                        keep_menu_open = true,
+                    },
+                    {
+                        text = _("Custom"),
+                        help_text = _("Configure individual sync options manually."),
+                        checked_func = function()
+                            return self.sync_mode == "custom"
+                        end,
+                        callback = function()
+                            self:setSyncMode("custom")
+                            UIManager:show(InfoMessage:new{
+                                text = _("Sync mode set to Custom"),
+                                timeout = 2,
+                            })
+                        end,
+                        keep_menu_open = true,
+                    },
+                    {
+                        text = _("Custom Options:"),
+                        enabled_func = function()
+                            return self.sync_mode == "custom"
+                        end,
+                        enabled = false,
+                    },
+                    {
+                        text = _("  Auto-sync on suspend"),
+                        help_text = _("Automatically sync the current reading session and all pending sessions when the device suspends."),
+                        enabled_func = function()
+                            return self.sync_mode == "custom"
+                        end,
+                        checked_func = function()
+                            return self.force_push_session_on_suspend
+                        end,
+                        callback = function()
+                            self.force_push_session_on_suspend = not self.force_push_session_on_suspend
+                            self.settings:saveSetting("force_push_session_on_suspend", self.force_push_session_on_suspend)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.force_push_session_on_suspend and _("Auto-sync on suspend enabled") or _("Auto-sync on suspend disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                    {
+                        text = _("  Connect WiFi on suspend"),
+                        help_text = _("Automatically enable WiFi and attempt to connect when the device suspends. Waits up to 15 seconds for connection."),
+                        enabled_func = function()
+                            return self.sync_mode == "custom"
+                        end,
+                        checked_func = function()
+                            return self.connect_network_on_suspend
+                        end,
+                        callback = function()
+                            self.connect_network_on_suspend = not self.connect_network_on_suspend
+                            self.settings:saveSetting("connect_network_on_suspend", self.connect_network_on_suspend)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.connect_network_on_suspend and _("Connect WiFi on suspend enabled") or _("Connect WiFi on suspend disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                },
             },
         },
     })
@@ -2557,6 +2559,29 @@ function BookloreSync:addToMainMenu(menu_items)
         },
     })
     
+    table.insert(base_menu, {
+        text = _("Hardcover"),
+        help_text = _("Configure Hardcover.app integration and sync book metadata."),
+        sub_item_table = {
+            {
+                text = _("Configure Hardcover Account"),
+                help_text = _("Load your Hardcover API token from the hardcover.token file in the plugin folder. Create the file and paste your token into it (get it from hardcover.app → Profile → API), then tap here to load it."),
+                keep_menu_open = true,
+                callback = function()
+                    Settings:configureHardcoverToken(self)
+                end,
+            },
+            {
+                text = _("Request book metadata from BookLore"),
+                help_text = _("Fetch metadata from the Booklore server for every matched book and store any Hardcover book IDs returned. For books without a Hardcover ID in Booklore, searches Hardcover by ISBN or title and lets you select the correct match."),
+                keep_menu_open = true,
+                callback = function()
+                    self:fetchAndStoreHardcoverIds()
+                end,
+            },
+        },
+    })
+
     table.insert(base_menu, Settings:buildPreferencesMenu(self))
     
     table.insert(base_menu, {
@@ -2591,22 +2616,6 @@ function BookloreSync:addToMainMenu(menu_items)
                 keep_menu_open = true,
                 callback = function()
                     self:clearUpdateCache()
-                end,
-            },
-        },
-    })
-
-    -- Debug menu
-    table.insert(base_menu, {
-        text = _("Debug"),
-        help_text = _("Developer tools and diagnostics."),
-        sub_item_table = {
-            {
-                text = _("Request book metadata from BookLore"),
-                help_text = _("Fetch metadata from the Booklore server for every matched book and store any Hardcover book IDs returned."),
-                keep_menu_open = true,
-                callback = function()
-                    self:fetchAndStoreHardcoverIds()
                 end,
             },
         },

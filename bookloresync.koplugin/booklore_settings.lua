@@ -415,14 +415,6 @@ function Settings:buildAuthMenu(parent)
                 end,
             },
             {
-                text = _("Configure Hardcover Account"),
-                help_text = _("Load your Hardcover API token from the hardcover.token file in the plugin folder. Create the file and paste your token into it (get it from hardcover.app → Profile → API), then tap here to load it."),
-                keep_menu_open = true,
-                callback = function()
-                    self:configureHardcoverToken(parent)
-                end,
-            },
-            {
                 text = _("Test Connection"),
                 help_text = _("Test the connection to your Booklore server and verify both KOReader and Booklore credentials. If Booklore login succeeds, the bearer token will be cached."),
                 enabled_func = function()

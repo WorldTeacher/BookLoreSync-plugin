@@ -2072,6 +2072,8 @@ function BookloreSync:fileDialogToggleTracking(file_path)
         })
     end
 end
+
+function BookloreSync:addToMainMenu(menu_items)
     local base_menu = {}
     
     table.insert(base_menu, {

@@ -2629,7 +2629,7 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("Request book metadata from BookLore"),
+                text = _("Fetch Hardcover Book IDs from Booklore->Hardcover"),
                 help_text = _("Fetch metadata from the Booklore server for every matched book and store any Hardcover book IDs returned. For books without a Hardcover ID in Booklore, searches Hardcover by ISBN or title and lets you select the correct match."),
                 keep_menu_open = true,
                 callback = function()

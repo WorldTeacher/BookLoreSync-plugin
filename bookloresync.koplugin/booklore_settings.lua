@@ -798,6 +798,24 @@ function Settings:buildPreferencesMenu(parent)
                 end,
             },
             {
+                text = _("Ask before enabling WiFi"),
+                help_text = _("When enabled, the plugin will ask for your permission before turning on WiFi for syncing. On confirm, the action proceeds; on skip, syncs are deferred (queued for the next opportunity) and lookups are skipped."),
+                checked_func = function()
+                    return parent.ask_wifi_enable
+                end,
+                callback = function()
+                    parent.ask_wifi_enable = not parent.ask_wifi_enable
+                    parent.settings:saveSetting("ask_wifi_enable", parent.ask_wifi_enable)
+                    parent.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = parent.ask_wifi_enable
+                            and _("Ask before enabling WiFi: on")
+                            or  _("Ask before enabling WiFi: off"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
                 text = _("Export Settings"),
                 help_text = _("Export plugin settings to a JSON file. Sensitive fields (server URL, usernames, and passwords) are excluded from the export."),
                 keep_menu_open = true,

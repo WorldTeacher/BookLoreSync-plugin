@@ -272,6 +272,7 @@ function BookloreSync:init()
     self.connect_network_on_suspend    = self.settings:readSetting("connect_network_on_suspend")    or false
     self.manual_sync_only              = self.settings:readSetting("manual_sync_only")              or false
     self.sync_mode                     = self.settings:readSetting("sync_mode") -- "automatic", "manual", or "custom"
+    self.ask_wifi_enable               = self.settings:readSetting("ask_wifi_enable")               or false
 
     -- Shelf sync settings
     self.booklore_shelf_name         = self.settings:readSetting("booklore_shelf_name")  or "KOReader"
@@ -2449,7 +2450,14 @@ function BookloreSync:addToMainMenu(menu_items)
                     return (sessions + annotations + ratings + bookmarks) > 0
                 end,
                 callback = function()
-                    self:syncPendingSessions()
+                    self:_requestWifi(_("sync pending items"), function()
+                        self:syncPendingSessions()
+                    end, function()
+                        UIManager:show(InfoMessage:new{
+                            text    = _("WiFi not enabled — pending items remain queued"),
+                            timeout = 2,
+                        })
+                    end)
                 end,
             },
             {
@@ -3543,7 +3551,28 @@ function BookloreSync:onCloseDocument()
     if not self.manual_sync_only then
         if pre_book_id then
             self:logInfo("BookloreSync: book_id known — triggering post-close sync")
-            self:syncPendingSessions(false)
+            -- _requestWifi will prompt if ask_wifi_enable is on and WiFi is off.
+            -- On deny the data stays in the pending queues and will be uploaded
+            -- on the next resume / manual sync.
+            self:_requestWifi(_("upload session and annotations"), function()
+                self:syncPendingSessions(false)
+            end, function()
+                -- User declined WiFi — show a brief "saved locally" notice so
+                -- they know the data is queued.
+                self:logInfo("BookloreSync: WiFi request declined at close — session queued")
+                if not self.silent_messages then
+                    local parts = { _("Booklore Sync: WiFi not enabled") }
+                    parts[#parts + 1] = _("S: 1 queued")
+                    if ann_queued_now > 0 or ann_synced_now > 0 then
+                        parts[#parts + 1] = T(_("A: %1 queued"), ann_queued_now + ann_synced_now)
+                    end
+                    parts[#parts + 1] = _("Will sync when WiFi is available")
+                    UIManager:show(InfoMessage:new{
+                        text    = table.concat(parts, "\n"),
+                        timeout = 3,
+                    })
+                end
+            end)
         else
             self:logInfo("BookloreSync: book_id unknown — skipping network sync, data stored locally")
             if not self.silent_messages then
@@ -3616,6 +3645,78 @@ function BookloreSync:connectNetwork()
 end
 
 --[[--
+Ask the user for permission to enable WiFi, then run the action.
+
+When `ask_wifi_enable` is disabled this is a straight pass-through: if WiFi
+is already connected `on_confirm` is called immediately; otherwise
+`on_confirm` is called as-is and the downstream sync methods handle being
+offline gracefully (they leave data in the pending queues).
+
+When `ask_wifi_enable` is enabled and WiFi is *not* currently connected the
+user is prompted with a ConfirmBox:
+  • Enable  → enable WiFi via `connectNetwork()`, then call `on_confirm`.
+  • Skip    → call `on_deny` (callers use this to skip or queue the action).
+
+The `context` string is displayed in the prompt so the user knows *why* the
+plugin wants WiFi (e.g. "sync sessions", "upload annotation").
+
+@param context    Short description of the action that needs WiFi.
+@param on_confirm Callback invoked when WiFi is (or becomes) available.
+@param on_deny    Callback invoked when the user declines (may be nil).
+--]]--
+function BookloreSync:_requestWifi(context, on_confirm, on_deny)
+    on_deny = on_deny or function() end
+
+    -- WiFi already up — proceed immediately without any prompt.
+    if NetworkMgr:isConnected() then
+        on_confirm()
+        return
+    end
+
+    -- Feature disabled — proceed without prompting.  The downstream sync
+    -- methods handle being offline gracefully (they skip network calls and
+    -- leave data in the pending queues).  Only callers that intentionally
+    -- want to enable WiFi (e.g. onSuspend with connect_network_on_suspend)
+    -- should pass a context; the prompt is the only new behaviour here.
+    if not self.ask_wifi_enable then
+        on_confirm()
+        return
+    end
+
+    -- Feature enabled — show a confirm dialog.
+    local prompt_text
+    if context and context ~= "" then
+        prompt_text = T(_("WiFi is required to %1.\n\nEnable WiFi now?"), context)
+    else
+        prompt_text = _("WiFi is required for Booklore Sync.\n\nEnable WiFi now?")
+    end
+
+    UIManager:show(ConfirmBox:new{
+        text        = prompt_text,
+        ok_text     = _("Enable"),
+        cancel_text = _("Skip"),
+        ok_callback = function()
+            self:logInfo("BookloreSync: User approved WiFi enable for:", context or "<unknown>")
+            local ok = self:connectNetwork()
+            if ok then
+                on_confirm()
+            else
+                self:logWarn("BookloreSync: WiFi enable approved but connection failed")
+                UIManager:show(InfoMessage:new{
+                    text    = _("Could not connect to WiFi"),
+                    timeout = 2,
+                })
+                on_deny()
+            end
+        end,
+        cancel_callback = function()
+            self:logInfo("BookloreSync: User declined WiFi enable for:", context or "<unknown>")
+            on_deny()
+        end,
+    })
+end
+
+--[[--
 Handler for when the device is about to suspend
 --]]
 function BookloreSync:onSuspend()
@@ -3631,16 +3732,19 @@ function BookloreSync:onSuspend()
         self:logInfo("BookloreSync: Force push on suspend enabled")
         
         if self.connect_network_on_suspend then
-            self:logInfo("BookloreSync: Attempting to connect to network before sync")
-            local network_ok = self:connectNetwork()
-            
-            if not network_ok then
-                self:logWarn("BookloreSync: Network connection failed, will attempt sync anyway")
-            end
+            -- When ask_wifi_enable is on, prompt before enabling WiFi.
+            -- On deny, we still attempt syncPendingSessions (it will be a
+            -- no-op if offline, data stays queued).
+            self:_requestWifi(_("sync sessions on suspend"), function()
+                self:logInfo("BookloreSync: Network ready — force syncing pending sessions on suspend")
+                self:syncPendingSessions(true)
+            end, function()
+                self:logInfo("BookloreSync: WiFi request declined on suspend — sessions remain queued")
+            end)
+        else
+            self:logInfo("BookloreSync: Force syncing pending sessions on suspend")
+            self:syncPendingSessions(true)
         end
-        
-        self:logInfo("BookloreSync: Force syncing pending sessions on suspend")
-        self:syncPendingSessions(true)
     else
         self:logInfo("BookloreSync: Force push on suspend disabled, sessions will sync on resume")
     end
@@ -3670,21 +3774,28 @@ function BookloreSync:onResume()
 
         if not self.manual_sync_only then
             self:logInfo("BookloreSync: Attempting background sync on resume")
-            self:syncPendingSessions(true)
+            -- Use _requestWifi so that if the ask_wifi_enable option is on the
+            -- user is prompted before we try to connect.  On deny the sync is
+            -- silently skipped (data remains queued for the next opportunity).
+            self:_requestWifi(_("sync pending sessions"), function()
+                self:syncPendingSessions(true)
 
-            -- Flag a deferred wake-sync so the shelf can be updated once the
-            -- network is fully up.  If WiFi is already connected, schedule it
-            -- directly; otherwise onNetworkConnected will pick it up.
-            if self.auto_sync_shelf_on_resume then
-                self.needs_wake_sync = true
-                if NetworkMgr:isConnected() then
-                    self:logInfo("BookloreSync: WiFi already connected on resume, scheduling delayed wake sync")
-                    self:_scheduleWakeSync()
+                -- Flag a deferred wake-sync so the shelf can be updated once
+                -- the network is fully up.  If WiFi is already connected,
+                -- schedule it directly; otherwise onNetworkConnected will pick it up.
+                if self.auto_sync_shelf_on_resume then
+                    self.needs_wake_sync = true
+                    if NetworkMgr:isConnected() then
+                        self:logInfo("BookloreSync: WiFi already connected on resume, scheduling delayed wake sync")
+                        self:_scheduleWakeSync()
+                    end
                 end
-            end
 
-            self:logInfo("BookloreSync: Checking for unmatched books")
-            self:resolveUnmatchedBooks(true)
+                self:logInfo("BookloreSync: Checking for unmatched books")
+                self:resolveUnmatchedBooks(true)
+            end, function()
+                self:logInfo("BookloreSync: WiFi request declined on resume — sync skipped")
+            end)
         end
     end
 
@@ -4125,145 +4236,152 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     end
 
     AsyncTask:new(function()
-        -- Worker: runs on background thread (or deferred on main thread in fallback)
-        return pcall(function()
-            -- Ensure we have the shelf ID
-            local shelf_ok, shelf_id = self.api:getOrCreateShelf(
-                self.booklore_shelf_name, self.booklore_username, self.booklore_password)
-            if not shelf_ok then error(shelf_id or "Failed to get/create shelf") end
+        -- Worker: runs on background thread (or deferred on main thread in fallback).
+        -- Errors thrown here are caught by AsyncTask and forwarded to the callback
+        -- as task_ok=false, with the error message as the second argument.
 
-            if shelf_id ~= self.shelf_id then
-                self.shelf_id = shelf_id
-                self.settings:saveSetting("shelf_id", self.shelf_id)
-                self.settings:flush()
-            end
+        -- Ensure we have the shelf ID
+        local shelf_ok, shelf_id = self.api:getOrCreateShelf(
+            self.booklore_shelf_name, self.booklore_username, self.booklore_password)
+        if not shelf_ok then error(shelf_id or "Failed to get/create shelf") end
 
-            -- Fetch book list
-            local books_ok, books = self.api:getBooksInShelf(
-                shelf_id, self.booklore_username, self.booklore_password)
-            if not books_ok then error(books or "Failed to retrieve books from shelf") end
+        if shelf_id ~= self.shelf_id then
+            self.shelf_id = shelf_id
+            self.settings:saveSetting("shelf_id", self.shelf_id)
+            self.settings:flush()
+        end
 
-            if type(books) ~= "table" or #books == 0 then
-                return true, _("Shelf is empty — no books to sync")
-            end
+        -- Fetch book list
+        local books_ok, books = self.api:getBooksInShelf(
+            shelf_id, self.booklore_username, self.booklore_password)
+        if not books_ok then error(books or "Failed to retrieve books from shelf") end
 
-            local downloaded = 0
-            local skipped    = 0
-            local deleted    = 0
-            local errors     = 0
-            local total      = #books
+        if type(books) ~= "table" or #books == 0 then
+            return false, _("Shelf is empty — no books to sync")
+        end
 
-            self.db:beginTransaction()
-            local ok_loop, err_loop = pcall(function()
-                local shelf_book_ids = {}
+        local downloaded = 0
+        local skipped    = 0
+        local deleted    = 0
+        local errors     = 0
+        local total      = #books
 
-                for i, book in ipairs(books) do
-                    local book_id = tonumber(book.id)
-                    if not book_id then goto book_continue end
+        self.db:beginTransaction()
+        local ok_loop, err_loop = pcall(function()
+            local shelf_book_ids = {}
 
-                    shelf_book_ids[book_id] = true
+            for i, book in ipairs(books) do
+                local book_id = tonumber(book.id)
+                if not book_id then goto book_continue end
 
-                    local filename = self:_generateFilename(book)
-                    local filepath = self.download_dir .. "/" .. filename
+                shelf_book_ids[book_id] = true
 
-                    -- Update progress UI safely from background thread
-                    UIManager:scheduleIn(0, function()
-                        if info_msg then
-                            if lfs.attributes(filepath, "mode") == "file" then
-                                info_msg.text = T(_("Skipping: %1 (%2 of %3)"), book.title or "Unknown", i, total)
-                            else
-                                info_msg.text = T(_("Downloading: %1 (%2 of %3)"), book.title or "Unknown", i, total)
-                            end
-                            UIManager:forceRePaint()
-                        end
-                    end)
+                local filename = self:_generateFilename(book)
+                local filepath = self.download_dir .. "/" .. filename
 
-                    if lfs.attributes(filepath, "mode") == "file" then
-                        -- Already present — ensure cache entry exists
-                        if not self.db:getBookByFilePath(filepath) then
-                            local hash = self:calculateBookHash(filepath)
-                            self.db:saveBookCache(filepath, hash, book_id,
-                                book.title, book.author, book.isbn10, book.isbn13)
-                        end
-                        skipped = skipped + 1
-                    else
-                        -- Download
-                        local dl_ok, dl_err = self.api:downloadBook(
-                            book_id, filepath, self.booklore_username, self.booklore_password)
-                        if dl_ok then
-                            local hash = self:calculateBookHash(filepath)
-                            self.db:saveBookCache(filepath, hash, book_id,
-                                book.title, book.author, book.isbn10, book.isbn13)
-                            downloaded = downloaded + 1
+                -- Update progress UI safely from background thread
+                UIManager:scheduleIn(0, function()
+                    if info_msg then
+                        if lfs.attributes(filepath, "mode") == "file" then
+                            info_msg.text = T(_("Skipping: %1 (%2 of %3)"), book.title or "Unknown", i, total)
                         else
-                            self:logWarn("BookloreSync: Download failed for book:", book.title, dl_err)
-                            errors = errors + 1
+                            info_msg.text = T(_("Downloading: %1 (%2 of %3)"), book.title or "Unknown", i, total)
                         end
+                        UIManager:forceRePaint()
                     end
+                end)
 
-                    ::book_continue::
+                if lfs.attributes(filepath, "mode") == "file" then
+                    -- Already present — ensure cache entry exists
+                    if not self.db:getBookByFilePath(filepath) then
+                        local hash = self:calculateBookHash(filepath)
+                        self.db:saveBookCache(filepath, hash, book_id,
+                            book.title, book.author, book.isbn10, book.isbn13)
+                    end
+                    skipped = skipped + 1
+                else
+                    -- Download
+                    local dl_ok, dl_err = self.api:downloadBook(
+                        book_id, filepath, self.booklore_username, self.booklore_password)
+                    if dl_ok then
+                        local hash = self:calculateBookHash(filepath)
+                        self.db:saveBookCache(filepath, hash, book_id,
+                            book.title, book.author, book.isbn10, book.isbn13)
+                        downloaded = downloaded + 1
+                    else
+                        self:logWarn("BookloreSync: Download failed for book:", book.title, dl_err)
+                        errors = errors + 1
+                    end
                 end
 
-                -- Bidirectional sync: remove local files no longer on shelf
-                if self.delete_removed_shelf_books then
-                    for entry in lfs.dir(self.download_dir) do
-                        local local_id = entry:match("^BookID_(%d+)%.[%a]+$")
-                        if local_id then
-                            local lid = tonumber(local_id)
-                            if lid and not shelf_book_ids[lid] then
-                                local fp = self.download_dir .. "/" .. entry
-                                UIManager:scheduleIn(0, function()
-                                    if info_msg then
-                                        info_msg.text = T(_("Removing: BookID %1"), lid)
-                                        UIManager:forceRePaint()
-                                    end
-                                end)
-                                if os.remove(fp) then
-                                    deleted = deleted + 1
-                                else
-                                    errors = errors + 1
+                ::book_continue::
+            end
+
+            -- Bidirectional sync: remove local files no longer on shelf
+            if self.delete_removed_shelf_books then
+                for entry in lfs.dir(self.download_dir) do
+                    local local_id = entry:match("^BookID_(%d+)%.[%a]+$")
+                    if local_id then
+                        local lid = tonumber(local_id)
+                        if lid and not shelf_book_ids[lid] then
+                            local fp = self.download_dir .. "/" .. entry
+                            UIManager:scheduleIn(0, function()
+                                if info_msg then
+                                    info_msg.text = T(_("Removing: BookID %1"), lid)
+                                    UIManager:forceRePaint()
                                 end
+                            end)
+                            if os.remove(fp) then
+                                deleted = deleted + 1
+                            else
+                                errors = errors + 1
                             end
                         end
                     end
                 end
-            end)
-
-            if ok_loop then
-                self.db:commit()
-            else
-                self.db:rollback()
-                self:logErr("BookloreSync: syncFromBookloreShelf — loop error, rolled back:", err_loop)
-                error(err_loop)
             end
-
-            return true, T(
-                _("Sync complete!\n\nDownloaded: %1\nSkipped: %2\nDeleted: %3\nErrors: %4"),
-                downloaded, skipped, deleted, errors
-            )
         end)
+
+        if ok_loop then
+            self.db:commit()
+        else
+            self.db:rollback()
+            self:logErr("BookloreSync: syncFromBookloreShelf — loop error, rolled back:", err_loop)
+            error(err_loop)
+        end
+
+        return true, T(
+            _("Sync complete!\n\nDownloaded: %1\nSkipped: %2\nDeleted: %3\nErrors: %4"),
+            downloaded, skipped, deleted, errors
+        )
     end,
-    function(task_ok, inner_ok, message)
-        -- Callback: always runs on the UI thread
+    function(task_ok, ok_or_msg, message)
+        -- Callback: always runs on the UI thread.
+        -- On success:  task_ok=true,  ok_or_msg=true|false, message=string
+        -- On error:    task_ok=false, ok_or_msg=error_string, message=nil
         if info_msg then UIManager:close(info_msg) end
         self.sync_in_progress = false
 
-        local final_ok  = task_ok and inner_ok
-        local final_msg
-        if final_ok then
-            final_msg = message
+        local final_ok, final_msg
+        if not task_ok then
+            -- Worker threw an error; ok_or_msg holds the error string
+            final_ok  = false
+            final_msg = T(_("Sync failed: %1"), tostring(ok_or_msg or "unknown error"))
+        elseif ok_or_msg == false then
+            -- Worker returned false, message (e.g. "Shelf is empty")
+            final_ok  = true
+            final_msg = message or _("No books to sync")
         else
-            local err_str = (type(message) == "string" and message)
-                         or (type(inner_ok) == "string" and inner_ok)
-                         or "unknown error"
-            final_msg = T(_("Sync failed: %1"), err_str)
+            -- Worker returned true, message (success with stats)
+            final_ok  = true
+            final_msg = message or _("Sync complete")
         end
 
         if not silent and not self.silent_messages then
             UIManager:show(InfoMessage:new{ text = final_msg, timeout = 5 })
         end
 
-        if final_ok then
+        if final_ok and ok_or_msg == true then
             local ok_fm, FM = pcall(require, "apps/filemanager/filemanager")
             if ok_fm and FM and FM.instance then
                 FM.instance:reinit(self.download_dir)

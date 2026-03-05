@@ -2637,7 +2637,7 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("Fetch Hardcover Book IDs from Booklore->Hardcover"),
+                text = _("Fetch Hardcover Book IDs"),
                 help_text = _("Fetch metadata from the Booklore server for every matched book and store any Hardcover book IDs returned. For books without a Hardcover ID in Booklore, searches Hardcover by ISBN or title and lets you select the correct match."),
                 keep_menu_open = true,
                 callback = function()
@@ -3253,7 +3253,7 @@ function BookloreSync:endSession(options)
     
     if not self.current_session then
         self:logInfo("BookloreSync: No active session to end")
-        return
+        return "no_session"
     end
     
     self:logInfo("BookloreSync: ========== Ending session ==========")
@@ -3274,7 +3274,7 @@ function BookloreSync:endSession(options)
     if not valid then
         self:logInfo("BookloreSync: Session invalid -", reason)
         self.current_session = nil
-        return
+        return "invalid", reason
     end
 
     -- Per-book tracking check: if the user has disabled tracking for this
@@ -3284,7 +3284,7 @@ function BookloreSync:endSession(options)
         self:logInfo("BookloreSync: Tracking disabled for this book, discarding session:",
                      self.current_session.file_path)
         self.current_session = nil
-        return
+        return "tracking_disabled"
     end
     
     local progress_delta = end_progress - self.current_session.start_progress
@@ -3331,6 +3331,7 @@ function BookloreSync:endSession(options)
     end
     
     self.current_session = nil
+    return success and "saved" or "db_error"
 end
 
 -- Event Handlers
@@ -3416,7 +3417,18 @@ function BookloreSync:onCloseDocument()
     -- toast and the network sync happen below (step 5), after rating and
     -- annotations have also been queued, so this call purely persists the
     -- session data and never triggers a premature sync.
-    self:endSession({ silent = true, force_queue = true })
+    local session_status, session_reason = self:endSession({ silent = true, force_queue = true })
+
+    -- Show "criteria not met" feedback immediately when the session was
+    -- discarded at close (not on suspend/resume paths which pass silent=true
+    -- themselves; those don't reach this code path anyway).
+    if session_status == "invalid" and not self.silent_messages then
+        UIManager:show(InfoMessage:new{
+            text    = _("Session not saved: criteria not met"),
+            timeout = 3,
+        })
+        return false
+    end
 
     -- ── Step 3: Queue / sync rating ───────────────────────────────────────
     self:logInfo(string.format(
@@ -3592,6 +3604,19 @@ function BookloreSync:onCloseDocument()
                 })
             end
         end
+    elseif session_status == "saved" and not self.silent_messages then
+        -- Manual sync only mode: session was queued, inform the user.
+        self:logInfo("BookloreSync: manual_sync_only — session queued, notifying user")
+        local parts = { _("Booklore Sync: Session saved") }
+        parts[#parts + 1] = _("S: 1 queued")
+        if ann_queued_now > 0 then
+            parts[#parts + 1] = T(_("A: %1 queued"), ann_queued_now)
+        end
+        parts[#parts + 1] = _("Use 'Sync Pending Now' to upload")
+        UIManager:show(InfoMessage:new{
+            text    = table.concat(parts, "\n"),
+            timeout = 3,
+        })
     end
 
     return false
@@ -3620,7 +3645,7 @@ function BookloreSync:connectNetwork()
     
     self:logInfo("BookloreSync: Attempting to connect to network")
     
-    if not Device:isConnected() then
+    if not NetworkMgr:isConnected() then
         self:logInfo("BookloreSync: Enabling WiFi")
         Device:setWifiState(true)
     end

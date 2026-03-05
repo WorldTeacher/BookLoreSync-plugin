@@ -3562,8 +3562,7 @@ function Database:setBookTracking(file_path, enabled)
         logger.err("BookloreSync Database: Failed to prepare setBookTracking:", self.conn:errmsg())
         return false
     end
-    local ok, err = stmt:bind(1, val)
-    if ok then ok, err = stmt:bind(2, file_path) end
+    local ok, err = pcall(function() stmt:bind(val, file_path) end)
     if not ok then
         logger.err("BookloreSync Database: Bind failed in setBookTracking:", err)
         stmt:close()
@@ -3587,15 +3586,18 @@ function Database:isBookTrackingEnabled(file_path)
         SELECT tracking_enabled FROM book_cache WHERE file_path = ?
     ]])
     if not stmt then return true end
-    local ok, err = stmt:bind(1, file_path)
+    local ok, err = pcall(function() stmt:bind(file_path) end)
     if not ok then
         stmt:close()
         return true
     end
-    local row = stmt:first_row()
+    local result = true
+    for row in stmt:rows() do
+        result = tonumber(row[1]) ~= 0
+        break
+    end
     stmt:close()
-    if not row then return true end  -- not in cache yet → track by default
-    return tonumber(row[1]) ~= 0
+    return result  -- not in cache yet → track by default
 end
 
 return Database

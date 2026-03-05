@@ -213,7 +213,7 @@ function BookloreSync:buildCfi(pos0, pos1, spine, document, html_cache)
         shared_len = shared_len - 1
     end
     -- Case 2: the first diverging step is an offset (":N"), meaning the last
-    -- shared step is the paired text-node step ("/1", "/3", …) — pull it out.
+    -- shared step is the paired text-node step ("/1", "/3", …) - pull it out.
     local next_idx = shared_len + 1
     if shared_len > 0
         and list0[next_idx] and list0[next_idx]:sub(1,1) == ":"
@@ -301,7 +301,7 @@ check("extract p[4] → nil",      extractNthElementContent(body8, "p",  4), nil
 local body9 = "<div><p>inner<b>bold</b></p></div><p>out</p>"
 check("div nested preserved",    extractNthElementContent(body9, "div", 1), "<p>inner<b>bold</b></p>")
 
-print("\n=== xpointerToCfiPath — text node step formats ===")
+print("\n=== xpointerToCfiPath - text node step formats ===")
 
 -- HTML: <html><head></head><body><h2>Ch</h2><p>First.</p><p>Second.</p></body></html>
 local mini_html = "<html><head></head><body><h2>Ch</h2><p>First paragraph.</p><p>Second paragraph.</p></body></html>"
@@ -333,7 +333,7 @@ local s4 = BookloreSync:xpointerToCfiPath(
     "/body/DocFragment[1]/body/p[1]/text()[2].92", fake_spine, fake_doc, {})
 check("text()[2].92 → /3:92 (K=2→step3)", cfiStepsToPath(s4), "/6/2!/4/4/3:92")
 
-print("\n=== xpointerToCfiPath — id assertions ===")
+print("\n=== xpointerToCfiPath - id assertions ===")
 
 local html_id = '<html><head></head><body><div id="Copyright01"><p>text</p></div></body></html>'
 local spine_id = { "OEBPS/copy.xhtml" }
@@ -345,7 +345,7 @@ local s5 = BookloreSync:xpointerToCfiPath(
 -- p[1] inside div is ordinal 1 → /2, text().0 → /1:0
 check("div id assertion in path", cfiStepsToPath(s5), "/6/2!/4/2[Copyright01]/2/1:0")
 
-print("\n=== buildCfi — range format ===")
+print("\n=== buildCfi - range format ===")
 
 -- Same spine item, same element, different text offsets → shared path is
 -- everything up to and including the element step; rel parts are /1:N

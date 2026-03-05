@@ -311,7 +311,7 @@ Database.migrations = {
     -- Each row represents one annotation that needs to be (re-)submitted.
     -- The payload is stored as a JSON blob so no schema change is needed when
     -- annotation fields evolve.
-    -- NOTE: book_id is nullable — annotations can be queued before the Booklore
+    -- NOTE: book_id is nullable - annotations can be queued before the Booklore
     -- book_id is known (e.g. server offline at close time).  syncPendingAnnotations
     -- resolves the book_id from book_cache at retry time.
     [13] = {

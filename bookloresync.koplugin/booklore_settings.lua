@@ -655,7 +655,7 @@ function Settings:buildBookmarksMenu(parent)
         sub_item_table = {
             {
                 text = _("Sync bookmarks"),
-                help_text = _("Upload KOReader bookmarks to Booklore. Bookmarks are deduplicated — already-synced entries are skipped."),
+                help_text = _("Upload KOReader bookmarks to Booklore. Bookmarks are deduplicated - already-synced entries are skipped."),
                 checked_func = function()
                     return parent.bookmarks_sync_enabled
                 end,

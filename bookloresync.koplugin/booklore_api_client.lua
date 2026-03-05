@@ -473,7 +473,7 @@ Check server health/connectivity
 function APIClient:checkHealth()
     self:logInfo("BookloreSync API: Checking server health")
     
-    local success, code, response = self:request("GET", "/api/health")
+    local success, code, response = self:request("GET", "/api/v1/healthcheck")
     
     if success or (code and code >= 200 and code < 500) then
         -- Server is reachable (even if endpoint doesn't exist)
@@ -1294,11 +1294,11 @@ Fetch all books in a given shelf.
 @return table|string  Array of normalised book objects, or error message
 --]]
 function APIClient:getBooksInShelf(shelf_id, username, password)
-    self:logInfo("BookloreSync API: getBooksInShelf — shelf_id:", shelf_id)
+    self:logInfo("BookloreSync API: getBooksInShelf - shelf_id:", shelf_id)
 
     local token_ok, token = self:getOrRefreshBearerToken(username, password)
     if not token_ok then
-        self:logErr("BookloreSync API: getBooksInShelf — auth failed:", token)
+        self:logErr("BookloreSync API: getBooksInShelf - auth failed:", token)
         return false, "Authentication failed"
     end
 
@@ -1306,7 +1306,7 @@ function APIClient:getBooksInShelf(shelf_id, username, password)
     local ok, code, response = self:request("GET", "/api/v1/shelves/" .. shelf_id .. "/books", nil, headers)
 
     if not ok and (code == 401 or code == 403) then
-        self:logWarn("BookloreSync API: getBooksInShelf — token rejected, refreshing")
+        self:logWarn("BookloreSync API: getBooksInShelf - token rejected, refreshing")
         if self.db then self.db:deleteBearerToken(username) end
         local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
         if ref_ok then
@@ -1316,7 +1316,7 @@ function APIClient:getBooksInShelf(shelf_id, username, password)
     end
 
     if ok and type(response) == "table" then
-        self:logInfo("BookloreSync API: getBooksInShelf — found", #response, "books")
+        self:logInfo("BookloreSync API: getBooksInShelf - found", #response, "books")
         for i, book in ipairs(response) do
             response[i] = self:_normalizeShelfBookObject(book)
         end
@@ -1338,11 +1338,11 @@ Find an existing shelf by name (case-insensitive), or create it if absent.
 @return number|string  shelf_id on success, error message on failure
 --]]
 function APIClient:getOrCreateShelf(name, username, password)
-    self:logInfo("BookloreSync API: getOrCreateShelf — name:", name)
+    self:logInfo("BookloreSync API: getOrCreateShelf - name:", name)
 
     local token_ok, token = self:getOrRefreshBearerToken(username, password)
     if not token_ok then
-        self:logErr("BookloreSync API: getOrCreateShelf — auth failed:", token)
+        self:logErr("BookloreSync API: getOrCreateShelf - auth failed:", token)
         return false, token
     end
 
@@ -1360,7 +1360,7 @@ function APIClient:getOrCreateShelf(name, username, password)
 
     if not ok or type(response) ~= "table" then
         local err_msg = (type(response) == "string" and response) or ("HTTP " .. tostring(code))
-        self:logWarn("BookloreSync API: getOrCreateShelf — could not list shelves:", err_msg)
+        self:logWarn("BookloreSync API: getOrCreateShelf - could not list shelves:", err_msg)
         return false, err_msg
     end
 
@@ -1406,11 +1406,11 @@ file into memory.
 @return string|nil  Error message on failure, nil on success
 --]]
 function APIClient:downloadBook(book_id, save_path, username, password)
-    self:logInfo("BookloreSync API: downloadBook — id:", book_id, "->", save_path)
+    self:logInfo("BookloreSync API: downloadBook - id:", book_id, "->", save_path)
 
     local token_ok, token = self:getOrRefreshBearerToken(username, password)
     if not token_ok then
-        self:logErr("BookloreSync API: downloadBook — auth failed:", token)
+        self:logErr("BookloreSync API: downloadBook - auth failed:", token)
         return false, "Authentication failed"
     end
 
@@ -1419,7 +1419,7 @@ function APIClient:downloadBook(book_id, save_path, username, password)
 
     local file, open_err = io.open(save_path, "wb")
     if not file then
-        self:logErr("BookloreSync API: downloadBook — cannot open file:", open_err)
+        self:logErr("BookloreSync API: downloadBook - cannot open file:", open_err)
         return false, "Cannot create file: " .. tostring(open_err)
     end
 
@@ -1435,7 +1435,7 @@ function APIClient:downloadBook(book_id, save_path, username, password)
 
     -- Retry on 401/403
     if type(code) == "number" and (code == 401 or code == 403) then
-        self:logWarn("BookloreSync API: downloadBook — token rejected, refreshing")
+        self:logWarn("BookloreSync API: downloadBook - token rejected, refreshing")
         if self.db then self.db:deleteBearerToken(username) end
         local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
         if ref_ok then
@@ -1458,7 +1458,7 @@ function APIClient:downloadBook(book_id, save_path, username, password)
     end
 
     if type(code) == "number" and code >= 200 and code < 300 then
-        self:logInfo("BookloreSync API: downloadBook — success")
+        self:logInfo("BookloreSync API: downloadBook - success")
         return true, nil
     end
 

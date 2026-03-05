@@ -142,7 +142,8 @@ end
 local BATCH_UPLOAD_SIZE = 100  -- max sessions per batch upload
 
 --[[--
-DbSettings — a LuaSettings-compatible wrapper backed by the plugin_settings
+
+DbSettings - a LuaSettings-compatible wrapper backed by the plugin_settings
 SQLite table.
 
 All existing call sites (readSetting / saveSetting / flush) work without any
@@ -288,7 +289,7 @@ function BookloreSync:init()
         self.delete_removed_shelf_books = false  -- Default disabled for safety
     end
 
-    -- Resume/wake-sync state (not persisted — reset each session)
+    -- Resume/wake-sync state (not persisted - reset each session)
     self.last_auto_sync_time  = 0     -- unix timestamp of last auto-sync (cooldown guard)
     self.needs_wake_sync      = false -- flagged by onResume; consumed by onNetworkConnected
     self.wake_sync_scheduled  = false -- prevents duplicate scheduled wake syncs
@@ -366,7 +367,7 @@ function BookloreSync:init()
     -- coverbrowser pattern: FileManager.addFileDialogButtons(FileManager, id, func).
     -- showFileDialog reads file_manager.file_dialog_added_buttons where file_manager is
     -- the live instance; Lua's __index chain finds the entry on the class table.
-    -- Registration must be unconditional — init() is always called from the reader
+    -- Registration must be unconditional - init() is always called from the reader
     -- context where self.ui.file_chooser is nil.
     FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions", function(file, is_file, _book_props)
         if not is_file then return nil end
@@ -675,7 +676,7 @@ function BookloreSync:detectBookMetadataLocation()
     -- Ensure a book_cache entry exists for this file path
     local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
     if not book_cache_id then
-        -- No cache entry yet — create a minimal one using whatever we know
+        -- No cache entry yet - create a minimal one using whatever we know
         local file_hash = ""
         if self.current_session and self.current_session.doc_path == doc_path then
             file_hash = self.current_session.file_hash or ""
@@ -719,7 +720,7 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
         return
     end
     if self.booklore_username == "" or self.booklore_password == "" then
-        self:logWarn("BookloreSync: Rating sync skipped — Booklore credentials not configured")
+        self:logWarn("BookloreSync: Rating sync skipped - Booklore credentials not configured")
         return
     end
 
@@ -728,7 +729,7 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
     if book_cache_id then
         local meta = self.db:getBookMetadata(book_cache_id)
         if meta and meta.rating_synced then
-            self:logInfo("BookloreSync: Rating already synced for book_cache_id:", book_cache_id, "— skipping")
+            self:logInfo("BookloreSync: Rating already synced for book_cache_id:", book_cache_id, "- skipping")
             return
         end
     end
@@ -745,7 +746,7 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
     end
 
     if not rating_1_5 then
-        self:logInfo("BookloreSync: No KOReader rating set for this book — skipping rating sync")
+        self:logInfo("BookloreSync: No KOReader rating set for this book - skipping rating sync")
         return
     end
 
@@ -787,7 +788,7 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
     -- hardcover_id is stored for this book.
     if self.hardcover_rating_sync_enabled then
         if not self.hardcover_token or self.hardcover_token == "" then
-            self:logWarn("BookloreSync: Hardcover rating sync enabled but no token configured — skipping")
+            self:logWarn("BookloreSync: Hardcover rating sync enabled but no token configured - skipping")
         else
             local hc_id
             -- Re-use book_cache_id if already resolved above, otherwise look it up now.
@@ -798,7 +799,7 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
             end
 
             if hc_id then
-                self:logInfo("BookloreSync: Syncing rating to Hardcover — hardcover_id:", hc_id,
+                self:logInfo("BookloreSync: Syncing rating to Hardcover - hardcover_id:", hc_id,
                     "rating:", rating_scaled)
                 local hc_ok, hc_err = self.hc_api:submitRating(hc_id, rating_scaled, self.hardcover_token)
                 if hc_ok then
@@ -807,7 +808,7 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
                     self:logWarn("BookloreSync: Hardcover rating sync failed:", tostring(hc_err))
                 end
             else
-                self:logInfo("BookloreSync: Hardcover rating sync enabled but no hardcover_id found for this book — skipping")
+                self:logInfo("BookloreSync: Hardcover rating sync enabled but no hardcover_id found for this book - skipping")
             end
         end
     end
@@ -838,7 +839,7 @@ function BookloreSync:showRatingDialog(doc_path, book_id)
     if book_cache_id then
         local meta = self.db:getBookMetadata(book_cache_id)
         if meta and meta.rating_synced then
-            self:logInfo("BookloreSync: Rating already synced — skipping dialog")
+            self:logInfo("BookloreSync: Rating already synced - skipping dialog")
             return
         end
     end
@@ -884,7 +885,7 @@ function BookloreSync:showRatingDialog(doc_path, book_id)
                         end
 
                         if not book_id then
-                            -- book_id not yet known — store rating locally and queue
+                            -- book_id not yet known - store rating locally and queue
                             -- it in pending_ratings (with nil book_id) so it is
                             -- uploaded once the book is matched on the next sync.
                             if bcid then
@@ -922,7 +923,7 @@ function BookloreSync:showRatingDialog(doc_path, book_id)
                                 })
                             end
                         else
-                            -- No credentials yet — the rating is stored locally;
+                            -- No credentials yet - the rating is stored locally;
                             -- queue it so it is sent once credentials are configured.
                             if bcid then
                                 self.db:addPendingRating(bcid, book_id, value)
@@ -1198,8 +1199,8 @@ Convert a single KOReader CREngine xpointer to a list of CFI step strings
 for the intra-document portion (after the `!`).
 
 KOReader xpointer text-node formats handled:
-  text().N      — first (only) text node, character offset N
-  text()[K].N   — Kth text node among mixed content, character offset N
+  text().N      - first (only) text node, character offset N
+  text()[K].N   - Kth text node among mixed content, character offset N
 
 In CFI, text nodes are addressed as odd-numbered children:
   text node K  →  /(2K-1):N
@@ -1386,7 +1387,7 @@ including the last shared element step), and `start-relative` /
 function BookloreSync:buildCfi(pos0, pos1, spine, document, html_cache)
     if not pos0 or not pos1 then return nil end
     if not spine or not document then
-        self:logWarn("BookloreSync: buildCfi called without spine/document — skipping")
+        self:logWarn("BookloreSync: buildCfi called without spine/document - skipping")
         return nil
     end
 
@@ -1440,14 +1441,14 @@ function BookloreSync:buildCfi(pos0, pos1, spine, document, html_cache)
     end
 
     -- Offset steps (":N") and the text-node step immediately preceding them
-    -- must never be part of the shared path — they are always terminal and
+    -- must never be part of the shared path - they are always terminal and
     -- belong to the relative start/end parts.
     -- Case 1: the shared boundary itself is an offset step (":N")
     if shared_len > 0 and list0[shared_len]:sub(1,1) == ":" then
         shared_len = shared_len - 1
     end
     -- Case 2: the first diverging step is an offset (":N"), meaning the last
-    -- shared step is the paired text-node step ("/1", "/3", …) — pull it out.
+    -- shared step is the paired text-node step ("/1", "/3", …) - pull it out.
     local next_idx = shared_len + 1
     if shared_len > 0
         and list0[next_idx] and list0[next_idx]:sub(1,1) == ":"
@@ -1520,7 +1521,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
         return 0, 0, 0
     end
     if self.booklore_username == "" or self.booklore_password == "" then
-        self:logWarn("BookloreSync: Highlights/notes sync skipped — credentials not configured")
+        self:logWarn("BookloreSync: Highlights/notes sync skipped - credentials not configured")
         return 0, 0, 0
     end
 
@@ -1533,7 +1534,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
 
     -- Annotation source priority (highest to lowest):
     --
-    -- 1. live_annotations — the raw ReaderAnnotation.annotations table captured
+    -- 1. live_annotations - the raw ReaderAnnotation.annotations table captured
     --    directly from self.ui.annotation before CloseDocument.  This is the only
     --    source that is guaranteed to be current at close time: KOReader stores
     --    annotations in ReaderAnnotation's own in-memory array and only copies
@@ -1542,11 +1543,11 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
     --    doc_settings["annotations"] at CloseDocument time therefore returns stale
     --    or absent data on real devices.
     --
-    -- 2. doc_settings — live in-memory DocSettings object.  Used as a fallback
+    -- 2. doc_settings - live in-memory DocSettings object.  Used as a fallback
     --    when live_annotations is not available (e.g. older KOReader builds that
     --    lack self.ui.annotation, or future call sites we haven't updated yet).
     --
-    -- 3. on-disk sidecar — last resort for retry/manual-sync paths where no live
+    -- 3. on-disk sidecar - last resort for retry/manual-sync paths where no live
     --    objects are available and the sidecar has already been flushed.
     local annotations
     if live_annotations and type(live_annotations) == "table" then
@@ -1555,7 +1556,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
         -- with defaults applied for any absent optional fields.
         annotations = {}
         for _, ann in ipairs(live_annotations) do
-            -- Bookmarks share the same array but lack pos0/color — skip them
+            -- Bookmarks share the same array but lack pos0/color - skip them
             if ann.text and ann.pos0 then
                 table.insert(annotations, {
                     text     = ann.text,
@@ -1593,7 +1594,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
     if is_epub and document then
         spine = self:buildEpubSpineMap(document)
         if not spine then
-            self:logWarn("BookloreSync: Could not build EPUB spine map — highlights/in-book notes will be skipped")
+            self:logWarn("BookloreSync: Could not build EPUB spine map - highlights/in-book notes will be skipped")
         end
     end
 
@@ -1722,17 +1723,17 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
                             self.booklore_username, self.booklore_password
                         )
                         if not in_book_ok then
-                            self:logWarn("BookloreSync: 'Both' — in-book note failed:", in_book_id)
+                            self:logWarn("BookloreSync: 'Both' - in-book note failed:", in_book_id)
                         end
                     else
-                        self:logInfo("BookloreSync: 'Both' — no CFI available, skipping in-book note")
+                        self:logInfo("BookloreSync: 'Both' - no CFI available, skipping in-book note")
                     end
                     bl_ok, bl_id = self.api:submitBookloreNote(
                         book_id, ann.note, ann.chapter,
                         self.booklore_username, self.booklore_password
                     )
                     if not bl_ok then
-                        self:logWarn("BookloreSync: 'Both' — Booklore note failed:", bl_id)
+                        self:logWarn("BookloreSync: 'Both' - Booklore note failed:", bl_id)
                     end
                 end
                 -- Treat the combined op as ok if at least one destination succeeded
@@ -1750,7 +1751,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
             end
 
             if queue_only then
-                -- No book_id yet or manual_sync_only mode — queue for retry with full CFI cached in payload.
+                -- No book_id yet or manual_sync_only mode - queue for retry with full CFI cached in payload.
                 local pending_payload = json.encode({
                     ann_type   = ann_type,
                     datetime   = datetime,
@@ -1800,7 +1801,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
             self:logErr("BookloreSync: Unexpected error processing annotation at:", datetime, "-", ann_err)
             failed_count = failed_count + 1
             -- Queue for retry even when the pcall itself fails, so the
-            -- annotation is not lost.  Use a minimal payload (no CFI) — the
+            -- annotation is not lost.  Use a minimal payload (no CFI) - the
             -- retry path will skip annotations it cannot re-submit.
             local ok_enc, pending_payload = pcall(json.encode, {
                 ann_type   = ann_type,
@@ -1824,12 +1825,12 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
 
     if self.manual_sync_only and queued_count > 0 then
         self:logInfo(string.format(
-            "BookloreSync: Highlights/notes cached — queued:%d  skipped:%d",
+            "BookloreSync: Highlights/notes cached - queued:%d  skipped:%d",
             queued_count, skipped_count
         ))
     else
         self:logInfo(string.format(
-            "BookloreSync: Highlights/notes sync done — synced:%d  skipped:%d  failed:%d  queued:%d",
+            "BookloreSync: Highlights/notes sync done - synced:%d  skipped:%d  failed:%d  queued:%d",
             synced_count, skipped_count, failed_count, queued_count
         ))
     end
@@ -2035,7 +2036,7 @@ Toggle tracking for a book from the file manager long-press menu.
 
 When tracking is disabled the book's cache row is updated immediately
 (or created with tracking_enabled=0 if the book has never been opened).
-Pending sessions already in the queue are left untouched — they will be
+Pending sessions already in the queue are left untouched - they will be
 skipped by getPendingSessions until tracking is re-enabled.
 
 @param file_path string  Absolute path to the book file
@@ -2326,7 +2327,7 @@ function BookloreSync:addToMainMenu(menu_items)
                     self.settings:flush()
                     UIManager:show(InfoMessage:new{
                         text = self.delete_removed_shelf_books
-                            and _("Delete removed shelf books enabled — local files not on shelf will be removed during sync")
+                            and _("Delete removed shelf books enabled - local files not on shelf will be removed during sync")
                             or  _("Delete removed shelf books disabled"),
                         timeout = 2,
                     })
@@ -2440,7 +2441,7 @@ function BookloreSync:addToMainMenu(menu_items)
                     if bookmarks   > 0 then table.insert(parts, T(_("%1 B"),  bookmarks))   end
                     return T(_("Sync Pending Now (%1)"), table.concat(parts, ", "))
                 end,
-                help_text = _("Manually upload all pending items that failed to sync previously — reading sessions, annotations (highlights and notes), ratings, and bookmarks. Items are cached locally when the network is unavailable."),
+                help_text = _("Manually upload all pending items that failed to sync previously - reading sessions, annotations (highlights and notes), ratings, and bookmarks. Items are cached locally when the network is unavailable."),
                 enabled_func = function()
                     if not self.db then return false end
                     local sessions     = tonumber(self.db:getPendingSessionCount())     or 0
@@ -2454,7 +2455,7 @@ function BookloreSync:addToMainMenu(menu_items)
                         self:syncPendingSessions()
                     end, function()
                         UIManager:show(InfoMessage:new{
-                            text    = _("WiFi not enabled — pending items remain queued"),
+                            text    = _("WiFi not enabled - pending items remain queued"),
                             timeout = 2,
                         })
                     end)
@@ -3386,7 +3387,7 @@ function BookloreSync:onCloseDocument()
     -- If resolution succeeds, propagate the ID back into current_session and
     -- the DB cache so subsequent steps see it as known.
     if not pre_book_id and pre_file_hash and pre_file_hash ~= "" then
-        self:logInfo("BookloreSync: book_id unknown at close — attempting final resolution (hash:", pre_file_hash, ")")
+        self:logInfo("BookloreSync: book_id unknown at close - attempting final resolution (hash:", pre_file_hash, ")")
         if NetworkMgr:isConnected() then
             -- Check cache first (may have been populated by a background sync)
             local cached = self.db:getBookByHash(pre_file_hash)
@@ -3400,7 +3401,7 @@ function BookloreSync:onCloseDocument()
                     self.db:updateBookId(pre_file_hash, pre_book_id)
                     self:logInfo("BookloreSync: book_id resolved from server at close:", pre_book_id)
                 else
-                    self:logWarn("BookloreSync: book_id could not be resolved at close — all data will be stored locally only")
+                    self:logWarn("BookloreSync: book_id could not be resolved at close - all data will be stored locally only")
                 end
             end
             -- Propagate back so endSession() stores the resolved ID in pending_sessions
@@ -3408,7 +3409,7 @@ function BookloreSync:onCloseDocument()
                 self.current_session.book_id = pre_book_id
             end
         else
-            self:logInfo("BookloreSync: Offline at close — book_id resolution deferred to next sync")
+            self:logInfo("BookloreSync: Offline at close - book_id resolution deferred to next sync")
         end
     end
 
@@ -3432,7 +3433,7 @@ function BookloreSync:onCloseDocument()
 
     -- ── Step 3: Queue / sync rating ───────────────────────────────────────
     self:logInfo(string.format(
-        "BookloreSync: Close flags — highlights_notes=%s  rating=%s  file_path=%s",
+        "BookloreSync: Close flags - highlights_notes=%s  rating=%s  file_path=%s",
         tostring(self.highlights_notes_sync_enabled),
         tostring(self.rating_sync_enabled),
         tostring(pre_file_path ~= nil)
@@ -3448,7 +3449,7 @@ function BookloreSync:onCloseDocument()
         end
 
         if pre_book_id then
-            -- book_id is known — act immediately.
+            -- book_id is known - act immediately.
             if mode == "koreader_scaled" then
                 -- Pass the live in-memory rating to avoid stale-sidecar reads.
                 self:syncKOReaderRating(pre_file_path, pre_book_id, pre_live_rating)
@@ -3460,18 +3461,18 @@ function BookloreSync:onCloseDocument()
                 end
             end
         else
-            -- book_id is still unknown — store everything locally, sync nothing.
+            -- book_id is still unknown - store everything locally, sync nothing.
             if mode == "koreader_scaled" and pre_live_rating and rating_book_cache_id then
                 -- Queue the scaled rating for retry once book_id is resolved.
                 local rating_scaled = math.max(1, math.min(10, math.floor(pre_live_rating) * 2))
                 self.db:upsertBookMetadata(rating_book_cache_id, { rating = rating_scaled, rating_synced = false })
                 self.db:addPendingRating(rating_book_cache_id, nil, rating_scaled)
-                self:logInfo("BookloreSync: koreader_scaled rating queued (no book_id) — scaled:", rating_scaled)
+                self:logInfo("BookloreSync: koreader_scaled rating queued (no book_id) - scaled:", rating_scaled)
             elseif mode == "select_at_complete" and pre_end_progress and pre_end_progress >= 99 then
                 -- Mark deferred so next sync shows/uploads the rating once book_id resolves.
                 if rating_book_cache_id then
                     self.db:setPendingRatingPrompt(rating_book_cache_id, true)
-                    self:logInfo("BookloreSync: Book completed but no book_id yet — deferred rating prompt stored")
+                    self:logInfo("BookloreSync: Book completed but no book_id yet - deferred rating prompt stored")
                 end
                 -- Show the dialog immediately so the user can record the rating now.
                 local path_copy = pre_file_path
@@ -3497,7 +3498,7 @@ function BookloreSync:onCloseDocument()
         -- Capture annotations directly from the ReaderAnnotation module.
         -- KOReader stores annotations in ReaderAnnotation's own in-memory table
         -- (self.ui.annotation.annotations) and only copies them into doc_settings
-        -- during the SaveSettings event — which fires AFTER CloseDocument on the
+        -- during the SaveSettings event - which fires AFTER CloseDocument on the
         -- standard close path (when self.dialog == self in ReaderUI:onClose).
         -- Reading doc_settings:readSetting("annotations") at this point therefore
         -- returns stale or missing data on real devices.  The authoritative live
@@ -3507,7 +3508,7 @@ function BookloreSync:onCloseDocument()
             live_annotations = self.ui.annotation.annotations
             self:logInfo("BookloreSync: Captured", #live_annotations, "annotations from ReaderAnnotation module")
         else
-            self:logInfo("BookloreSync: ReaderAnnotation module not available — will fall back to doc_settings / sidecar")
+            self:logInfo("BookloreSync: ReaderAnnotation module not available - will fall back to doc_settings / sidecar")
         end
 
         -- Derive bookmarks from the same live annotations array.
@@ -3532,7 +3533,7 @@ function BookloreSync:onCloseDocument()
             if #live_bookmarks > 0 then
                 self:logInfo("BookloreSync: Derived", #live_bookmarks, "bookmarks from live annotations array")
             else
-                self:logInfo("BookloreSync: No bookmarks found in live annotations array — will fall back to doc_settings / sidecar")
+                self:logInfo("BookloreSync: No bookmarks found in live annotations array - will fall back to doc_settings / sidecar")
                 live_bookmarks = nil
             end
         end
@@ -3562,16 +3563,16 @@ function BookloreSync:onCloseDocument()
     -- will be picked up on the next online resume or manual sync.
     if not self.manual_sync_only then
         if pre_book_id then
-            self:logInfo("BookloreSync: book_id known — triggering post-close sync")
+            self:logInfo("BookloreSync: book_id known - triggering post-close sync")
             -- _requestWifi will prompt if ask_wifi_enable is on and WiFi is off.
             -- On deny the data stays in the pending queues and will be uploaded
             -- on the next resume / manual sync.
             self:_requestWifi(_("upload session and annotations"), function()
                 self:syncPendingSessions(false)
             end, function()
-                -- User declined WiFi — show a brief "saved locally" notice so
+                -- User declined WiFi - show a brief "saved locally" notice so
                 -- they know the data is queued.
-                self:logInfo("BookloreSync: WiFi request declined at close — session queued")
+                self:logInfo("BookloreSync: WiFi request declined at close - session queued")
                 if not self.silent_messages then
                     local parts = { _("Booklore Sync: WiFi not enabled") }
                     parts[#parts + 1] = _("S: 1 queued")
@@ -3586,10 +3587,10 @@ function BookloreSync:onCloseDocument()
                 end
             end)
         else
-            self:logInfo("BookloreSync: book_id unknown — skipping network sync, data stored locally")
+            self:logInfo("BookloreSync: book_id unknown - skipping network sync, data stored locally")
             if not self.silent_messages then
                 -- Build an informative "stored locally" summary.
-                local parts = { _("Book not found in Booklore — saved locally") }
+                local parts = { _("Book not found in Booklore - saved locally") }
                 parts[#parts + 1] = _("S: 1 cached")
                 if ann_queued_now > 0 then
                     parts[#parts + 1] = T(_("A: %1 cached"), ann_queued_now)
@@ -3606,7 +3607,7 @@ function BookloreSync:onCloseDocument()
         end
     elseif session_status == "saved" and not self.silent_messages then
         -- Manual sync only mode: session was queued, inform the user.
-        self:logInfo("BookloreSync: manual_sync_only — session queued, notifying user")
+        self:logInfo("BookloreSync: manual_sync_only - session queued, notifying user")
         local parts = { _("Booklore Sync: Session saved") }
         parts[#parts + 1] = _("S: 1 queued")
         if ann_queued_now > 0 then
@@ -3692,13 +3693,13 @@ plugin wants WiFi (e.g. "sync sessions", "upload annotation").
 function BookloreSync:_requestWifi(context, on_confirm, on_deny)
     on_deny = on_deny or function() end
 
-    -- WiFi already up — proceed immediately without any prompt.
+    -- WiFi already up - proceed immediately without any prompt.
     if NetworkMgr:isConnected() then
         on_confirm()
         return
     end
 
-    -- Feature disabled — proceed without prompting.  The downstream sync
+    -- Feature disabled - proceed without prompting.  The downstream sync
     -- methods handle being offline gracefully (they skip network calls and
     -- leave data in the pending queues).  Only callers that intentionally
     -- want to enable WiFi (e.g. onSuspend with connect_network_on_suspend)
@@ -3708,7 +3709,7 @@ function BookloreSync:_requestWifi(context, on_confirm, on_deny)
         return
     end
 
-    -- Feature enabled — show a confirm dialog.
+    -- Feature enabled - show a confirm dialog.
     local prompt_text
     if context and context ~= "" then
         prompt_text = T(_("WiFi is required to %1.\n\nEnable WiFi now?"), context)
@@ -3761,10 +3762,10 @@ function BookloreSync:onSuspend()
             -- On deny, we still attempt syncPendingSessions (it will be a
             -- no-op if offline, data stays queued).
             self:_requestWifi(_("sync sessions on suspend"), function()
-                self:logInfo("BookloreSync: Network ready — force syncing pending sessions on suspend")
+                self:logInfo("BookloreSync: Network ready - force syncing pending sessions on suspend")
                 self:syncPendingSessions(true)
             end, function()
-                self:logInfo("BookloreSync: WiFi request declined on suspend — sessions remain queued")
+                self:logInfo("BookloreSync: WiFi request declined on suspend - sessions remain queued")
             end)
         else
             self:logInfo("BookloreSync: Force syncing pending sessions on suspend")
@@ -3819,7 +3820,7 @@ function BookloreSync:onResume()
                 self:logInfo("BookloreSync: Checking for unmatched books")
                 self:resolveUnmatchedBooks(true)
             end, function()
-                self:logInfo("BookloreSync: WiFi request declined on resume — sync skipped")
+                self:logInfo("BookloreSync: WiFi request declined on resume - sync skipped")
             end)
         end
     end
@@ -3879,7 +3880,7 @@ function BookloreSync:onNetworkConnected()
     if not self.is_enabled then return false end
     if not self.needs_wake_sync then return false end
 
-    self:logInfo("BookloreSync: Network connected with wake sync pending — scheduling")
+    self:logInfo("BookloreSync: Network connected with wake sync pending - scheduling")
     self:_scheduleWakeSync()
     return false
 end
@@ -3911,7 +3912,7 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, l
         return 0, 0, 0
     end
     if self.booklore_username == "" or self.booklore_password == "" then
-        self:logWarn("BookloreSync: Bookmark sync skipped — credentials not configured")
+        self:logWarn("BookloreSync: Bookmark sync skipped - credentials not configured")
         return 0, 0, 0
     end
 
@@ -3930,7 +3931,7 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, l
             if #bookmarks > 0 then
                 self:logInfo(string.format("BookloreSync: Bookmarks from live in-memory doc_settings (%d)", #bookmarks))
             else
-                self:logInfo("BookloreSync: doc_settings had no bookmarks — falling back to on-disk sidecar")
+                self:logInfo("BookloreSync: doc_settings had no bookmarks - falling back to on-disk sidecar")
                 bookmarks = self.metadata_extractor:getBookmarks(doc_path)
                 self:logInfo(string.format("BookloreSync: Bookmarks from on-disk sidecar (%d)", #bookmarks))
             end
@@ -3953,7 +3954,7 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, l
     if is_epub and document then
         spine = self:buildEpubSpineMap(document)
         if not spine then
-            self:logWarn("BookloreSync: Could not build EPUB spine map for bookmarks — will skip EPUB CFI")
+            self:logWarn("BookloreSync: Could not build EPUB spine map for bookmarks - will skip EPUB CFI")
         end
     end
 
@@ -3998,7 +3999,7 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, l
             end
 
             if not cfi then
-                self:logInfo("BookloreSync: No CFI for bookmark at:", datetime, "— queuing without CFI")
+                self:logInfo("BookloreSync: No CFI for bookmark at:", datetime, "- queuing without CFI")
                 -- Queue with a page-based fallback so it can be retried later
                 local pending_payload = json.encode({
                     datetime      = datetime,
@@ -4069,7 +4070,7 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, l
     end
 
     self:logInfo(string.format(
-        "BookloreSync: Bookmark sync complete — synced=%d queued=%d failed=%d",
+        "BookloreSync: Bookmark sync complete - synced=%d queued=%d failed=%d",
         synced_count, queued_count, failed_count
     ))
     return synced_count, queued_count, failed_count
@@ -4113,7 +4114,7 @@ function BookloreSync:syncPendingBookmarks(silent)
             if cached_id then
                 book_id = cached_id
             else
-                self:logInfo("BookloreSync: No book_id for pending bookmark id:", row.id, "— deferring")
+                self:logInfo("BookloreSync: No book_id for pending bookmark id:", row.id, "- deferring")
                 goto pb_continue
             end
         end
@@ -4129,7 +4130,7 @@ function BookloreSync:syncPendingBookmarks(silent)
             self.db:deletePendingBookmark(row.id)
             synced_count = synced_count + 1
         elseif type(server_id) == "string" and server_id:lower():find("already exists") then
-            -- Server reports a duplicate — treat as success so the item is
+            -- Server reports a duplicate - treat as success so the item is
             -- not retried indefinitely.
             self.db:markBookmarkSynced(row.book_cache_id, row.datetime, nil)
             self.db:deletePendingBookmark(row.id)
@@ -4144,7 +4145,7 @@ function BookloreSync:syncPendingBookmarks(silent)
     end
 
     self:logInfo(string.format(
-        "BookloreSync: Pending bookmark retry complete — synced=%d failed=%d",
+        "BookloreSync: Pending bookmark retry complete - synced=%d failed=%d",
         synced_count, failed_count
     ))
     return synced_count, failed_count
@@ -4156,9 +4157,9 @@ Detect a sensible default download directory for the current device.
 Resolution order:
   1. KOReader's configured home directory (G_reader_settings "home_dir")
   2. Device.home_dir (set by KOReader at startup for the current platform)
-  3. /mnt/onboard/Books  — Kobo internal storage
-  4. /sdcard/Books       — Android
-  5. /Books              — generic fallback
+  3. /mnt/onboard/Books  - Kobo internal storage
+  4. /sdcard/Books       - Android
+  5. /Books              - generic fallback
 
 The result is always a "Books" subdirectory so downloaded shelf files
 don't litter the root of the user's home.
@@ -4239,7 +4240,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
         local ok_mkdir = lfs.mkdir(self.download_dir)
         if not ok_mkdir then
             local msg = T(_("Cannot create download directory: %1"), self.download_dir)
-            self:logErr("BookloreSync: syncFromBookloreShelf —", msg)
+            self:logErr("BookloreSync: syncFromBookloreShelf -", msg)
             if not silent and not self.silent_messages then
                 UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
             end
@@ -4249,7 +4250,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     end
 
     self.sync_in_progress = true
-    self:logInfo("BookloreSync: syncFromBookloreShelf — starting AsyncTask sync")
+    self:logInfo("BookloreSync: syncFromBookloreShelf - starting AsyncTask sync")
 
     local info_msg
     if not silent and not self.silent_messages then
@@ -4282,7 +4283,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
         if not books_ok then error(books or "Failed to retrieve books from shelf") end
 
         if type(books) ~= "table" or #books == 0 then
-            return false, _("Shelf is empty — no books to sync")
+            return false, _("Shelf is empty - no books to sync")
         end
 
         local downloaded = 0
@@ -4317,7 +4318,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                 end)
 
                 if lfs.attributes(filepath, "mode") == "file" then
-                    -- Already present — ensure cache entry exists
+                    -- Already present - ensure cache entry exists
                     if not self.db:getBookByFilePath(filepath) then
                         local hash = self:calculateBookHash(filepath)
                         self.db:saveBookCache(filepath, hash, book_id,
@@ -4371,7 +4372,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             self.db:commit()
         else
             self.db:rollback()
-            self:logErr("BookloreSync: syncFromBookloreShelf — loop error, rolled back:", err_loop)
+            self:logErr("BookloreSync: syncFromBookloreShelf - loop error, rolled back:", err_loop)
             error(err_loop)
         end
 
@@ -4422,7 +4423,7 @@ end
 --[[--
 Generate a stable filename for a shelf book download.
 
-Format: "BookID_{id}.{extension}" — avoids filesystem-unsafe characters
+Format: "BookID_{id}.{extension}" - avoids filesystem-unsafe characters
 while keeping filenames predictable for the bidirectional deletion sweep.
 
 @param book table  Book object from Booklore API
@@ -4460,18 +4461,18 @@ function BookloreSync:preDeleteHook(filepath)
         if cached then
             if cached.book_id then
                 book_id = tonumber(cached.book_id)
-                self:logInfo("BookloreSync: preDeleteHook — cached book_id:", book_id)
+                self:logInfo("BookloreSync: preDeleteHook - cached book_id:", book_id)
             else
-                self:logInfo("BookloreSync: preDeleteHook — cached book has no book_id (never synced)")
+                self:logInfo("BookloreSync: preDeleteHook - cached book has no book_id (never synced)")
             end
         else
-            self:logInfo("BookloreSync: preDeleteHook — book not in cache")
+            self:logInfo("BookloreSync: preDeleteHook - book not in cache")
         end
     end
 
     local hash = self:calculateBookHash(filepath)
     if not hash then
-        self:logWarn("BookloreSync: preDeleteHook — could not compute hash for:", filepath)
+        self:logWarn("BookloreSync: preDeleteHook - could not compute hash for:", filepath)
         return nil, nil, nil
     end
 
@@ -4504,7 +4505,7 @@ function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_
 
     -- If offline, queue immediately rather than attempting the async call
     if not from_queue and not NetworkMgr:isConnected() then
-        self:logWarn("BookloreSync: notifyBookloreOnDeletion — offline, queuing deletion")
+        self:logWarn("BookloreSync: notifyBookloreOnDeletion - offline, queuing deletion")
         if self.db then self.db:savePendingDeletion(hash, stem, cached_book_id) end
         return
     end
@@ -4513,13 +4514,13 @@ function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_
 
     UIManager:scheduleIn(0, function()
         local ok, err = pcall(function()
-            self:logInfo("BookloreSync: notifyBookloreOnDeletion — hash:", hash, "stem:", stem, "cached_book_id:", tostring(cached_book_id))
+            self:logInfo("BookloreSync: notifyBookloreOnDeletion - hash:", hash, "stem:", stem, "cached_book_id:", tostring(cached_book_id))
 
             local book_id = cached_book_id
 
             -- Fallback: search by title if we don't have a cached book_id
             if not book_id then
-                self:logInfo("BookloreSync: notifyBookloreOnDeletion — no cached book_id, searching by title")
+                self:logInfo("BookloreSync: notifyBookloreOnDeletion - no cached book_id, searching by title")
                 local ok1, resp1 = self.api:searchBooksWithAuth(stem, self.booklore_username, self.booklore_password)
                 if ok1 and type(resp1) == "table" and resp1[1] and resp1[1].id then
                     book_id = tonumber(resp1[1].id)
@@ -4536,7 +4537,7 @@ function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_
             end
 
             if not book_id then
-                self:logWarn("BookloreSync: notifyBookloreOnDeletion — book not found on server, skipping shelf removal")
+                self:logWarn("BookloreSync: notifyBookloreOnDeletion - book not found on server, skipping shelf removal")
                 return
             end
 
@@ -4545,7 +4546,7 @@ function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_
             if not token_ok then error(token or "Failed to obtain auth token") end
 
             local shelf_id = self.shelf_id
-            if not shelf_id then error("No shelf_id configured — cannot unassign book from shelf") end
+            if not shelf_id then error("No shelf_id configured - cannot unassign book from shelf") end
 
             local headers = {
                 ["Authorization"] = "Bearer " .. token,
@@ -4559,7 +4560,7 @@ function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_
             local req_ok, code, resp = self.api:request("POST", "/api/v1/books/shelves", body, headers)
 
             if req_ok or code == 200 then
-                self:logInfo("BookloreSync: notifyBookloreOnDeletion — book unassigned from shelf, id:", book_id)
+                self:logInfo("BookloreSync: notifyBookloreOnDeletion - book unassigned from shelf, id:", book_id)
             else
                 error(tostring(code) .. ": " .. tostring(resp))
             end
@@ -4567,7 +4568,7 @@ function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_
         if not ok then
             self:logWarn("BookloreSync: notifyBookloreOnDeletion failed:", tostring(err))
             if not from_queue and booklore_self.db then
-                self:logInfo("BookloreSync: notifyBookloreOnDeletion — queuing for retry")
+                self:logInfo("BookloreSync: notifyBookloreOnDeletion - queuing for retry")
                 booklore_self.db:savePendingDeletion(hash, stem, cached_book_id)
             end
         end
@@ -4593,7 +4594,7 @@ function BookloreSync:syncPendingDeletions(silent)
     local deletions = self.db:getPendingDeletions()
     if not deletions or #deletions == 0 then return 0, 0 end
 
-    self:logInfo("BookloreSync: syncPendingDeletions — retrying", #deletions, "queued deletion(s)")
+    self:logInfo("BookloreSync: syncPendingDeletions - retrying", #deletions, "queued deletion(s)")
 
     local synced_count = 0
     local failed_count = 0
@@ -4604,7 +4605,7 @@ function BookloreSync:syncPendingDeletions(silent)
     for _, deletion in ipairs(deletions) do
         -- Drop stale entries that have exceeded the retry limit
         if deletion.retry_count > 10 then
-            self:logWarn("BookloreSync: syncPendingDeletions — dropping stale deletion (>10 retries), hash:", deletion.file_hash)
+            self:logWarn("BookloreSync: syncPendingDeletions - dropping stale deletion (>10 retries), hash:", deletion.file_hash)
             self.db:removePendingDeletion(deletion.id)
             goto del_continue
         end
@@ -4618,15 +4619,15 @@ function BookloreSync:syncPendingDeletions(silent)
         end
 
         if not book_id then
-            -- Can't find the book — nothing to remove; silently discard
-            self:logInfo("BookloreSync: syncPendingDeletions — book_id unknown, discarding deletion id:", deletion.id)
+            -- Can't find the book - nothing to remove; silently discard
+            self:logInfo("BookloreSync: syncPendingDeletions - book_id unknown, discarding deletion id:", deletion.id)
             self.db:removePendingDeletion(deletion.id)
             synced_count = synced_count + 1
             goto del_continue
         end
 
         if not token_ok then
-            self:logWarn("BookloreSync: syncPendingDeletions — no auth token, skipping")
+            self:logWarn("BookloreSync: syncPendingDeletions - no auth token, skipping")
             self.db:incrementDeletionRetry(deletion.id)
             failed_count = failed_count + 1
             goto del_continue
@@ -4634,7 +4635,7 @@ function BookloreSync:syncPendingDeletions(silent)
 
         local shelf_id = self.shelf_id
         if not shelf_id then
-            self:logWarn("BookloreSync: syncPendingDeletions — no shelf_id configured, cannot unassign book, skipping")
+            self:logWarn("BookloreSync: syncPendingDeletions - no shelf_id configured, cannot unassign book, skipping")
             self.db:incrementDeletionRetry(deletion.id)
             failed_count = failed_count + 1
             goto del_continue
@@ -4662,7 +4663,7 @@ function BookloreSync:syncPendingDeletions(silent)
     end
 
     self:logInfo(string.format(
-        "BookloreSync: syncPendingDeletions complete — synced=%d failed=%d",
+        "BookloreSync: syncPendingDeletions complete - synced=%d failed=%d",
         synced_count, failed_count
     ))
     return synced_count, failed_count
@@ -4684,14 +4685,14 @@ function BookloreSync:syncPendingRatings(silent)
     silent = silent or false
 
     if not self.db then
-        self:logErr("BookloreSync: syncPendingRatings — database not initialised")
+        self:logErr("BookloreSync: syncPendingRatings - database not initialised")
         return 0, 0
     end
 
     -- Respect the user's rating-sync toggle: if they disabled rating sync
     -- after queueing ratings, do not submit anything.
     if not self.rating_sync_enabled then
-        self:logInfo("BookloreSync: Rating sync disabled — skipping pending ratings")
+        self:logInfo("BookloreSync: Rating sync disabled - skipping pending ratings")
         return 0, 0
     end
 
@@ -4703,14 +4704,14 @@ function BookloreSync:syncPendingRatings(silent)
         self:logInfo("BookloreSync: Processing", #deferred, "deferred rating prompt(s)")
         local mode = self.rating_sync_mode or "koreader_scaled"
         for _, row in ipairs(deferred) do
-            self:logInfo("BookloreSync: Deferred rating prompt — book_id:", row.book_id,
+            self:logInfo("BookloreSync: Deferred rating prompt - book_id:", row.book_id,
                          "file:", row.file_path)
             if mode == "koreader_scaled" then
                 -- Push the KOReader star rating silently now that we have a book_id.
                 -- syncKOReaderRating will either sync successfully, queue the rating
                 -- in pending_ratings on failure, or return early (no rating set /
                 -- already synced / no credentials).  Only clear the deferred flag
-                -- if we actually had credentials to attempt the call — otherwise
+                -- if we actually had credentials to attempt the call - otherwise
                 -- leave the flag so the next sync retries.
                 if self.booklore_username ~= "" and self.booklore_password ~= "" then
                     self:syncKOReaderRating(row.file_path, row.book_id)
@@ -4718,7 +4719,7 @@ function BookloreSync:syncPendingRatings(silent)
                     -- in pending_ratings, so the deferred-prompt entry is no longer needed.
                     self.db:setPendingRatingPrompt(row.book_cache_id, false)
                 else
-                    self:logWarn("BookloreSync: Deferred rating skipped — Booklore credentials not configured")
+                    self:logWarn("BookloreSync: Deferred rating skipped - Booklore credentials not configured")
                     -- Leave flag set; will retry on the next sync once credentials are added.
                 end
             elseif mode == "select_at_complete" then
@@ -4728,14 +4729,14 @@ function BookloreSync:syncPendingRatings(silent)
                 -- the pending row so Phase 2 can upload it without re-prompting.
                 local meta = self.db:getBookMetadata(row.book_cache_id)
                 if meta and meta.rating then
-                    -- Rating already captured — just stamp the resolved book_id
+                    -- Rating already captured - just stamp the resolved book_id
                     -- onto the pending_ratings row and clear the deferred flag.
                     self.db:addPendingRating(row.book_cache_id, row.book_id, meta.rating)
                     self.db:setPendingRatingPrompt(row.book_cache_id, false)
                     self:logInfo("BookloreSync: Stamped book_id", row.book_id,
                                  "onto pending rating for book_cache_id:", row.book_cache_id)
                 else
-                    -- No rating stored yet — show the dialog now that we have a book_id.
+                    -- No rating stored yet - show the dialog now that we have a book_id.
                     -- Clear the flag before scheduling so the dialog is not re-shown
                     -- on subsequent syncs.
                     local file_path = row.file_path
@@ -4764,7 +4765,7 @@ function BookloreSync:syncPendingRatings(silent)
     local failed_count = 0
 
     for _, row in ipairs(pending) do
-        self:logInfo("BookloreSync: Submitting pending rating — book_id:", row.book_id,
+        self:logInfo("BookloreSync: Submitting pending rating - book_id:", row.book_id,
                      "rating:", row.rating, "(retry #" .. (row.retry_count + 1) .. ")")
 
         -- Resolve book_id if it was nil when the rating was first queued.
@@ -4773,7 +4774,7 @@ function BookloreSync:syncPendingRatings(silent)
             local bc = self.db:getBookCacheById(row.book_cache_id)
             book_id = bc and bc.book_id or nil
             if not book_id then
-                self:logInfo("BookloreSync: book_id still unknown for pending rating id:", row.id, "— will retry later")
+                self:logInfo("BookloreSync: book_id still unknown for pending rating id:", row.id, "- will retry later")
                 goto continue_rating
             end
             self:logInfo("BookloreSync: Resolved book_id", book_id, "for pending rating id:", row.id)
@@ -4802,7 +4803,7 @@ function BookloreSync:syncPendingRatings(silent)
         ::continue_rating::
     end
 
-    self:logInfo("BookloreSync: Pending ratings sync complete — synced:", synced_count, "failed:", failed_count)
+    self:logInfo("BookloreSync: Pending ratings sync complete - synced:", synced_count, "failed:", failed_count)
     return synced_count, failed_count
 end
 
@@ -4830,17 +4831,17 @@ function BookloreSync:syncPendingAnnotations(silent)
     silent = silent or false
 
     if not self.db then
-        self:logErr("BookloreSync: syncPendingAnnotations — database not initialised")
+        self:logErr("BookloreSync: syncPendingAnnotations - database not initialised")
         return 0, 0
     end
 
     if not self.highlights_notes_sync_enabled then
-        self:logInfo("BookloreSync: Annotation sync disabled — skipping pending annotations")
+        self:logInfo("BookloreSync: Annotation sync disabled - skipping pending annotations")
         return 0, 0
     end
 
     if self.booklore_username == "" or self.booklore_password == "" then
-        self:logInfo("BookloreSync: Pending annotations skipped — Booklore credentials not configured")
+        self:logInfo("BookloreSync: Pending annotations skipped - Booklore credentials not configured")
         return 0, 0
     end
 
@@ -4859,13 +4860,13 @@ function BookloreSync:syncPendingAnnotations(silent)
     local skipped_count = 0
 
     for _, row in ipairs(pending) do
-        self:logInfo("BookloreSync: Retrying pending annotation — id:", row.id,
+        self:logInfo("BookloreSync: Retrying pending annotation - id:", row.id,
                      "type:", row.ann_type, "datetime:", row.datetime,
                      "(retry #" .. (row.retry_count + 1) .. ")")
 
         local ok_dec, payload = pcall(json.decode, row.payload)
         if not ok_dec or type(payload) ~= "table" then
-            self:logErr("BookloreSync: Failed to decode pending annotation payload (id:", row.id, ") — removing")
+            self:logErr("BookloreSync: Failed to decode pending annotation payload (id:", row.id, ") - removing")
             self.db:deletePendingAnnotation(row.id)
             goto continue_ann
         end
@@ -4875,7 +4876,7 @@ function BookloreSync:syncPendingAnnotations(silent)
             local bc = self.db:getBookCacheById(row.book_cache_id)
             book_id = bc and bc.book_id or nil
             if not book_id then
-                self:logInfo("BookloreSync: book_id still unknown for pending annotation id:", row.id, "— will retry later")
+                self:logInfo("BookloreSync: book_id still unknown for pending annotation id:", row.id, "- will retry later")
                 skipped_count = skipped_count + 1
                 goto continue_ann
             end
@@ -4891,7 +4892,7 @@ function BookloreSync:syncPendingAnnotations(silent)
             -- pick it up fresh and the pending row will be superseded.)
             local cfi = payload.cfi
             if not cfi or cfi == "" then
-                self:logInfo("BookloreSync: Skipping pending highlight (no CFI available) — id:", row.id)
+                self:logInfo("BookloreSync: Skipping pending highlight (no CFI available) - id:", row.id)
                 skipped_count = skipped_count + 1
                 goto continue_ann
             end
@@ -4908,7 +4909,7 @@ function BookloreSync:syncPendingAnnotations(silent)
         elseif row.ann_type == "in_book_note" then
             local cfi = payload.cfi
             if not cfi or cfi == "" then
-                self:logInfo("BookloreSync: Skipping pending in-book note (no CFI available) — id:", row.id)
+                self:logInfo("BookloreSync: Skipping pending in-book note (no CFI available) - id:", row.id)
                 skipped_count = skipped_count + 1
                 goto continue_ann
             end
@@ -4929,7 +4930,7 @@ function BookloreSync:syncPendingAnnotations(silent)
             )
 
         else
-            self:logWarn("BookloreSync: Unknown ann_type in pending_annotations (id:", row.id, "):", row.ann_type, "— removing")
+            self:logWarn("BookloreSync: Unknown ann_type in pending_annotations (id:", row.id, "):", row.ann_type, "- removing")
             self.db:deletePendingAnnotation(row.id)
             goto continue_ann
         end
@@ -4941,7 +4942,7 @@ function BookloreSync:syncPendingAnnotations(silent)
             self.db:deletePendingAnnotation(row.id)
             self:logInfo("BookloreSync: Pending annotation synced (id:", row.id, ")")
         elseif type(server_id) == "string" and server_id:lower():find("already exists") then
-            -- Server reports a duplicate — treat as success so the item is
+            -- Server reports a duplicate - treat as success so the item is
             -- not retried indefinitely.
             synced_count = synced_count + 1
             self.db:markAnnotationSynced(row.book_cache_id, row.datetime, row.ann_type, nil)
@@ -4956,7 +4957,7 @@ function BookloreSync:syncPendingAnnotations(silent)
         ::continue_ann::
     end
 
-    self:logInfo("BookloreSync: Pending annotations sync complete — synced:", synced_count, "failed:", failed_count, "skipped:", skipped_count)
+    self:logInfo("BookloreSync: Pending annotations sync complete - synced:", synced_count, "failed:", failed_count, "skipped:", skipped_count)
     return synced_count, failed_count, skipped_count
 end
 
@@ -5115,14 +5116,14 @@ function BookloreSync:syncPendingSessions(silent)
 
     for _, session in ipairs(sessions) do
         if session.bookHash and not session.bookId then
-            self:logInfo("BookloreSync: Phase 0 — resolving book_id for hash:", session.bookHash)
+            self:logInfo("BookloreSync: Phase 0 - resolving book_id for hash:", session.bookHash)
             -- 1. Check DB cache (may have been populated by onCloseDocument)
             local cached = self.db:getBookByHash(session.bookHash)
             if cached and cached.book_id then
                 session.bookId = tonumber(cached.book_id)
                 -- Write back so future sync cycles skip re-resolution.
                 self.db:updatePendingSessionBookId(session.id, session.bookId)
-                self:logInfo("BookloreSync: Phase 0 — resolved from cache:", session.bookId)
+                self:logInfo("BookloreSync: Phase 0 - resolved from cache:", session.bookId)
                 resolved_count = resolved_count + 1
             elseif network_ok then
                 -- 2. Ask the server (only when online)
@@ -5134,22 +5135,22 @@ function BookloreSync:syncPendingSessions(silent)
                         -- Warm the book-cache and fix the pending_sessions row.
                         self.db:updateBookId(session.bookHash, book_id)
                         self.db:updatePendingSessionBookId(session.id, book_id)
-                        self:logInfo("BookloreSync: Phase 0 — resolved from server:", book_id)
+                        self:logInfo("BookloreSync: Phase 0 - resolved from server:", book_id)
                         resolved_count = resolved_count + 1
                     else
-                        self:logWarn("BookloreSync: Phase 0 — server returned invalid book_id for hash:", session.bookHash)
+                        self:logWarn("BookloreSync: Phase 0 - server returned invalid book_id for hash:", session.bookHash)
                     end
                 else
-                    self:logWarn("BookloreSync: Phase 0 — book not found on server for hash:", session.bookHash, "— will retry later")
+                    self:logWarn("BookloreSync: Phase 0 - book not found on server for hash:", session.bookHash, "- will retry later")
                 end
             else
-                self:logInfo("BookloreSync: Phase 0 — offline, skipping server lookup for hash:", session.bookHash)
+                self:logInfo("BookloreSync: Phase 0 - offline, skipping server lookup for hash:", session.bookHash)
             end
         end
     end
 
     if resolved_count > 0 then
-        self:logInfo("BookloreSync: Phase 0 complete — resolved", resolved_count, "book_id(s)")
+        self:logInfo("BookloreSync: Phase 0 complete - resolved", resolved_count, "book_id(s)")
     end
 
     -- ── Phase 1: Ratings ──────────────────────────────────────────────────
@@ -5219,7 +5220,7 @@ function BookloreSync:syncPendingSessions(silent)
         return
     end
 
-    self:logInfo("BookloreSync: Phase 3 — submitting", pending_count, "pending session(s)")
+    self:logInfo("BookloreSync: Phase 3 - submitting", pending_count, "pending session(s)")
 
     local synced_count = 0
     local failed_count = 0
@@ -5228,7 +5229,7 @@ function BookloreSync:syncPendingSessions(silent)
         self:logInfo("BookloreSync: Processing pending session", i, "of", #sessions)
 
         if not session.bookId then
-            self:logWarn("BookloreSync: Session", i, "has no book_id after Phase 0 — skipping")
+            self:logWarn("BookloreSync: Session", i, "has no book_id after Phase 0 - skipping")
             self.db:incrementSessionRetryCount(session.id)
             failed_count = failed_count + 1
             goto continue
@@ -5250,7 +5251,7 @@ function BookloreSync:syncPendingSessions(silent)
             endLocation       = session.endLocation,
         }
 
-        self:logInfo("BookloreSync: Submitting session", i, "— book_id:", session.bookId,
+        self:logInfo("BookloreSync: Submitting session", i, "- book_id:", session.bookId,
                      "duration:", duration_formatted)
 
         local success, message = self.api:submitSession(session_data)
@@ -5272,7 +5273,7 @@ function BookloreSync:syncPendingSessions(silent)
         ::continue::
     end
 
-    self:logInfo("BookloreSync: Sync complete — sessions synced:", synced_count,
+    self:logInfo("BookloreSync: Sync complete - sessions synced:", synced_count,
                  "failed:", failed_count, "resolved:", resolved_count)
 
     if not silent then
@@ -5282,7 +5283,7 @@ function BookloreSync:syncPendingSessions(silent)
         elseif synced_count > 0 then
             parts[#parts + 1] = T(_("S: %1 synced"), synced_count)
         elseif failed_count > 0 then
-            parts[#parts + 1] = _("S: all failed — check connection")
+            parts[#parts + 1] = _("S: all failed - check connection")
         end
         if ratings_synced + ratings_failed > 0 then
             if ratings_failed > 0 then
@@ -5472,7 +5473,7 @@ function BookloreSync:_saveBookCacheMatch(book, selected_result)
 
     if not book_id then
         UIManager:show(InfoMessage:new{
-            text = _("Invalid book ID — match not saved"),
+            text = _("Invalid book ID - match not saved"),
             timeout = 2,
         })
         return
@@ -5493,7 +5494,7 @@ function BookloreSync:_saveBookCacheMatch(book, selected_result)
         return
     end
 
-    self:logInfo("BookloreSync: Saved manual match — file:", book.file_path,
+    self:logInfo("BookloreSync: Saved manual match - file:", book.file_path,
                  "book_id:", book_id)
 
     -- Advance to the next unmatched book
@@ -6907,7 +6908,7 @@ function BookloreSync:syncRematchedSessions()
 end
 
 --[[--
-Manual Matching — placeholder, work in progress.
+Manual Matching - placeholder, work in progress.
 --]]
 function BookloreSync:manualMatching()
     UIManager:show(InfoMessage:new{
@@ -7357,7 +7358,7 @@ function BookloreSync:fetchAndStoreHardcoverIds()
         -- Skip books that already have a valid hardcover_id stored locally.
         if book.hardcover_id and book.hardcover_id > 0 then
             skipped = skipped + 1
-            self:logInfo("BookloreSync: hardcover_id already stored for book_id", book.book_id, "— skipping")
+            self:logInfo("BookloreSync: hardcover_id already stored for book_id", book.book_id, "- skipping")
         else
             local ok, data = self.api:getBookById(
                 book.book_id,
@@ -7404,7 +7405,7 @@ function BookloreSync:fetchAndStoreHardcoverIds()
                 end
             else
                 failed = failed + 1
-                self:logWarn("BookloreSync: getBookById failed for book_id", book.book_id, "—", tostring(data))
+                self:logWarn("BookloreSync: getBookById failed for book_id", book.book_id, "-", tostring(data))
             end
         end
     end
@@ -7412,7 +7413,7 @@ function BookloreSync:fetchAndStoreHardcoverIds()
     -- Hardcover fallback: for books where Booklore returned no hardcover_id,
     -- present search results one at a time for the user to confirm.
     local hc_found = 0
-    self:logInfo("BookloreSync: Hardcover fallback — token set:", (self.hardcover_token ~= ""),
+    self:logInfo("BookloreSync: Hardcover fallback - token set:", (self.hardcover_token ~= ""),
         "candidates:", #fallback_candidates)
 
     UIManager:close(booklore_msg)
@@ -7442,7 +7443,7 @@ function BookloreSync:fetchAndStoreHardcoverIds()
     local process_next
     process_next = function(i)
         if i > #fallback_candidates then
-            -- All done — show summary
+            -- All done - show summary
             local summary
             if hc_found > 0 then
                 summary = T(_(
@@ -7477,7 +7478,7 @@ function BookloreSync:fetchAndStoreHardcoverIds()
         UIManager:show(searching_msg)
         UIManager:forceRePaint()
 
-        -- Step 1: ISBN-13 lookup (no selector needed — ISBNs are unambiguous)
+        -- Step 1: ISBN-13 lookup (no selector needed - ISBNs are unambiguous)
         local isbn = cand.isbn13
         if isbn and isbn ~= "" then
             local hc_id, isbn_err = self.hc_api:findBookByIsbn(isbn, self.hardcover_token)
@@ -7545,7 +7546,7 @@ function BookloreSync:fetchAndStoreHardcoverIds()
 
         local book_label = cand.title or ""
         if cand.authors and cand.authors ~= "" then
-            book_label = book_label .. " — " .. cand.authors
+            book_label = book_label .. " - " .. cand.authors
         end
 
         selector = Menu:new{

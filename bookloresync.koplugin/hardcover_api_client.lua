@@ -82,7 +82,7 @@ function HardcoverClient:query(query, variables, token)
     end
 
     if code < 200 or code >= 300 then
-        self:logWarn("HardcoverClient: HTTP", code, "—", response_text)
+        self:logWarn("HardcoverClient: HTTP", code, "-", response_text)
         return nil, "Hardcover HTTP " .. tostring(code)
     end
 
@@ -162,7 +162,7 @@ function HardcoverClient:findBookByIsbn(isbn, token)
     isbn = isbn:gsub("[-% ]", "")
     local isbn_field = (#isbn == 13) and "isbn_13" or "isbn_10"
 
-    self:logInfo("HardcoverClient: ISBN lookup —", isbn_field, "=", isbn)
+    self:logInfo("HardcoverClient: ISBN lookup -", isbn_field, "=", isbn)
 
     local query = [[
         query($isbn: String!) {
@@ -230,7 +230,7 @@ function HardcoverClient:searchBook(title, author, token)
         search_str = search_str .. " " .. author
     end
 
-    self:logInfo("HardcoverClient: Title search —", search_str)
+    self:logInfo("HardcoverClient: Title search -", search_str)
 
     local search_query = [[
         query($q: String!, $page: Int!) {
@@ -304,7 +304,7 @@ function HardcoverClient:searchBook(title, author, token)
                 author = author_name,
                 year   = year,
             })
-            self:logInfo("HardcoverClient: Candidate —", book_id, b.title, author_name, year)
+            self:logInfo("HardcoverClient: Candidate -", book_id, b.title, author_name, year)
         end
     end
 
@@ -388,7 +388,7 @@ function HardcoverClient:submitRating(hardcover_id, rating, token)
     -- Convert 1-10 → 0.5-5.0
     local hc_rating = rating / 2
 
-    self:logInfo("HardcoverClient: submitRating — hardcover_id:", hardcover_id,
+    self:logInfo("HardcoverClient: submitRating - hardcover_id:", hardcover_id,
         "booklore_rating:", rating, "hc_rating:", hc_rating)
 
     -- Step 1: get user ID (cached after first call)
@@ -402,7 +402,7 @@ function HardcoverClient:submitRating(hardcover_id, rating, token)
     local user_book_id, ub_err = self:findUserBookId(hardcover_id, user_id, token)
     if not user_book_id then
         self:logWarn("HardcoverClient: No user_book record for hardcover_id",
-            hardcover_id, "—", ub_err)
+            hardcover_id, "-", ub_err)
         return false, tostring(ub_err)
     end
 

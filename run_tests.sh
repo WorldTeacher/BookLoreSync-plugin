@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_tests.sh — Run all Booklore plugin unit tests.
+# run_tests.sh - Run all Booklore plugin unit tests.
 # Exits 0 only if every test suite passes.
 # Used by CI and can be run locally: bash run_tests.sh
 

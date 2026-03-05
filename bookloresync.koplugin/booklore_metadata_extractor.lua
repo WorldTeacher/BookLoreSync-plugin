@@ -173,7 +173,7 @@ function BookloreMetadataExtractor:getHighlightsFromDocSettings(doc_settings)
 
     local highlights = {}
     for _, annotation in ipairs(annotations) do
-        -- Bookmarks share the same array but lack pos0/color — skip them here
+        -- Bookmarks share the same array but lack pos0/color - skip them here
         if annotation.text and annotation.pos0 then
             table.insert(highlights, {
                 text     = annotation.text,
@@ -223,7 +223,7 @@ function BookloreMetadataExtractor:getHighlights(doc_path)
     
     local highlights = {}
     for _, annotation in ipairs(annotations) do
-        -- Bookmarks share the same array but lack pos0/color — skip them here
+        -- Bookmarks share the same array but lack pos0/color - skip them here
         if annotation.text and annotation.pos0 then
             table.insert(highlights, {
                 text = annotation.text,

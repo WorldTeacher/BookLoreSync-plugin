@@ -93,7 +93,7 @@ function FileLogger:_listLogFiles()
 
     local lfs_ok, lfs = pcall(require, "libs/libkoreader-lfs")
     if lfs_ok and lfs then
-        -- lfs-based iteration — no shell required
+        -- lfs-based iteration - no shell required
         for entry in lfs.dir(self.log_dir) do
             if entry:match("^booklore%-%d%d%d%d%-%d%d%-%d%d%.log$") then
                 table.insert(log_files, self.log_dir .. "/" .. entry)

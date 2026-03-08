@@ -2197,13 +2197,13 @@ function BookloreSync:_fileDialogBookloreSync(file_path)
                 text     = _("Annotations"),
                 callback = function()
                     UIManager:close(sync_dialog)
-                    UIManager:show(InfoMessage:new{
-                        text = _("Will only sync to webUI, not in book"),
-                        timeout = 1.5,
+                    UIManager:show(ConfirmBox:new{
+                        text = _("Will only sync to webUI, not in book, as spine is missing"),
+                        ok_text = _("Continue"),
+                        ok_callback = function()
+                            self:fileDialogSyncAnnotations(file_path)
+                        end,
                     })
-                    UIManager:scheduleIn(1.5, function()
-                        self:fileDialogSyncAnnotations(file_path)
-                    end)
                 end,
             }},
             {{

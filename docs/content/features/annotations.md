@@ -6,11 +6,13 @@ weight = 4
 
 # Annotations
 
-The annotations sync feature uploads highlights and notes you make in KOReader to your BookLore library. Annotations are deduplicated — the same highlight is never uploaded twice.
+The annotations sync feature uploads highlights and notes you make in KOReader to your BookLore library. Annotations are deduplicated - the same highlight is never uploaded twice.
 
 ---
 
 ## Prerequisites
+
+![Sync highlights and notes enabled](../sync_annotaton_on.png)
 
 Annotation sync requires:
 
@@ -26,8 +28,7 @@ Annotation sync requires:
 | Highlighted text (any colour) | Annotation with the highlighted text and colour |
 | Note attached to a highlight | Annotation comment, or standalone book note (depending on destination) |
 | Chapter/section context | Used as the note title when destination is "In BookLore" |
-
-Bookmarks (without text selection) are not currently synced.
+| Bookmarks (position markers without text) | Synced as bookmark entries via `POST /api/v1/bookmarks` |
 
 ---
 
@@ -44,7 +45,7 @@ API endpoint used:
 POST /api/v1/annotations
 ```
 
-> EPUB CFI generation is only supported for EPUB files. For PDF and comic formats, use "In BookLore" mode.
+> EPUB CFI generation is only supported for EPUB files. For PDF and comic formats, use "In BookLore" mode. PDF files receive a mock CFI placeholder that allows BookLore to accept the annotation without crashing, but precise in-reader positioning is not available.
 
 ### In BookLore
 
@@ -57,6 +58,12 @@ POST /api/v1/book-notes   (standalone BookLore notes)
 ```
 
 This mode works for all file formats.
+
+### Both
+
+Sends annotations to **both** destinations simultaneously - stored as in-book annotations (EPUB CFI) and as standalone BookLore notes. Use this if you want your highlights accessible from both the reader view and the book detail page.
+
+> When using "Both" with PDF files, the in-book copy uses the mock CFI placeholder, while the BookLore note is stored normally.
 
 ---
 
@@ -75,7 +82,7 @@ flowchart TD
     A --> B --> C --> D --> E
 {% end %}
 
-This happens entirely on-device — no server-side processing required.
+This happens entirely on-device - no server-side processing required.
 
 ---
 
@@ -103,13 +110,35 @@ KOReader supports named highlight colours. The plugin maps these to the nearest 
 
 Annotations are checked and uploaded after every valid reading session. Only annotations not yet recorded in the `synced_annotations` deduplication table are sent.
 
-This is the recommended strategy for most users — your annotations are always up to date on the server without any manual action.
+This is the recommended strategy for most users - your annotations are always up to date on the server without any manual action.
 
 ### Upload on read complete
 
 Annotations are only uploaded when reading progress reaches **99% or more**. This sends all annotations for the book in one batch when you finish it, rather than incrementally throughout reading.
 
 Use this if you prefer not to sync partial highlights (e.g., you frequently highlight and then delete).
+
+---
+
+## Bookmark sync
+
+In addition to highlights and notes, the plugin can sync **bookmarks** - position markers you add in KOReader without selecting text.
+
+When bookmark sync is enabled, the plugin:
+
+1. Reads KOReader's bookmark list for the current book.
+2. Calculates a CFI position for each bookmark.
+3. Uploads new bookmarks to BookLore via:
+   ```
+   POST /api/v1/bookmarks
+   ```
+4. Records the uploaded bookmarks in the `synced_bookmarks` deduplication table.
+
+Bookmark sync is triggered at the same time as annotation sync (after a qualifying reading session or at read complete, depending on your upload strategy setting).
+
+To enable bookmark sync, toggle on **Sync bookmarks** in:
+
+**Tools → BookLore Sync → Sync Settings → Annotations Sync → Sync bookmarks**
 
 ---
 
@@ -127,4 +156,4 @@ On each sync, only annotations not found in this table are uploaded. This preven
 
 If an annotation upload fails, it is stored in the `pending_annotations` table and retried on the next sync trigger. You can see the count of pending annotations in:
 
-**Tools → BookLore Sync → Settings → Manage Sessions → View Details**
+**Tools → BookLore Sync → Manage Sessions → View Details**

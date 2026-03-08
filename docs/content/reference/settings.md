@@ -44,9 +44,23 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `manual_sync_only` | boolean | `false` | When `true`, sessions are queued but not auto-uploaded; requires manual **Sync Now** |
-| `force_push_session_on_suspend` | boolean | `false` | Reserved; behaviour not yet implemented |
-| `connect_network_on_suspend` | boolean | `false` | Reserved; behaviour not yet implemented |
+| `sync_mode` | string | *(derived)* | High-level sync mode: `"automatic"` (sync on suspend + WiFi enabled), `"manual"` (queue only; sync via **Sync Now**), or `"custom"` (manual configuration of the two flags below). Derived from `manual_sync_only` and `force_push_session_on_suspend`/`connect_network_on_suspend` on first run; saved explicitly after that. |
+| `manual_sync_only` | boolean | `false` | When `true`, sessions are queued but not auto-uploaded; requires manual **Sync Now**. Set automatically when `sync_mode` is `"manual"`. |
+| `force_push_session_on_suspend` | boolean | `false` | When `true`, triggers `syncPendingSessions` on device suspend. Set automatically when `sync_mode` is `"automatic"`; also available as a custom toggle when `sync_mode` is `"custom"`. |
+| `connect_network_on_suspend` | boolean | `false` | When `true`, enables WiFi before syncing on suspend (works in conjunction with `force_push_session_on_suspend`). Set automatically when `sync_mode` is `"automatic"`; also available as a custom toggle when `sync_mode` is `"custom"`. |
+| `ask_wifi_enable` | boolean | `false` | When `true`, shows a confirmation dialog before enabling WiFi for a sync |
+
+---
+
+## Shelf sync settings
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `booklore_shelf_name` | string | `"KOReader"` | Name of the BookLore shelf to sync from; created automatically if it does not exist |
+| `shelf_id` | integer | `nil` | Cached ID of the resolved shelf (set automatically after first sync) |
+| `download_dir` | string | *(auto)* | Local directory where downloaded books are saved; defaults to `/mnt/onboard/Books` (Kobo) or `/sdcard/Books` (Android) |
+| `auto_sync_shelf_on_resume` | boolean | `false` | Automatically run shelf sync every time the device wakes from sleep |
+| `delete_removed_shelf_books` | boolean | `false` | Delete local book files when they are removed from the shelf |
 
 ---
 
@@ -54,8 +68,10 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `rating_sync_enabled` | boolean | `false` | Enable or disable rating sync |
+| `rating_sync_enabled` | boolean | `false` | Enable or disable rating sync to BookLore |
 | `rating_sync_mode` | string | `"koreader_scaled"` | Rating mode: `"koreader_scaled"` (×2 conversion) or `"select_at_complete"` (manual 1–10 dialog) |
+| `hardcover_token` | string | `""` | Hardcover API token for syncing ratings to Hardcover |
+| `hardcover_rating_sync_enabled` | boolean | `false` | Enable or disable rating sync to Hardcover (requires `hardcover_token`) |
 
 ---
 
@@ -64,7 +80,8 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `highlights_notes_sync_enabled` | boolean | `false` | Enable or disable highlights and notes sync |
-| `notes_destination` | string | `"in_book"` | Where to store notes: `"in_book"` (EPUB CFI annotation) or `"in_booklore"` (standalone book note) |
+| `bookmarks_sync_enabled` | boolean | `false` | Enable or disable bookmark sync (position markers without text) |
+| `notes_destination` | string | `"in_book"` | Where to store notes: `"in_book"`, `"in_booklore"`, or `"both"` |
 | `upload_strategy` | string | `"on_session"` | When to upload: `"on_session"` (after every session) or `"on_complete"` (at ≥99% progress) |
 
 ---

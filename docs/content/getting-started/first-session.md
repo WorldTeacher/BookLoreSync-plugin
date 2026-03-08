@@ -6,7 +6,7 @@ weight = 3
 
 # First Session Walkthrough
 
-This page explains in detail what the plugin does from the moment you open a book to the moment a session appears in BookLore. Understanding this helps you diagnose issues and make the most of the configuration options.
+This page explains in detail what the plugin does from the moment you open a book to the moment a session appears in BookLore.
 
 ---
 
@@ -43,7 +43,7 @@ flowchart TD
 
 ## Book fingerprinting
 
-Every book is identified by an MD5 fingerprint computed from a sample of its contents. This is the same algorithm used by BookLore's KOReader sync endpoint — it does not read the whole file, just strategic byte ranges, so it is fast even on large files.
+Every book is identified by an MD5 fingerprint computed from a sample of its contents. This is the same algorithm used by BookLore's KOReader sync endpoint - it does not read the whole file, just strategic byte ranges, so it is fast even on large files.
 
 The fingerprint is cached in the local database so it is only calculated once per file. If you move a book file to a different path, the cache is updated automatically.
 

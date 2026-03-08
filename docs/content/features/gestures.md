@@ -6,7 +6,7 @@ weight = 6
 
 # Gestures and Buttons
 
-The plugin does not define any gestures of its own. Instead, it registers four **dispatcher actions** with KOReader's built-in dispatcher system. You can then assign any of those actions to whatever input you prefer — a swipe, a tap zone, a hardware button, or a KOReader profile.
+The plugin does not define any gestures of its own. Instead, it registers four **dispatcher actions** with KOReader's built-in dispatcher system. You can then assign any of those actions to whatever input you prefer - a swipe, a tap zone, a hardware button, or a KOReader profile.
 
 ---
 

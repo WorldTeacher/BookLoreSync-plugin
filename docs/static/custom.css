@@ -4,3 +4,50 @@
 .scroll-progress {
     display: none !important;
 }
+
+/* ── Section cards (landing page) ─────────────────────────────────────────── */
+.section-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.section-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  background: var(--bg-secondary, rgba(255,255,255,0.04));
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.2s, background 0.2s, transform 0.15s;
+}
+
+.section-card:hover {
+  border-color: var(--accent-color, #7c6af7);
+  background: var(--bg-hover, rgba(124,106,247,0.08));
+  transform: translateY(-2px);
+  text-decoration: none;
+  color: inherit;
+}
+
+.section-card__icon {
+  font-size: 2rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.section-card__title {
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.section-card__desc {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  line-height: 1.4;
+}

@@ -8,9 +8,7 @@ template = "section.html"
 
 # Configuration
 
-All plugin settings are accessed from:
-
-**Tools → BookLore Sync → Settings**
+All plugin settings are accessed from **Tools → BookLore Sync**.
 
 ![BookLoresync Settings overview](bookloresync-settings.png)
 
@@ -21,7 +19,8 @@ Settings are organised into these sub-menus:
 | [Authentication](@/configuration/authentication.md) | Server URL and login credentials for both the KOReader sync endpoint and the BookLore API |
 | [Sync Settings](@/configuration/session-tracking.md) | Session Settings, Ratings, Annotations, and sync triggers |
 | [Manage Sessions](@/configuration/manage-sessions.md) | Manual sync, pending item counts, unmatched book resolution, and local cache details |
-| [Import Reading History](@/features/session-tracking.md) | One-time extraction and matching of historical sessions from KOReader's statistics database |
+| [Import Reading History](@/configuration/import-history.md) | One-time extraction and matching of historical sessions from KOReader's statistics database |
+| [Hardcover](@/configuration/hardcover.md) | Hardcover API token setup and book ID fetching |
 | [Preferences](@/configuration/preferences.md) | Notifications, logging level, and other plugin behaviour |
 | About & Updates | Plugin version information and update management |
 

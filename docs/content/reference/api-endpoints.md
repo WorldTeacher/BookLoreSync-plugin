@@ -35,23 +35,6 @@ The token is fetched from `POST /api/v1/auth/login` and automatically refreshed 
 
 ---
 
-## Health check
-
-### `GET /api/health`
-
-Checks that the BookLore server is reachable and responding.
-
-**Authentication:** None required
-
-**Successful response:**
-```json
-{"status": "ok"}
-```
-
-Used by the **Test Connection** feature and before update downloads.
-
----
-
 ## Authentication endpoints
 
 ### `GET /api/koreader/users/auth`
@@ -83,12 +66,12 @@ Obtains a Bearer token (JWT) for the BookLore account.
 **Successful response:**
 ```json
 {
-  "token": "<jwt_string>",
-  "expiresAt": "<iso8601_timestamp>"
+  "accessToken": "<jwt_string>",
+  "refreshToken": "<refresh_token_string>"
 }
 ```
 
-The token and expiry are cached in the `bearer_tokens` table. The plugin proactively refreshes the token when it is within 24 hours of expiry.
+The `accessToken` is cached in the `bearer_tokens` table with a 28-day local TTL. The plugin proactively refreshes the token when it is within 24 hours of that expiry.
 
 ---
 
@@ -100,14 +83,14 @@ Looks up a book by its MD5 file fingerprint.
 
 **Authentication:** MD5 credentials (headers)
 
-**Path parameter:** `:hash` — the MD5 fingerprint of the book file.
+**Path parameter:** `:hash` - the MD5 fingerprint of the book file.
 
 **Successful response:**
 ```json
 {
   "id": 42,
   "title": "Book Title",
-  "author": "Author Name"
+  "authors": "Author Name"
 }
 ```
 
@@ -121,7 +104,7 @@ Alternative book lookup using Bearer token authentication.
 
 **Authentication:** Bearer token
 
-**Path parameter:** `:hash` — the MD5 fingerprint of the book file.
+**Path parameter:** `:hash` - the MD5 fingerprint of the book file.
 
 Used for extended sync features.
 
@@ -133,7 +116,7 @@ Searches for a book by title.
 
 **Authentication:** Bearer token
 
-Used as a fallback for book lookup when hash lookup fails.
+Used as a fallback for book lookup when hash lookup fails, and during manual/import-history matching flows.
 
 ---
 
@@ -144,6 +127,29 @@ Searches for a book by ISBN.
 **Authentication:** Bearer token
 
 Used as a further fallback for book lookup.
+
+---
+
+### `GET /api/v1/books/<id>`
+
+Fetches full metadata for a single book by its BookLore ID.
+
+**Authentication:** Bearer token
+
+**Path parameter:** `<id>` — the BookLore book ID (integer).
+
+**Successful response:**
+```json
+{
+  "id": 42,
+  "title": "Book Title",
+  "isbn10": "0123456789",
+  "isbn13": "9780123456789",
+  "hardcover_id": 12345
+}
+```
+
+Used when resolving a book by numeric ID during manual matching, and when fetching Hardcover IDs for matched books.
 
 ---
 
@@ -159,9 +165,11 @@ Uploads a single reading session.
 ```json
 {
   "bookId": 42,
+  "bookType": "EPUB",
   "startTime": "2026-02-22T14:00:00Z",
   "endTime": "2026-02-22T15:00:00Z",
   "durationSeconds": 3600,
+  "durationFormatted": "1:00:00",
   "startProgress": 25.50,
   "endProgress": 38.75,
   "progressDelta": 13.25,
@@ -183,9 +191,11 @@ Uploads up to 100 reading sessions in a single request.
 **Request body:**
 ```json
 {
+  "bookId": 42,
+  "bookType": "EPUB",
   "sessions": [
-    { ... session object ... },
-    { ... session object ... }
+    { "...session object..." },
+    { "...session object..." }
   ]
 }
 ```
@@ -226,12 +236,16 @@ Creates an in-book annotation (highlight with optional note) attached to an EPUB
 ```json
 {
   "bookId": 42,
-  "highlightedText": "The highlighted passage text",
-  "note": "My note on this passage",
   "cfi": "epubcfi(/6/4[chap01]!/4/2/1:0)",
-  "color": "#FFC107"
+  "text": "The highlighted passage text",
+  "note": "My note on this passage",
+  "color": "#FFC107",
+  "style": "highlight",
+  "chapterTitle": "Chapter 1"
 }
 ```
+
+`note`, `color`, `style`, and `chapterTitle` are optional.
 
 Used for the "In book" notes destination mode.
 
@@ -239,9 +253,23 @@ Used for the "In book" notes destination mode.
 
 ### `POST /api/v2/book-notes`
 
-Creates an in-book note with a position reference (used in conjunction with annotations).
+Creates an in-book note with a position reference.
 
 **Authentication:** Bearer token
+
+**Request body:**
+```json
+{
+  "bookId": 42,
+  "cfi": "epubcfi(/6/4[chap01]!/4/2/1:0)",
+  "noteContent": "Note text",
+  "selectedText": "The passage the note is attached to",
+  "color": "#FFC107",
+  "chapterTitle": "Chapter 1"
+}
+```
+
+`selectedText`, `color`, and `chapterTitle` are optional.
 
 Used for the "In book" notes destination mode.
 
@@ -263,6 +291,48 @@ Creates a standalone book note visible on the BookLore book detail page.
 ```
 
 Used for the "In BookLore" notes destination mode.
+
+---
+
+## Bookmark endpoint
+
+### `POST /api/v1/bookmarks`
+
+Creates a bookmark at a specific EPUB CFI position.
+
+**Authentication:** Bearer token
+
+**Request body:**
+```json
+{
+  "bookId": 42,
+  "cfi": "epubcfi(/6/4[chap01]!/4/2/1:0)",
+  "title": "Optional bookmark label"
+}
+```
+
+`title` is optional.
+
+---
+
+## Shelf endpoint
+
+### `POST /api/v1/books/shelves`
+
+Assigns or unassigns one or more books to/from shelves.
+
+**Authentication:** Bearer token
+
+**Request body:**
+```json
+{
+  "bookIds": [42],
+  "shelvesToAssign": [],
+  "shelvesToUnassign": [7]
+}
+```
+
+Used when a book file is deleted from the device to unassign it from the KOReader shelf. Also used during shelf sync to assign downloaded books to the configured shelf.
 
 ---
 

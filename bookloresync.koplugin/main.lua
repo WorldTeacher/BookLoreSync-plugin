@@ -373,11 +373,11 @@ function BookloreSync:init()
         if not is_file then return nil end
         return {
             {
-                text = _("Sync all annotations"),
+                text = _("Booklore Sync"),
                 callback = function()
                     local fc = FileManager.instance and FileManager.instance.file_chooser
                     if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
-                    self:fileDialogSyncAnnotations(file)
+                    self:_fileDialogBookloreSync(file)
                 end,
             },
             {
@@ -386,14 +386,6 @@ function BookloreSync:init()
                     local fc = FileManager.instance and FileManager.instance.file_chooser
                     if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
                     self:fileDialogMatchBook(file)
-                end,
-            },
-            {
-                text = _("Sync Rating"),
-                callback = function()
-                    local fc = FileManager.instance and FileManager.instance.file_chooser
-                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
-                    self:fileDialogSyncRating(file)
                 end,
             },
             {
@@ -1878,9 +1870,14 @@ function BookloreSync:fileDialogSyncAnnotations(file_path)
         timeout = 1,
     })
 
-    -- syncHighlightsAndNotes requires an open document for CFI generation;
-    -- without it we can only retry pending annotations.
-    local synced, failed = self:syncPendingAnnotations(false)
+    -- Step 1: read the SDR and queue/submit any unqueued annotations for this
+    -- book.  syncHighlightsAndNotes falls back to the on-disk sidecar when no
+    -- live document is open.
+    self:syncHighlightsAndNotes(file_path, book.book_id, nil, nil, nil)
+
+    -- Step 2: retry any rows in pending_annotations that belong to this book.
+    local book_cache_id = book.id
+    local synced, failed = self:syncPendingAnnotations(false, book_cache_id)
     local msg
     if synced > 0 then
         msg = T(_("Booklore: synced %1 annotation(s), %2 failed"), synced, failed)
@@ -1918,13 +1915,13 @@ function BookloreSync:fileDialogMatchBook(file_path)
             text = T(_("Booklore: this book is already matched (id %1).\nRe-match it?"), book.book_id),
             ok_text = _("Re-match"),
             ok_callback = function()
-                self:_matchSingleBook(book)
+                self:_matchSingleBookInteractive(book)
             end,
         })
         return
     end
 
-    self:_matchSingleBook(book)
+    self:_matchSingleBookInteractive(book)
 end
 
 --[[--
@@ -1998,6 +1995,132 @@ function BookloreSync:_matchSingleBook(book)
 end
 
 --[[--
+Internal: interactive single-book match with an editable InputDialog.
+
+Unlike _matchSingleBook (which fires an immediate silent search), this
+function first shows an InputDialog pre-filled with the book's title so
+the user can adjust the search term or enter a numeric Booklore ID before
+the search runs.  Used from fileDialogMatchBook (long-press menu).
+
+@param book  table  Row from getBookByFilePath()
+--]]
+function BookloreSync:_matchSingleBookInteractive(book)
+    local default_term = (book.title and book.title ~= "") and book.title
+                         or book.file_path:match("([^/]+)$") or ""
+
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title   = T(_("Match book:\n%1"), default_term),
+        input   = default_term,
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    callback = function()
+                        UIManager:close(input_dialog)
+                    end,
+                },
+                {
+                    text             = _("Search"),
+                    is_enter_default = true,
+                    callback         = function()
+                        local term = input_dialog:getInputText()
+                        UIManager:close(input_dialog)
+                        if not term or term == "" then return end
+
+                        -- Pure integer → fetch by ID and save immediately
+                        if term:match("^%d+$") then
+                            local id = tonumber(term)
+                            local ok, result = self.api:getBookById(
+                                id, self.booklore_username, self.booklore_password)
+                            if not ok or not result then
+                                UIManager:show(ConfirmBox:new{
+                                    text        = T(_("Booklore: no book found with ID %1.\nRetry?"), id),
+                                    ok_text     = _("Retry"),
+                                    cancel_text = _("Cancel"),
+                                    ok_callback = function()
+                                        self:_matchSingleBookInteractive(book)
+                                    end,
+                                })
+                                return
+                            end
+                            self:_saveBookCacheMatch(book, result)
+                            return
+                        end
+
+                        -- Text → search by title
+                        UIManager:show(InfoMessage:new{
+                            text    = T(_("Booklore: searching for: %1"), term),
+                            timeout = 1,
+                        })
+                        local ok, results = self.api:searchBooksWithAuth(
+                            term, self.booklore_username, self.booklore_password)
+                        if not ok then
+                            local err = type(results) == "string" and results or _("Unknown error")
+                            UIManager:show(ConfirmBox:new{
+                                text        = T(_("Booklore: search failed: %1\nRetry?"), err),
+                                ok_text     = _("Retry"),
+                                cancel_text = _("Cancel"),
+                                ok_callback = function()
+                                    self:_matchSingleBookInteractive(book)
+                                end,
+                            })
+                            return
+                        end
+                        if not results or #results == 0 then
+                            UIManager:show(ConfirmBox:new{
+                                text        = T(_("Booklore: no results for:\n%1\nRetry?"), term),
+                                ok_text     = _("Retry"),
+                                cancel_text = _("Cancel"),
+                                ok_callback = function()
+                                    self:_matchSingleBookInteractive(book)
+                                end,
+                            })
+                            return
+                        end
+
+                        local top_results = {}
+                        for i = 1, math.min(5, #results) do
+                            top_results[i] = results[i]
+                        end
+                        local buttons = {}
+                        for _, result in ipairs(top_results) do
+                            local score = result.matchScore
+                                and string.format(" (%.0f%%)", result.matchScore * 100) or ""
+                            local label = result.title .. score
+                            if result.author and result.author ~= "" then
+                                label = label .. "\n" .. result.author
+                            end
+                            local r = result
+                            table.insert(buttons, {{
+                                text     = label,
+                                callback = function()
+                                    UIManager:close(self.bk_match_dialog)
+                                    self:_saveBookCacheMatch(book, r)
+                                end,
+                            }})
+                        end
+                        table.insert(buttons, {{
+                            text     = _("Cancel"),
+                            callback = function()
+                                UIManager:close(self.bk_match_dialog)
+                            end,
+                        }})
+
+                        self.bk_match_dialog = ButtonDialog:new{
+                            title   = T(_("Select match for:\n%1"), term),
+                            buttons = buttons,
+                        }
+                        UIManager:show(self.bk_match_dialog)
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(input_dialog)
+end
+
+--[[--
 File manager long-press: Sync the KOReader star rating for a single book.
 --]]
 function BookloreSync:fileDialogSyncRating(file_path)
@@ -2026,9 +2149,171 @@ function BookloreSync:fileDialogSyncRating(file_path)
 
     self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
 
+    local mode = self.rating_sync_mode or "koreader_scaled"
+
+    if mode == "select_at_complete" then
+        -- Manual mode: let the user enter a rating via the standard dialog.
+        self:showRatingDialog(file_path, book.book_id)
+        return
+    end
+
+    -- koreader_scaled: verify a star rating actually exists before trying to sync.
+    local existing_rating = self.metadata_extractor:getRating(file_path)
+    if not existing_rating then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: this book has not been rated in KOReader yet.\nSet a star rating and try again."),
+        })
+        return
+    end
+
     -- syncKOReaderRating requires a live_rating or reads from doc_settings;
     -- pass nil so it reads from the stored sdr/doc_settings for this path.
     self:syncKOReaderRating(file_path, book.book_id, nil)
+end
+
+--[[--
+Long-press menu: show a ButtonDialog letting the user choose which sync to run.
+
+Choices: Annotations, Rating, Both.  "Both" runs annotation sync inline first,
+then rating sync; a single combined InfoMessage reports the outcome.
+For "Both" with select_at_complete rating mode, the annotation result is shown
+first, then the rating InputDialog is opened afterwards.
+--]]
+function BookloreSync:_fileDialogBookloreSync(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
+        return
+    end
+    if self.booklore_username == "" or self.booklore_password == "" then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
+        return
+    end
+
+    local sync_dialog
+    sync_dialog = ButtonDialog:new{
+        title   = _("Booklore Sync"),
+        buttons = {
+            {{
+                text     = _("Annotations"),
+                callback = function()
+                    UIManager:close(sync_dialog)
+                    UIManager:show(ConfirmBox:new{
+                        text = _("Will only sync to webUI, not in book, as spine is missing"),
+                        ok_text = _("Continue"),
+                        ok_callback = function()
+                            self:fileDialogSyncAnnotations(file_path)
+                        end,
+                    })
+                end,
+            }},
+            {{
+                text     = _("Rating"),
+                callback = function()
+                    UIManager:close(sync_dialog)
+                    self:fileDialogSyncRating(file_path)
+                end,
+            }},
+            {{
+                text     = _("Both"),
+                callback = function()
+                    UIManager:close(sync_dialog)
+                    self:_fileDialogSyncBoth(file_path)
+                end,
+            }},
+            {{
+                text     = _("Cancel"),
+                callback = function()
+                    UIManager:close(sync_dialog)
+                end,
+            }},
+        },
+    }
+    UIManager:show(sync_dialog)
+end
+
+--[[--
+Internal: run annotation sync and rating sync together and report a combined result.
+--]]
+function BookloreSync:_fileDialogSyncBoth(file_path)
+    -- ── Prerequisites ────────────────────────────────────────────────────
+    local book = self.db:getBookByFilePath(file_path)
+    if not book then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book not found in local database.\nOpen the book first to register it."),
+        })
+        return
+    end
+    if not book.book_id then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book is not yet matched to Booklore.\nUse \"Match Book\" first."),
+        })
+        return
+    end
+
+    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+
+    local book_cache_id = book.id
+
+    -- ── Annotations ──────────────────────────────────────────────────────
+    local ann_parts = {}
+    if self.highlights_notes_sync_enabled then
+        -- Step 1: read SDR and queue/submit unqueued annotations for this book.
+        self:syncHighlightsAndNotes(file_path, book.book_id, nil, nil, nil)
+        -- Step 2: retry any remaining pending rows for this book only.
+        local synced, failed = self:syncPendingAnnotations(false, book_cache_id)
+        synced = tonumber(synced) or 0
+        failed = tonumber(failed) or 0
+        if synced > 0 or failed > 0 then
+            ann_parts[#ann_parts + 1] = T(_("Annotations: %1 synced, %2 failed"), synced, failed)
+        else
+            ann_parts[#ann_parts + 1] = _("Annotations: none pending")
+        end
+    else
+        ann_parts[#ann_parts + 1] = _("Annotations: disabled in settings")
+    end
+
+    if self.bookmarks_sync_enabled then
+        local bm_synced, bm_failed = self:syncPendingBookmarks(false, book_cache_id)
+        bm_synced = tonumber(bm_synced) or 0
+        bm_failed = tonumber(bm_failed) or 0
+        if bm_synced > 0 or bm_failed > 0 then
+            ann_parts[#ann_parts + 1] = T(_("Bookmarks: %1 synced, %2 failed"), bm_synced, bm_failed)
+        end
+    end
+
+    -- ── Rating ───────────────────────────────────────────────────────────
+    local mode = self.rating_sync_mode or "koreader_scaled"
+
+    if mode == "select_at_complete" then
+        -- Show annotation summary first, then open the rating dialog.
+        UIManager:show(InfoMessage:new{
+            text    = table.concat(ann_parts, "\n"),
+            timeout = 3,
+        })
+        self:showRatingDialog(file_path, book.book_id)
+        return
+    end
+
+    -- koreader_scaled: sync inline and add to the summary.
+    local existing_rating = self.metadata_extractor:getRating(file_path)
+    if not existing_rating then
+        ann_parts[#ann_parts + 1] = _("Rating: not rated in KOReader yet")
+    else
+        local ok_r = self:syncKOReaderRating(file_path, book.book_id, nil)
+        -- syncKOReaderRating does not return a value; check rating_synced flag
+        local bcid = self.db:getBookCacheIdByFilePath(file_path)
+        local meta = bcid and self.db:getBookMetadata(bcid)
+        if meta and meta.rating_synced then
+            ann_parts[#ann_parts + 1] = _("Rating: synced")
+        else
+            ann_parts[#ann_parts + 1] = _("Rating: sync failed or already synced")
+        end
+    end
+
+    UIManager:show(InfoMessage:new{
+        text    = table.concat(ann_parts, "\n"),
+        timeout = 4,
+    })
 end
 
 --[[--
@@ -4079,13 +4364,24 @@ end
 --[[--
 Retry all pending bookmarks from the pending_bookmarks queue.
 
-@param silent boolean  Suppress UI feedback (default false)
+@param silent         boolean     Suppress UI feedback (default false)
+@param book_cache_id  integer|nil If set, only process rows for this book_cache_id
 @return integer synced_count, integer failed_count
 --]]
-function BookloreSync:syncPendingBookmarks(silent)
+function BookloreSync:syncPendingBookmarks(silent, book_cache_id)
     silent = silent or false
     local pending = self.db:getPendingBookmarks()
     if not pending or #pending == 0 then return 0, 0 end
+    if book_cache_id then
+        local filtered = {}
+        for _, row in ipairs(pending) do
+            if row.book_cache_id == book_cache_id then
+                filtered[#filtered + 1] = row
+            end
+        end
+        pending = filtered
+    end
+    if #pending == 0 then return 0, 0 end
 
     local synced_count = 0
     local failed_count = 0
@@ -4768,6 +5064,19 @@ function BookloreSync:syncPendingRatings(silent)
         self:logInfo("BookloreSync: Submitting pending rating - book_id:", row.book_id,
                      "rating:", row.rating, "(retry #" .. (row.retry_count + 1) .. ")")
 
+        -- Per-book tracking check: skip this rating if the user has disabled
+        -- tracking for the book.  We look up the cache row to get the file_path
+        -- (same lookup used below to resolve a missing book_id, so the extra
+        -- cost is only incurred for the books that still lack a book_id).
+        do
+            local bc = self.db:getBookCacheById(row.book_cache_id)
+            local fp = bc and bc.file_path or nil
+            if fp and not self.db:isBookTrackingEnabled(fp) then
+                self:logInfo("BookloreSync: Tracking disabled for book, skipping pending rating id:", row.id)
+                goto continue_rating
+            end
+        end
+
         -- Resolve book_id if it was nil when the rating was first queued.
         local book_id = row.book_id
         if not book_id then
@@ -4823,11 +5132,12 @@ but no pre-computed CFI, this path cannot rebuild the CFI because the EPUB
 document is no longer open.  Those rows will remain pending until the book is
 opened again and syncHighlightsAndNotes() succeeds.
 
-@param silent boolean  If true, do not show UI messages
+@param silent         boolean   If true, do not show UI messages
+@param book_cache_id  integer|nil  If set, only process rows for this book_cache_id
 @return integer synced_count
 @return integer failed_count
 --]]
-function BookloreSync:syncPendingAnnotations(silent)
+function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
     silent = silent or false
 
     if not self.db then
@@ -4846,6 +5156,15 @@ function BookloreSync:syncPendingAnnotations(silent)
     end
 
     local pending = self.db:getPendingAnnotations()
+    if book_cache_id then
+        local filtered = {}
+        for _, row in ipairs(pending) do
+            if row.book_cache_id == book_cache_id then
+                filtered[#filtered + 1] = row
+            end
+        end
+        pending = filtered
+    end
     if #pending == 0 then
         self:logInfo("BookloreSync: No pending annotations to sync")
         return 0, 0
@@ -4863,6 +5182,18 @@ function BookloreSync:syncPendingAnnotations(silent)
         self:logInfo("BookloreSync: Retrying pending annotation - id:", row.id,
                      "type:", row.ann_type, "datetime:", row.datetime,
                      "(retry #" .. (row.retry_count + 1) .. ")")
+
+        -- Per-book tracking check: skip this annotation if the user has
+        -- disabled tracking for the book (same pattern as sessions/ratings).
+        do
+            local bc = self.db:getBookCacheById(row.book_cache_id)
+            local fp = bc and bc.file_path or nil
+            if fp and not self.db:isBookTrackingEnabled(fp) then
+                self:logInfo("BookloreSync: Tracking disabled for book, skipping pending annotation id:", row.id)
+                skipped_count = skipped_count + 1
+                goto continue_ann
+            end
+        end
 
         local ok_dec, payload = pcall(json.decode, row.payload)
         if not ok_dec or type(payload) ~= "table" then
@@ -4928,6 +5259,42 @@ function BookloreSync:syncPendingAnnotations(silent)
                 book_id, payload.note, payload.chapter,
                 self.booklore_username, self.booklore_password
             )
+
+        elseif row.ann_type == "both_note" then
+            -- Submit as both an in-book note (CFI required) and a Booklore
+            -- web-UI note.  Only treat as success when both destinations succeed.
+            local in_book_ok, in_book_id
+            local bl_ok,      bl_id
+            local cfi = payload.cfi
+            if cfi and cfi ~= "" then
+                in_book_ok, in_book_id = self.api:submitInBookNote(
+                    book_id, cfi, payload.note,
+                    {
+                        selected_text = payload.text,
+                        color         = payload.color,
+                        chapter_title = payload.chapter,
+                    },
+                    self.booklore_username, self.booklore_password
+                )
+                if not in_book_ok then
+                    self:logWarn("BookloreSync: 'Both' retry - in-book note failed:", in_book_id)
+                end
+            else
+                self:logInfo("BookloreSync: 'Both' retry - no CFI, skipping in-book note (id:", row.id, ")")
+                -- Without a CFI the in-book destination cannot be fulfilled;
+                -- leave the row pending until the book is opened again.
+                skipped_count = skipped_count + 1
+                goto continue_ann
+            end
+            bl_ok, bl_id = self.api:submitBookloreNote(
+                book_id, payload.note, payload.chapter,
+                self.booklore_username, self.booklore_password
+            )
+            if not bl_ok then
+                self:logWarn("BookloreSync: 'Both' retry - Booklore note failed:", bl_id)
+            end
+            ok        = in_book_ok and bl_ok
+            server_id = in_book_id or bl_id
 
         else
             self:logWarn("BookloreSync: Unknown ann_type in pending_annotations (id:", row.id, "):", row.ann_type, "- removing")
@@ -6908,13 +7275,274 @@ function BookloreSync:syncRematchedSessions()
 end
 
 --[[--
-Manual Matching - placeholder, work in progress.
+Manual Matching - iterate over all unmatched books one by one.
+
+For each unmatched book an InputDialog is shown pre-filled with the book's
+cached title. The user can edit the term or enter a numeric Booklore ID.
+Submitting a pure integer fetches the book by ID and saves immediately;
+submitting text searches by title and shows a selection dialog.
 --]]
 function BookloreSync:manualMatching()
-    UIManager:show(InfoMessage:new{
-        text = _("WIP, sorry"),
-        timeout = 5,
-    })
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
+        return
+    end
+    if self.booklore_username == "" or self.booklore_password == "" then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
+        return
+    end
+
+    local unmatched = self.db:getAllUnmatchedBooks()
+    if not unmatched or #unmatched == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: no unmatched books found"),
+            timeout = 2,
+        })
+        return
+    end
+
+    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.bk_matching_index  = 1
+    self.bk_unmatched_books = unmatched
+    self:_showManualMatchDialog(unmatched[1])
+end
+
+--[[--
+Internal: show an InputDialog for a single unmatched book, then search or
+fetch by ID and let the user confirm the match.  On success, advances the
+iterator and recurses for the next unmatched book.
+
+@param book  table  Row from getAllUnmatchedBooks()
+--]]
+function BookloreSync:_showManualMatchDialog(book)
+    local default_term = (book.title and book.title ~= "") and book.title
+                         or book.file_path:match("([^/]+)$") or ""
+    local total   = self.bk_unmatched_books and #self.bk_unmatched_books or 1
+    local current = self.bk_matching_index or 1
+    local progress = T(_("Book %1 of %2"), current, total)
+
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title       = T(_("Match book (%1)\n%2"), progress, default_term),
+        description = _("Enter Title / BookLore ID"),
+        input       = default_term,
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    callback = function()
+                        UIManager:close(input_dialog)
+                        self.bk_unmatched_books = nil
+                        self.bk_matching_index  = nil
+                    end,
+                },
+                {
+                    text = _("Skip"),
+                    callback = function()
+                        UIManager:close(input_dialog)
+                        self.bk_matching_index = (self.bk_matching_index or 1) + 1
+                        if self.bk_unmatched_books and
+                           self.bk_matching_index <= #self.bk_unmatched_books then
+                            self:_showManualMatchDialog(
+                                self.bk_unmatched_books[self.bk_matching_index])
+                        else
+                            UIManager:show(InfoMessage:new{
+                                text    = _("Booklore: manual matching complete"),
+                                timeout = 2,
+                            })
+                            self.bk_unmatched_books = nil
+                            self.bk_matching_index  = nil
+                        end
+                    end,
+                },
+                {
+                    text             = _("Search"),
+                    is_enter_default = true,
+                    callback         = function()
+                        local term = input_dialog:getInputText()
+                        UIManager:close(input_dialog)
+                        if not term or term == "" then return end
+
+                        -- Pure integer → fetch by ID
+                        if term:match("^%d+$") then
+                            local id = tonumber(term)
+                            local ok, result = self.api:getBookById(
+                                id, self.booklore_username, self.booklore_password)
+                            if not ok or not result then
+                                UIManager:show(ConfirmBox:new{
+                                    text        = T(_("Booklore: no book found with ID %1.\nRetry?"), id),
+                                    ok_text     = _("Retry"),
+                                    cancel_text = _("Skip"),
+                                    ok_callback = function()
+                                        self:_showManualMatchDialog(book)
+                                    end,
+                                    cancel_callback = function()
+                                        self.bk_matching_index = (self.bk_matching_index or 1) + 1
+                                        if self.bk_unmatched_books and
+                                           self.bk_matching_index <= #self.bk_unmatched_books then
+                                            self:_showManualMatchDialog(
+                                                self.bk_unmatched_books[self.bk_matching_index])
+                                        else
+                                            UIManager:show(InfoMessage:new{
+                                                text    = _("Booklore: manual matching complete"),
+                                                timeout = 2,
+                                            })
+                                            self.bk_unmatched_books = nil
+                                            self.bk_matching_index  = nil
+                                        end
+                                    end,
+                                })
+                                return
+                            end
+                            -- Save immediately (no confirm for ID path)
+                            self:_saveBookCacheMatch(book, result)
+                            self.bk_matching_index = (self.bk_matching_index or 1) + 1
+                            if self.bk_unmatched_books and
+                               self.bk_matching_index <= #self.bk_unmatched_books then
+                                self:_showManualMatchDialog(
+                                    self.bk_unmatched_books[self.bk_matching_index])
+                            else
+                                UIManager:show(InfoMessage:new{
+                                    text    = _("Booklore: manual matching complete"),
+                                    timeout = 2,
+                                })
+                                self.bk_unmatched_books = nil
+                                self.bk_matching_index  = nil
+                            end
+                            return
+                        end
+
+                        -- Text → search by title
+                        local ok, results = self.api:searchBooksWithAuth(
+                            term, self.booklore_username, self.booklore_password)
+                        if not ok then
+                            local err = type(results) == "string" and results or _("Unknown error")
+                            UIManager:show(ConfirmBox:new{
+                                text        = T(_("Booklore: search failed: %1\nRetry?"), err),
+                                ok_text     = _("Retry"),
+                                cancel_text = _("Skip"),
+                                ok_callback = function()
+                                    self:_showManualMatchDialog(book)
+                                end,
+                                cancel_callback = function()
+                                    self.bk_matching_index = (self.bk_matching_index or 1) + 1
+                                    if self.bk_unmatched_books and
+                                       self.bk_matching_index <= #self.bk_unmatched_books then
+                                        self:_showManualMatchDialog(
+                                            self.bk_unmatched_books[self.bk_matching_index])
+                                    else
+                                        UIManager:show(InfoMessage:new{
+                                            text    = _("Booklore: manual matching complete"),
+                                            timeout = 2,
+                                        })
+                                        self.bk_unmatched_books = nil
+                                        self.bk_matching_index  = nil
+                                    end
+                                end,
+                            })
+                            return
+                        end
+                        if not results or #results == 0 then
+                            UIManager:show(ConfirmBox:new{
+                                text        = T(_("Booklore: no results for:\n%1\nRetry?"), term),
+                                ok_text     = _("Retry"),
+                                cancel_text = _("Skip"),
+                                ok_callback = function()
+                                    self:_showManualMatchDialog(book)
+                                end,
+                                cancel_callback = function()
+                                    self.bk_matching_index = (self.bk_matching_index or 1) + 1
+                                    if self.bk_unmatched_books and
+                                       self.bk_matching_index <= #self.bk_unmatched_books then
+                                        self:_showManualMatchDialog(
+                                            self.bk_unmatched_books[self.bk_matching_index])
+                                    else
+                                        UIManager:show(InfoMessage:new{
+                                            text    = _("Booklore: manual matching complete"),
+                                            timeout = 2,
+                                        })
+                                        self.bk_unmatched_books = nil
+                                        self.bk_matching_index  = nil
+                                    end
+                                end,
+                            })
+                            return
+                        end
+
+                        -- Build selection dialog
+                        local top_results = {}
+                        for i = 1, math.min(5, #results) do
+                            top_results[i] = results[i]
+                        end
+                        local buttons = {}
+                        for _, result in ipairs(top_results) do
+                            local score = result.matchScore
+                                and string.format(" (%.0f%%)", result.matchScore * 100) or ""
+                            local label = result.title .. score
+                            if result.author and result.author ~= "" then
+                                label = label .. "\n" .. result.author
+                            end
+                            local r = result
+                            table.insert(buttons, {{
+                                text     = label,
+                                callback = function()
+                                    UIManager:close(self.bk_match_dialog)
+                                    self:_saveBookCacheMatch(book, r)
+                                    self.bk_matching_index = (self.bk_matching_index or 1) + 1
+                                    if self.bk_unmatched_books and
+                                       self.bk_matching_index <= #self.bk_unmatched_books then
+                                        self:_showManualMatchDialog(
+                                            self.bk_unmatched_books[self.bk_matching_index])
+                                    else
+                                        UIManager:show(InfoMessage:new{
+                                            text    = _("Booklore: manual matching complete"),
+                                            timeout = 2,
+                                        })
+                                        self.bk_unmatched_books = nil
+                                        self.bk_matching_index  = nil
+                                    end
+                                end,
+                            }})
+                        end
+                        table.insert(buttons, {{
+                            text     = _("Skip"),
+                            callback = function()
+                                UIManager:close(self.bk_match_dialog)
+                                self.bk_matching_index = (self.bk_matching_index or 1) + 1
+                                if self.bk_unmatched_books and
+                                   self.bk_matching_index <= #self.bk_unmatched_books then
+                                    self:_showManualMatchDialog(
+                                        self.bk_unmatched_books[self.bk_matching_index])
+                                else
+                                    UIManager:show(InfoMessage:new{
+                                        text    = _("Booklore: manual matching complete"),
+                                        timeout = 2,
+                                    })
+                                    self.bk_unmatched_books = nil
+                                    self.bk_matching_index  = nil
+                                end
+                            end,
+                        }})
+                        table.insert(buttons, {{
+                            text     = _("Cancel"),
+                            callback = function()
+                                UIManager:close(self.bk_match_dialog)
+                                self.bk_unmatched_books = nil
+                                self.bk_matching_index  = nil
+                            end,
+                        }})
+
+                        self.bk_match_dialog = ButtonDialog:new{
+                            title   = T(_("Select match for:\n%1\n\n%2"), term, progress),
+                            buttons = buttons,
+                        }
+                        UIManager:show(self.bk_match_dialog)
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(input_dialog)
 end
 
 --[[--

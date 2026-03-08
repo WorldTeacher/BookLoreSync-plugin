@@ -160,7 +160,7 @@ This document tracks all features from the old plugin and their implementation s
 | GET /api/koreader/users/auth | ✅ | `booklore_api_client.lua:238-262` | Authentication endpoint |
 | GET /api/koreader/books/by-hash/:hash | ✅ | `booklore_api_client.lua:271-284` | Book lookup by hash |
 | POST /api/v1/reading-sessions | ✅ | `booklore_api_client.lua:293-309` | Session submission |
-| GET /api/health | ✅ | `booklore_api_client.lua:317-331` | Health check |
+| GET /api/v1/healthcheck | ✅ | `booklore_api_client.lua:317-331` | Health check |
 | HTTP timeout (10s) | ✅ | `booklore_api_client.lua:22` | Configurable timeout |
 | HTTPS support | ✅ | `booklore_api_client.lua:173-176` | Full HTTPS support |
 | JSON request encoding | ✅ | `booklore_api_client.lua:156` | Using cjson |

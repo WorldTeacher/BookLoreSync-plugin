@@ -12,7 +12,7 @@ Session tracking is the core feature of the plugin. Every time you read a book i
 
 ## What is a reading session?
 
-A reading session is a single continuous reading period — from when you open (or resume) a book to when you close it (or the device sleeps). Each session contains:
+A reading session is a single continuous reading period - from when you open (or resume) a book to when you close it (or the device sleeps). Each session contains:
 
 | Field | Description |
 |-------|-------------|
@@ -60,17 +60,16 @@ Before a session is saved, it is validated against the thresholds you configure.
 
 The session is kept if:
 - `duration_seconds ≥ min_duration` (default: 30 seconds)
-- `progress_delta > 0`
+- `pages_read > 0` (at least one page was turned)
 
 **Detection mode: `pages`**
 
 The session is kept if:
 - `pages_read ≥ min_pages` (default: 5 pages)
-- `progress_delta > 0`
 
 Sessions that fail validation are discarded immediately and never written to the database.
 
-> A session where progress did not advance at all (e.g., you opened the book at position X and closed it still at X) carries no useful information and is always discarded, regardless of duration or pages.
+> In duration mode, a session where no pages were turned (e.g., you opened the book but did not scroll or turn a page) is always discarded, regardless of how long the book was open.
 
 ---
 
@@ -87,14 +86,27 @@ flowchart LR
 
     subgraph wake ["Device wakes - onResume"]
         W1["Start new session from current position"]
-        W2["Silent background sync of pending sessions (if enabled)"]
-        W1 --> W2
+        W2["Deferred wake sync scheduled (15s delay)"]
+        W3["Silent background sync of pending sessions"]
+        W1 --> W2 --> W3
     end
 
     sleep -->|"Two separate sessions recorded"| wake
 {% end %}
 
 This means a reading period that spans a sleep event is split into **two sessions**: one before sleep, one after. Both sessions are uploaded to BookLore separately.
+
+### Resume cooldown
+
+To avoid flooding the server when a device suspends and resumes rapidly (e.g., repeated short sleep events), the plugin enforces a **5-minute cooldown** between auto-syncs triggered by resume. If a resume event occurs within 5 minutes of the last auto-sync, the sync is deferred rather than run immediately.
+
+### Deferred wake sync
+
+When the device wakes, the plugin schedules a sync to run **15 seconds after resume**. This gives the network time to reconnect before the upload is attempted. If the network is not yet available after 15 seconds, the session stays queued and will be picked up when connectivity is detected.
+
+### Network-connected sync
+
+If the plugin is waiting for network and the device reports a new connection (via the `onNetworkConnected` event), any deferred wake sync is triggered immediately without waiting for the full 15-second timer.
 
 ---
 
@@ -125,8 +137,56 @@ If a book file is renamed or moved, the plugin detects the new path and updates 
 
 ## Progress precision
 
-Progress is always stored locally at full precision. The decimal places setting (default: 2, range: 0–5) is applied at sync time — it controls how many decimal places are sent to the BookLore server, not how many are kept in the local database.
+Progress is always stored locally at full precision. The decimal places setting (default: 2, range: 0–5) is applied at sync time - it controls how many decimal places are sent to the BookLore server, not how many are kept in the local database.
 
-For most use cases the default of 2 is fine. Increase it if your BookLore server reports noticeably rounded progress values for very long books.
+Increase this value if your BookLore server reports noticeably rounded progress values for very long books.
 
 See [Configuration → Session Tracking](@/configuration/session-tracking.md#progress-decimal-places) to change this setting.
+
+---
+
+## Per-book tracking toggle
+
+
+You can disable session tracking for individual books without turning off the plugin globally. This is useful for reference books, cookbooks, or any book where you do not want reading history recorded.
+
+**To toggle tracking for a book:**
+
+1. Long-press the book in the file manager.
+2. Select **Enable tracking** or **Disable tracking** from the context menu.
+
+When tracking is disabled for a book:
+- No session is saved when you close or suspend the device while reading it.
+- No annotations or ratings are synced.
+- The book is silently skipped - no notification is shown.
+
+The tracking state is stored per-book in the local database (`tracking_enabled` column in `book_cache`) and persists across restarts.
+
+---
+
+## Session feedback
+
+
+After a session ends, the plugin may show a brief notification:
+
+| Result | Message shown | Condition |
+|--------|--------------|-----------|
+| Session saved / queued | `"Session saved"` with annotation count | Manual Sync Only mode; not in silent mode |
+| Criteria not met | `"Session not saved: criteria not met"` | Session failed validation (too short or no progress); not in silent mode |
+| Tracking disabled | *(no message)* | Book has tracking disabled |
+
+All session notifications are suppressed when **Silent Mode** is enabled in preferences.
+
+---
+
+## Book deletion notification
+
+When you delete a book from the file manager (via the long-press menu), the plugin sends a deletion event to BookLore:
+
+```
+DELETE /api/v1/books/{id}
+```
+
+If the book's server ID is not yet known (e.g., it was never synced), or if the device is offline, the deletion is stored in the `pending_deletions` table and retried on the next sync.
+
+This keeps your BookLore library in sync with your device - books you remove locally are also removed from the server.

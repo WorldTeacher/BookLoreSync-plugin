@@ -61,21 +61,6 @@
     <div class="sidebar__footer">
         {# Mobile-only actions (hidden on desktop where they're in header) #}
         <div class="sidebar__actions-mobile">
-            {# Version picker #}
-            {% if config.extra.versions is defined %}
-            <div class="sidebar__action">
-                <span class="sidebar__action-label">Version</span>
-                <div class="sidebar__version">
-                    <span class="sidebar__version-current">v{{ config.extra.versions.current }}</span>
-                    {% for v in config.extra.versions.list %}
-                    {% if v.version != config.extra.versions.current %}
-                    <a href="{{ v.url | safe }}" class="sidebar__version-link">v{{ v.version }}</a>
-                    {% endif %}
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
             {# Theme toggle #}
             {% if config.extra.show_theme_toggle | default(value=true) %}
             <div class="sidebar__action">

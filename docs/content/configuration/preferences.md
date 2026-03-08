@@ -1,6 +1,6 @@
 +++
 title = "Preferences"
-description = "Configure notifications and logging behaviour."
+description = "Configure notifications, logging, and WiFi behaviour."
 weight = 4
 +++
 
@@ -8,7 +8,7 @@ weight = 4
 
 The preferences settings are found at:
 
-**Tools → BookLore Sync → Settings → Preferences**
+**Tools → BookLore Sync → Preferences**
 
 ---
 
@@ -16,7 +16,7 @@ The preferences settings are found at:
 
 **Default:** Off
 
-When enabled, the plugin suppresses all popup notifications related to session caching, sync results, and upload confirmations. The plugin continues to work normally in the background — you just won't see any toast messages.
+When enabled, the plugin suppresses all popup notifications related to session caching, sync results, and upload confirmations. The plugin continues to work normally in the background - you just won't see any toast messages.
 
 This is useful on devices where popups are disruptive, or if you prefer a completely silent reading experience.
 
@@ -59,15 +59,33 @@ Enable **Debug Logging** and **Secure Logs** together before capturing a log to 
 
 ---
 
+## Ask Before Enabling WiFi
+
+**Default:** Off
+
+When enabled, the plugin prompts for confirmation before turning on WiFi for any sync operation. The prompt shows the action that requires WiFi (for example, "sync sessions" or "upload annotation"). Two options are presented:
+
+- **Enable** — turns on WiFi and proceeds with the action.
+- **Skip** — leaves WiFi off; the action is deferred and data remains in the pending queue for the next sync opportunity.
+
+When disabled, the plugin enables WiFi automatically without prompting whenever a sync requires it.
+
+---
+
+## Export Settings
+
+Writes the current plugin configuration to a JSON file at:
+
+```
+{koreader_settings_dir}/booklore_settings_export.json
+```
+
+Sensitive fields are excluded from the export: server URL, username, and password are never written to the file. All other settings — sync mode, thresholds, feature toggles, and logging options — are included.
+
+A confirmation toast shows the full path when the export succeeds.
+
+---
+
 ## Dispatcher actions
 
-The following actions can be assigned to KOReader hardware buttons, gestures, or profiles via the dispatcher:
-
-| Action | Dispatcher key | What it does |
-|--------|---------------|-------------|
-| Toggle sync | `ToggleBookloreSync` | Enable or disable the plugin |
-| Sync pending | `SyncBooklorePending` | Upload all pending sessions now |
-| Toggle manual sync | `ToggleBookloreManualSyncOnly` | Switch between auto and manual sync mode |
-| Test connection | `TestBookloreConnection` | Run a connection test |
-
-To assign an action, go to **Tools → More tools → Gestures** (or the equivalent for your device's button customisation).
+See [Reference → Dispatcher Actions](@/reference/dispatcher-actions.md) for the full list of actions that can be assigned to KOReader hardware buttons, gestures, or profiles.

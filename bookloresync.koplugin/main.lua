@@ -2197,7 +2197,13 @@ function BookloreSync:_fileDialogBookloreSync(file_path)
                 text     = _("Annotations"),
                 callback = function()
                     UIManager:close(sync_dialog)
-                    self:fileDialogSyncAnnotations(file_path)
+                    UIManager:show(InfoMessage:new{
+                        text = _("Will only sync to webUI, not in book"),
+                        timeout = 1.5,
+                    })
+                    UIManager:scheduleIn(1.5, function()
+                        self:fileDialogSyncAnnotations(file_path)
+                    end)
                 end,
             }},
             {{
@@ -5058,6 +5064,19 @@ function BookloreSync:syncPendingRatings(silent)
         self:logInfo("BookloreSync: Submitting pending rating - book_id:", row.book_id,
                      "rating:", row.rating, "(retry #" .. (row.retry_count + 1) .. ")")
 
+        -- Per-book tracking check: skip this rating if the user has disabled
+        -- tracking for the book.  We look up the cache row to get the file_path
+        -- (same lookup used below to resolve a missing book_id, so the extra
+        -- cost is only incurred for the books that still lack a book_id).
+        do
+            local bc = self.db:getBookCacheById(row.book_cache_id)
+            local fp = bc and bc.file_path or nil
+            if fp and not self.db:isBookTrackingEnabled(fp) then
+                self:logInfo("BookloreSync: Tracking disabled for book, skipping pending rating id:", row.id)
+                goto continue_rating
+            end
+        end
+
         -- Resolve book_id if it was nil when the rating was first queued.
         local book_id = row.book_id
         if not book_id then
@@ -5163,6 +5182,18 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
         self:logInfo("BookloreSync: Retrying pending annotation - id:", row.id,
                      "type:", row.ann_type, "datetime:", row.datetime,
                      "(retry #" .. (row.retry_count + 1) .. ")")
+
+        -- Per-book tracking check: skip this annotation if the user has
+        -- disabled tracking for the book (same pattern as sessions/ratings).
+        do
+            local bc = self.db:getBookCacheById(row.book_cache_id)
+            local fp = bc and bc.file_path or nil
+            if fp and not self.db:isBookTrackingEnabled(fp) then
+                self:logInfo("BookloreSync: Tracking disabled for book, skipping pending annotation id:", row.id)
+                skipped_count = skipped_count + 1
+                goto continue_ann
+            end
+        end
 
         local ok_dec, payload = pcall(json.decode, row.payload)
         if not ok_dec or type(payload) ~= "table" then

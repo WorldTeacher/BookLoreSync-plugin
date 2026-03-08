@@ -1,55 +1,46 @@
 #!/usr/bin/env bash
-# run_tests.sh - Run all Booklore plugin unit tests.
-# Exits 0 only if every test suite passes.
-# Used by CI and can be run locally: bash run_tests.sh
+# run_tests.sh - Run framework-based Lua tests with coverage.
+# Exits 0 only if tests pass and coverage artifacts are generated.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Require luajit; fall back to lua if unavailable.
-if command -v luajit &>/dev/null; then
-    LUA=luajit
-elif command -v lua &>/dev/null; then
-    LUA=lua
-else
-    echo "ERROR: neither luajit nor lua found in PATH" >&2
+if ! command -v busted &>/dev/null; then
+    echo "ERROR: busted not found in PATH (install via luarocks install busted)" >&2
     exit 1
 fi
 
-echo "Using Lua runtime: $($LUA -v 2>&1 | head -1)"
-echo ""
-
-FAILED_SUITES=()
-
-run_suite() {
-    local file="$1"
-    echo "──────────────────────────────────────────"
-    echo "Running: $file"
-    echo "──────────────────────────────────────────"
-    if $LUA "$file"; then
-        echo "[PASSED] $file"
-    else
-        echo "[FAILED] $file"
-        FAILED_SUITES+=("$file")
-    fi
-    echo ""
-}
-
-run_suite "test_api_client.lua"
-run_suite "test_main.lua"
-run_suite "test_updater.lua"
-run_suite "test_cfi.lua"
-
-echo "══════════════════════════════════════════"
-if [ ${#FAILED_SUITES[@]} -eq 0 ]; then
-    echo "ALL TEST SUITES PASSED"
-    exit 0
-else
-    echo "FAILED SUITES (${#FAILED_SUITES[@]}):"
-    for s in "${FAILED_SUITES[@]}"; do
-        echo "  - $s"
-    done
+if ! command -v luacov &>/dev/null; then
+    echo "ERROR: luacov not found in PATH (install via luarocks install luacov)" >&2
     exit 1
 fi
+
+if ! command -v luacov-cobertura &>/dev/null; then
+    echo "ERROR: luacov-cobertura not found in PATH (install via luarocks install luacov-cobertura)" >&2
+    exit 1
+fi
+
+rm -f luacov.stats.out luacov.report.out coverage.xml
+
+echo "Running Busted test suite"
+busted --output utfTerminal --pattern "_spec%.lua$" test
+
+echo "Generating luacov text report"
+luacov
+
+echo "Generating Cobertura XML report"
+luacov-cobertura -o coverage.xml
+
+if [ ! -f coverage.xml ]; then
+    echo "ERROR: coverage.xml was not generated" >&2
+    exit 1
+fi
+
+TOTAL_COVERAGE=$(awk '/^Summary/{found=1} found && /^Total/{print $NF; exit}' luacov.report.out)
+if [ -n "${TOTAL_COVERAGE:-}" ]; then
+    echo "TOTAL_COVERAGE=${TOTAL_COVERAGE}"
+fi
+
+echo "All tests passed and coverage artifacts generated"

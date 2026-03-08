@@ -29,7 +29,7 @@ include:
 variables:
   GIT_SUBMODULE_STRATEGY: recursive
   ZOLA_WORKSPACE_DIR: "docs"
-
+  GIT_DEPTH: "0"
 # secret variables
 # (define the variables below in your GitLab group/project variables)
 # GITLAB_TOKEN: A GitLab 'project access token' or 'personal access token' with `api`, `read_repository` and `write repository` scopes.

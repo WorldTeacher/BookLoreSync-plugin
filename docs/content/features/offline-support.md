@@ -12,7 +12,7 @@ The plugin is designed to work fully offline. Sessions are always saved locally 
 
 ## How the queue works
 
-> Note: this assumes that the setup syncs immediately, instead of using manual upload
+> **Note:** This describes the default behaviour where sessions sync immediately after each session ends. If **Manual Sync Only** is enabled, sessions accumulate in the queue until you trigger a sync manually.
 
 Every validated session is written to the `pending_sessions` table in the local SQLite database before any network request is attempted. The session remains there until it is successfully uploaded.
 
@@ -73,7 +73,7 @@ Up to **100 sessions per batch** are sent in one request. This is 10–20 times 
 
 ## Retry logic
 
-Each pending session tracks a `retry_count` — the number of times upload has been attempted and failed. This counter is incremented on each failed attempt.
+Each pending session tracks a `retry_count` - the number of times upload has been attempted and failed. This counter is incremented on each failed attempt.
 
 The retry count is visible when inspecting the database directly:
 
@@ -81,7 +81,7 @@ The retry count is visible when inspecting the database directly:
 SELECT id, retry_count, book_id, duration_seconds FROM pending_sessions;
 ```
 
-There is no automatic backoff or maximum retry limit — the plugin will keep retrying on every sync trigger until the session is successfully uploaded or manually cleared.
+There is no automatic backoff or maximum retry limit - the plugin will keep retrying on every sync trigger until the session is successfully uploaded or manually cleared.
 
 ---
 
@@ -92,17 +92,54 @@ Pending sessions are synced automatically in these situations:
 | Trigger | Behaviour |
 |---------|-----------|
 | **Session end** | Sync attempted after every valid session (if not in Manual Sync Only mode) |
-| **Device resume** | Silent background sync when device wakes from sleep |
+| **Device resume** | Deferred background sync 15 seconds after device wakes from sleep |
+| **Network connected** | Immediate sync when network becomes available (if a wake sync was pending) |
 | **Manual Sync Now** | Triggered by **Tools → BookLore Sync → Sync Now** |
 | **Dispatcher action** | `SyncBooklorePending` can be assigned to a button or gesture |
 
 ---
 
+## WiFi confirmation prompt
+
+If the **Ask before enabling WiFi** setting is on, the plugin will show a confirmation dialog before attempting to enable WiFi for a sync:
+
+> **Enable WiFi now?**
+> A sync is ready to run. Enable WiFi to upload pending sessions?
+
+- **Confirm** - WiFi is enabled and the sync proceeds.
+- **Cancel** - WiFi is not enabled. The session stays queued and will be uploaded the next time a sync is triggered while WiFi is already on.
+
+This prompt appears before any sync attempt that would require enabling WiFi, including session-end syncs, wake syncs, and manually triggered syncs.
+
+To configure this, see **Tools → BookLore Sync → Sync Settings → Sync Triggers → Ask before enabling WiFi**.
+
+---
+
+## Book deletion queue
+
+When a book is deleted from the file manager, the plugin attempts to notify BookLore:
+
+```
+DELETE /api/v1/books/{id}
+```
+
+If the book ID is not yet known (e.g., book was never synced while online) or if the device is offline, the deletion is stored in the `pending_deletions` table and retried on the next sync.
+
+```sql
+SELECT id, file_path, book_id, created_at FROM pending_deletions;
+```
+
+Pending deletions are processed alongside pending sessions on every sync trigger.
+
+---
+
 ## Inspecting the queue
+
+![Queue overview](../view_details.png)
 
 To see how many sessions are waiting:
 
-**Tools → BookLore Sync → Settings → Manage Sessions → View Details**
+**Tools → BookLore Sync → Manage Sessions → View Details**
 
 To view the raw data:
 
@@ -117,6 +154,6 @@ sqlite3 {your_koreader_installation}/settings/booklore-sync.sqlite \
 
 To discard all pending sessions:
 
-**Tools → BookLore Sync → Settings → Manage Sessions → Clear Pending**
+**Tools → BookLore Sync → Manage Sessions → Clear Pending**
 
 > **Warning:** This permanently deletes all queued sessions. They will not be uploaded to BookLore. Only use this to remove test data or sessions you do not want.

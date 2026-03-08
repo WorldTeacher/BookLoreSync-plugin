@@ -28,7 +28,7 @@ To assign an action to a gesture or button in KOReader:
 1. Go to **Tools → More tools → Gestures** (or the equivalent for your device).
 2. Select the gesture or button you want to configure.
 3. Choose **Other actions** from the action list.
-4. Find the BookLore Sync actions in the list (they appear under their action names).
+4. Scroll to find the BookLore Sync actions and select one.
 5. Confirm.
 
 The exact navigation path varies by device and KOReader version. Consult the KOReader documentation for your specific device if needed.
@@ -41,4 +41,4 @@ The exact navigation path varies by device and KOReader version. Consult the KOR
 
 **Toggle BookLore Sync** (`ToggleBookloreSync`) is useful if you read some books that are not in your BookLore library (e.g., work documents, temporary files) and you want to quickly disable tracking without going into the Settings menu.
 
-**Toggle Manual Sync Only** (`ToggleBookloreManualSyncOnly`) is useful on metered or unreliable connections — you can switch to manual mode when on mobile data and back to auto mode when on Wi-Fi.
+**Toggle Manual Sync Only** (`ToggleBookloreManualSyncOnly`) is useful on metered or unreliable connections - you can switch to manual mode when on mobile data and back to auto mode when on Wi-Fi.

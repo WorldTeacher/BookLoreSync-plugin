@@ -107,7 +107,7 @@ MAJOR.MINOR.PATCH
 | MINOR | New features added in a backwards-compatible way |
 | PATCH | Bug fixes |
 
-Development builds (built from uncommitted changes) show a version like `0.0.0-dev+<commit>` and are always treated as outdated — installing a release will always replace a dev build.
+Development builds (built from uncommitted changes) show a version like `0.0.0-dev+<commit>` and are always treated as outdated - installing a release will always replace a dev build.
 
 ---
 

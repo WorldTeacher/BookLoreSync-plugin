@@ -472,14 +472,14 @@ function BookloreSync:registerDispatcherActions()
     Dispatcher:registerAction("booklore_toggle_sync", {
         category = "none",
         event = "ToggleBookloreSync",
-        title = _("Toggle Booklore Sync"),
+        title = _("BookLoreSync: Toggle Booklore Sync"),
         general = true,
     })
     
     Dispatcher:registerAction("booklore_sync_pending", {
         category = "none",
         event = "SyncBooklorePending",
-        title = _("Sync Booklore Pending Sessions"),
+        title = _("BookLoreSync: Sync Booklore Pending Sessions"),
         general = true,
     })
 
@@ -487,20 +487,20 @@ function BookloreSync:registerDispatcherActions()
     Dispatcher:registerAction("booklore_toggle_manual_sync_only", {
         category = "none",
         event = "ToggleBookloreManualSyncOnly",
-        title = _("Toggle Booklore Manual Sync Only"),
+        title = _("BookLoreSync: Toggle Booklore Manual Sync Only"),
         general = true,
     })
     
     Dispatcher:registerAction("booklore_test_connection", {
         category = "none",
         event = "TestBookloreConnection",
-        title = _("Test Booklore Connection"),
+        title = _("BookLoreSync: Test Booklore Connection"),
         general = true,
     })
     Dispatcher:registerAction("booklore_sync_shelf", {
         category = "none",
         event = "SyncBookloreShelf",
-        title = _("Sync from Booklore Shelf"),
+        title = _("BookLoreSync: Sync from Booklore Shelf"),
         general = true,
     })
 end
@@ -2011,6 +2011,7 @@ function BookloreSync:_matchSingleBookInteractive(book)
     local input_dialog
     input_dialog = InputDialog:new{
         title   = T(_("Match book:\n%1"), default_term),
+        description = _("accepts title or id"),
         input   = default_term,
         buttons = {
             {
@@ -3713,6 +3714,14 @@ function BookloreSync:onCloseDocument()
             text    = _("Session not saved: criteria not met"),
             timeout = 3,
         })
+        return false
+    end
+
+    -- Per-book tracking disabled: endSession already discarded the session.
+    -- Safeguard here to ensure rating/annotation/bookmark paths are skipped
+    -- as well on the immediate close-document flow.
+    if session_status == "tracking_disabled" then
+        self:logInfo("BookloreSync: Tracking disabled for this book - skipping rating/annotation sync on close")
         return false
     end
 

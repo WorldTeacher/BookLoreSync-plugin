@@ -6,7 +6,7 @@ weight = 3
 
 # Database
 
-The plugin stores all its data in a single SQLite database file named `booklore-sync.sqlite`, located inside KOReader's settings directory. The exact path depends on your platform — see the [Database location table](#database-location-on-different-platforms) below.
+The plugin stores all its data in a single SQLite database file named `booklore-sync.sqlite`, located inside KOReader's settings directory. The exact path depends on your platform - see the [Database location table](#database-location-on-different-platforms) below.
 
 This file contains pending sessions, book cache, annotations, ratings, settings, and bearer tokens.
 
@@ -14,23 +14,10 @@ This file contains pending sessions, book cache, annotations, ratings, settings,
 
 ## Viewing the database
 
-Use the `sqlite3` command-line tool to inspect the database. Substitute the path for your platform from the [table below](#database-location-on-different-platforms).
-
-```bash
-# Linux / macOS
-sqlite3 {your_koreader_installation}/settings/booklore-sync.sqlite
-
-# Android (via ADB shell or terminal emulator)
-sqlite3 /sdcard/koreader/settings/booklore-sync.sqlite
-
-# Kobo (via SSH)
-sqlite3 /mnt/onboard/.adds/koreader/settings/booklore-sync.sqlite
-
-# Kindle (via SSH)
-sqlite3 /mnt/us/koreader/settings/booklore-sync.sqlite
-```
+The best way is to connect the device to a PC and use a sql editor, as this ensures that the dependencies are installed and access is possible
 
 ### Useful queries
+
 
 **View all tables:**
 ```sql
@@ -77,6 +64,29 @@ SELECT * FROM pending_ratings;
 **Pending annotations:**
 ```sql
 SELECT id, book_id, created_at FROM pending_annotations ORDER BY created_at DESC;
+```
+
+**Pending bookmarks:**
+```sql
+SELECT id, book_id, created_at FROM pending_bookmarks ORDER BY created_at DESC;
+```
+
+**Historical sessions (archived after upload):**
+```sql
+SELECT koreader_book_title, start_time, end_time, duration_seconds,
+       matched, synced
+FROM historical_sessions
+ORDER BY start_time DESC
+LIMIT 20;
+```
+
+**Unmatched historical sessions:**
+```sql
+SELECT koreader_book_title, COUNT(*) AS session_count
+FROM historical_sessions
+WHERE matched = 0
+GROUP BY koreader_book_id
+ORDER BY session_count DESC;
 ```
 
 **Current Bearer token:**
@@ -149,3 +159,33 @@ cp {your_koreader_installation}/settings/booklore-sync.sqlite ~/backup/booklore-
 ```
 
 To restore, copy the backup file back to the original location before starting KOReader.
+
+---
+
+## Incorrect indexes
+
+If the database has corrupted or incorrect indexes, you can recover the data by dumping it into a new database and reindexing.
+
+```bash
+sqlite3 booklore-sync.sqlite ".mode insert" ".dump" > data_recovery.sql
+```
+
+> **Important:** Open `data_recovery.sql` in a text editor before proceeding.
+>
+> 1. Scroll to the very end of the file.
+> 2. If the last line reads `ROLLBACK;`, delete it and replace it with `COMMIT;`.
+> 3. Save the file.
+
+Then import the dump into a new database:
+
+```bash
+sqlite3 new_recovery.db < data_recovery.sql
+```
+
+Finally, rebuild the indexes inside the new database:
+
+```bash
+sqlite3 new_recovery.db "REINDEX;"
+```
+
+Once complete, replace the original database file with `new_recovery.db` and restart KOReader.

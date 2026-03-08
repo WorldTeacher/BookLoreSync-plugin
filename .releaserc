@@ -1,5 +1,9 @@
 plugins:
-  - "@semantic-release/commit-analyzer"
+  - - "@semantic-release/commit-analyzer"
+    - preset: "angular"
+      releaseRules:
+        - breaking: true
+          release: "major"
   - "@semantic-release/release-notes-generator"
   - "@semantic-release/gitlab"
   # generates the CHANGELOG.md

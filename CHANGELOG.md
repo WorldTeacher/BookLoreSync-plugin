@@ -1,3 +1,10 @@
+# [3.5.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.4.1...3.5.0) (2026-03-08)
+
+
+### Features
+
+* **release:** trigger semrel [release] ([95ebf03](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/95ebf0308a7c257919dcc121695dc22bc715b712))
+
 # 1.0.0 (2026-03-08)
 
 

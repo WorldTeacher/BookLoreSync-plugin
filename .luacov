@@ -1,0 +1,11 @@
+statsfile = "luacov.stats.out"
+reportfile = "luacov.report.out"
+
+include = {
+  "bookloresync.koplugin.*"
+}
+
+exclude = {
+  "test.*",
+  "test_.*"
+}

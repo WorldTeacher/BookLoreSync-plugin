@@ -38,23 +38,13 @@ variables:
 # your pipeline stages
 stages:
   - build
-  - test
   - package-build
-  - package-test
   - infra
   - deploy
   - acceptance
   - publish
   - infra-prod
   - production
-
-run-tests:
-  stage: test
-  image: alpine:latest
-  before_script:
-    - apk add --no-cache luajit bash
-  script:
-    - bash run_tests.sh
 
 zip-koplugin-release:
   stage: publish

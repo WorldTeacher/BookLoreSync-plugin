@@ -1,5 +1,5 @@
 # The URL the site will be built for
-base_url = "https://docs.worldteacher.dev/worldteacher/booklore-koreader-plugin"
+base_url = "https://docs.worldteacher.dev/wt-booklore/booklore-koreader-plugin"
 title = "Booklore Sync — KOReader Plugin"
 description = "Official documentation for the Booklore Sync KOReader plugin. Automatically track reading sessions, sync ratings, highlights, and notes to your self-hosted Booklore server."
 theme = "tanuki"
@@ -14,6 +14,6 @@ insert_anchor_links = "left"
 
 [extra]
 mode = "docs"
-gitlab = "https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin"
+gitlab = "https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin"
 show_theme_toggle = true
 

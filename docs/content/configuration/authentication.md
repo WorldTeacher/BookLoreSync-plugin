@@ -8,7 +8,7 @@ weight = 1
 
 The authentication settings are found at:
 
-**Tools → BookLore Sync → Settings → Authentication**
+**Tools → BookLore Sync → Authentication**
 
 ![Koreader Auth Settings](../../getting-started/koreader-settings-auth.png)
 
@@ -30,7 +30,7 @@ https://booklore.example.com
 
 Trailing slashes are not required. The plugin will strip them automatically.
 
-> Enter only the base URL — do not append `/api` or any path. The plugin handles all API routing internally.
+> Enter only the base URL - do not append `/api` or any path. The plugin handles all API routing internally.
 
 ---
 
@@ -79,13 +79,13 @@ The button is only enabled once a server URL and username have been entered.
 A successful test shows:
 
 ```
-Connection successful
-
-Authentification verified
+KOReader: Success
+BookLore: Success
+by-hash endpoint: ok
 ```
 
 
-A failed test shows a specific error message — for example, if the server is unreachable, if credentials are wrong, or if the health endpoint returns an unexpected status.
+A failed test shows a specific error message - for example, if the server is unreachable, if credentials are wrong, or if the health endpoint returns an unexpected status.
 
 > You can also use the dispatcher action `TestBookloreConnection` to test the connection from a KOReader gesture or button shortcut. See [Gestures and Buttons](@/features/gestures.md) for how to set this up.
 
@@ -100,4 +100,4 @@ The plugin uses two separate authentication mechanisms depending on the API endp
 | MD5 credentials | `x-auth-user` / `x-auth-key` | Session upload, book lookup |
 | Bearer token (JWT) | `Authorization: Bearer <token>` | Ratings, annotations, book search |
 
-You do not need to manage tokens manually — the plugin handles acquisition and refresh automatically.
+You do not need to manage tokens manually - the plugin handles acquisition and refresh automatically.

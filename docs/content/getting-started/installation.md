@@ -15,7 +15,7 @@ Before you start, make sure you have:
 - Your Booklore **username and password**.
 - Enough free storage on your device for the plugin and its SQLite database (a few MB at most).
 
-The plugin has no other dependencies — everything it needs (SQLite, JSON, HTTP) is already bundled with KOReader.
+The plugin has no other dependencies - everything it needs (SQLite, JSON, HTTP) is already bundled with KOReader.
 
 > **Important: Custom Docker Image Required**
 >
@@ -23,17 +23,17 @@ The plugin has no other dependencies — everything it needs (SQLite, JSON, HTTP
 
 ---
 
-## Step 1 — Download the plugin
+## Step 1 - Download the plugin
 
-Download the latest release ZIP from the [GitLab releases page](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/-/releases).
+Download the latest release ZIP from the [GitHub releases page](https://github.com/WorldTeacher/BookLoreSync-plugin/releases).
 
 The ZIP contains a single folder named `bookloresync.koplugin`.
 
-Alternatively, the plugin can update itself once installed — see [Auto-Update](@/features/auto-update.md).
+Alternatively, the plugin can update itself once installed - see [Auto-Update](@/features/auto-update.md).
 
 ---
 
-## Step 2 — Copy the plugin to KOReader
+## Step 2 - Copy the plugin to KOReader
 
 Copy the `bookloresync.koplugin` folder into KOReader's plugin directory. The exact path depends on your device and platform.
 
@@ -78,7 +78,7 @@ Connect your Kobo via USB. KOReader's data lives on the device's internal storag
 .adds/koreader/plugins/
 ```
 
-The `.adds/` folder may be hidden on Windows — enable "Show hidden files" in Explorer, or use a file manager that shows hidden directories.
+The `.adds/` folder may be hidden on Windows - enable "Show hidden files" in Explorer, or use a file manager that shows hidden directories.
 
 Alternatively, if you have KOReader's SSH server enabled (available on some Kobo models via the developer menu), you can transfer wirelessly.
 
@@ -121,7 +121,7 @@ plugins/
 
 ---
 
-## Step 3 — Restart KOReader
+## Step 3 - Restart KOReader
 
 A restart is required for KOReader to load the newly installed plugin.
 
@@ -129,7 +129,7 @@ Go to **Menu → Exit → Restart**.
 
 ---
 
-## Step 4 — Verify the plugin loaded
+## Step 4 - Verify the plugin loaded
 
 After restarting, check that the plugin entry appears in the **Tools** menu. This menu is accessible from both the file browser and from within an open book:
 
@@ -150,21 +150,22 @@ If it does not appear, check that:
 
 ---
 
-## Step 5 — Configure the server connection
+## Step 5 - Configure the server connection
 
 ![BookLore Sync authentication submenu in KOReader](../koreader-settings-auth.png)
 
-Go to **Tools → Booklore Sync → Settings → Authentication** and enter:
+Go to **Tools → Booklore Sync → Authentication** and enter:
 
-1. **Server URL** — the address of your Booklore server, e.g. `http://192.168.1.100:6060` or `https://booklore.example.com`.
-> Enter only the base URL — do not append `/api` or any path. The plugin handles all API routing internally.
-2. **KOReader credentials** — tap **Configure KOReader Account** and enter your username and password. These are the credentials you set in the BookLore Settings -> Devices -> KOReader.
-3. **Booklore account** — tap **Configure Booklore Account** and enter the same (or a separate) username and password. This second set of credentials is used for extended features like rating and annotation sync. This is the user you use to log in in the webUI.
+1. **Server URL** - the address of your Booklore server, e.g. `http://192.168.1.100:6060` or `https://booklore.example.com`.
+> Enter only the base URL - do not append `/api` or any path. The plugin handles all API routing internally.
+2. **KOReader credentials** - tap **Configure KOReader Account** and enter your username and password. These are the credentials you set in the BookLore Settings -> Devices -> KOReader.
+3. **Booklore account** - tap **Configure Booklore Account** and enter the same (or a separate) username and password. This second set of credentials is used for extended features like rating and annotation sync. This is the user you use to log in in the webUI.
 4. Tap **Test Connection** to verify everything is working.
 
 A confirmation message will appear if the connection succeeds.
 
 ![BookLore Sync Login success notification](../koreader-auth-success.png)
+
 ---
 
 ## Next steps

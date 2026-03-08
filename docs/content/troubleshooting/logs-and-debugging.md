@@ -28,7 +28,7 @@ To follow the log in real time while reproducing an issue:
 tail -f /tmp/koreader.log | grep BookloreSync
 ```
 
-This log is not persistent — it is cleared each time KOReader starts.
+This log is not persistent - it is cleared each time KOReader starts.
 
 ---
 
@@ -40,7 +40,7 @@ For more detailed diagnostics, the plugin can write its own log file with daily 
 
 Go to:
 
-**Tools → BookLore Sync → Settings → Preferences → Debug logging**
+**Tools → BookLore Sync → Preferences → Debug logging**
 
 Toggle it on. The plugin will begin writing to:
 
@@ -73,7 +73,7 @@ Toggle **Debug logging** off in the same menu. The current log file is closed cl
 
 If you need to share a log file publicly (e.g., when reporting a bug), enable **Secure logs** before capturing:
 
-**Tools → BookLore Sync → Settings → Preferences → Secure logs**
+**Tools → BookLore Sync → Preferences → Secure logs**
 
 With this setting on, all URLs in log output are replaced with `[URL REDACTED]`, so your server address and path information are not exposed.
 
@@ -129,7 +129,7 @@ grep "BookloreSync.*update\|version" /tmp/koreader.log
 
 ## Reporting a bug
 
-When opening a bug report on the [GitLab issue tracker](https://gitlab.worldteacher.dev/WorldTeacher/booklore-koreader-plugin/-/issues), please include:
+When opening a bug report on the [GitHub issue tracker](https://github.com/WorldTeacher/BookLoreSync-plugin/issues), please include:
 
 1. **Plugin version** (from **About & Updates → Version Info**)
 2. **KOReader version** (from KOReader's own About screen)

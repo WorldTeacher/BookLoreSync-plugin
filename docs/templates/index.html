@@ -2,14 +2,6 @@
 
 {% block title %}{{ config.title }}{% endblock %}
 
-{% set mode = config.extra.mode | default(value="site") %}
-
-{% block sidebar %}
-{% if mode == "docs" %}
-{% include "partials/sidebar.html" %}
-{% endif %}
-{% endblock %}
-
 {% block content %}
 {% set mode = config.extra.mode | default(value="site") %}
 
@@ -170,17 +162,12 @@
 </footer>
 
 {% elif mode == "docs" or mode == "book" %}
-{# Docs/Book mode - redirect to first page or show landing #}
+{# Docs/Book mode - show landing page with section content #}
 {% set section = get_section(path="_index.md") %}
-{% if section.pages %}
-{% set first_page = section.pages | first %}
-<script>window.location.href = "{{ first_page.permalink | safe }}";</script>
-<p>Redirecting to <a href="{{ first_page.permalink | safe }}">{{ first_page.title }}</a>...</p>
-{% else %}
-<section class="hero">
+<section class="hero docs-landing">
     <h1 class="hero__title">{{ config.title }}</h1>
     <p class="hero__subtitle">{{ config.description }}</p>
+    {{ section.content | safe }}
 </section>
-{% endif %}
 {% endif %}
 {% endblock %}

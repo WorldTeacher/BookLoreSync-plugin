@@ -6,7 +6,7 @@ weight = 2
 
 # Sync Settings
 
-Found at: **Tools → BookLore Sync → Settings → Sync Settings**
+Found at: **Tools → BookLore Sync → Sync Settings**
 
 This menu contains four sections: Session Settings, Rating Sync, Annotations Sync, and Sync Triggers.
 
@@ -77,22 +77,24 @@ KOReader uses a 1–5 star scale. BookLore uses a 1–10 scale. When this mode i
 | 4 ★★★★☆ | 8 |
 | 5 ★★★★★ | 10 |
 
-The rating is read from the book's `.sdr` sidecar file. If no rating has been set in KOReader, no rating is synced.
+The rating is read from the `summary.rating` field of KOReader's `DocSettings`. When syncing at book-close time, the live in-memory `DocSettings` object is used directly. In all other cases (e.g. deferred sync of pending sessions), the `.sdr` sidecar file on disk is read as a fallback. If no rating has been set in KOReader, no rating is synced.
 
 ### Select at complete
 
 A 1–10 rating dialog is shown when you close a book that has reached 99% or more progress. Your selection is immediately synced to BookLore. Closing the dialog without selecting skips the rating for that session.
 > To prevent some bugs, the dialog is shown with a ~2s delay and does not open the keyboard.
 
-### Hardcover rating (planned)
+### Hardcover rating sync
 
-A future mode will sync ratings to a [Hardcover](https://hardcover.app) account. Not yet implemented.
+Toggle on to also sync the rating to your [Hardcover](https://hardcover.app) account when a session ends. Uses the Hardcover book ID stored in Booklore for the matched book.
+
+Requires **Enable rating sync** to be on. Hardcover account setup (API token and book ID fetch) is covered in [Hardcover](@/configuration/hardcover.md).
 
 ---
 
 ## Annotations Sync
 
-> **Warning:** Annotation sync currently only works for EPUB files. Highlights and notes from PDF, CBZ, and other formats are not synced.
+> **Note:** In-book EPUB CFI annotation positioning is only supported for EPUB files. For PDF files, a mock CFI placeholder is used. Annotation sync is not supported for CBZ/CBR formats.
 
 Requires **BookLore account credentials** to be configured. See [Authentication](@/configuration/authentication.md).
 
@@ -102,12 +104,19 @@ Toggle on to upload KOReader highlights and notes to BookLore at the end of qual
 
 The plugin tracks uploaded annotations in a deduplication table so the same highlight is never uploaded twice.
 
+### Sync bookmarks
+
+Toggle on to also upload KOReader position bookmarks (markers without selected text) to BookLore.
+
+Bookmarks are deduplicated via the `synced_bookmarks` table and uploaded to `POST /api/v1/bookmarks`.
+
 ### Notes destination
 
 | Option | Behaviour | Notes |
 |--------|-----------|-------|
-| **In book** | Notes are stored as in-book annotations attached to the highlighted passage. Requires EPUB CFI calculation. Best for reading in BookLore's reader view.| Currently tested with EPUB files only. |
-| **In BookLore** | Notes are stored as standalone book notes on the BookLore book page, using the chapter title as the note title. Works for all file formats. |
+| **In book** | Notes are stored as in-book annotations attached to the highlighted passage. Requires EPUB CFI calculation. Best for reading in BookLore's reader view. | EPUB only for precise positioning; PDF uses mock CFI. |
+| **In BookLore** | Notes are stored as standalone book notes on the BookLore book page, using the chapter title as the note title. Works for all file formats. | |
+| **Both** | Sends annotations to both destinations simultaneously. | PDF in-book copy uses mock CFI placeholder. |
 
 ### Upload strategy
 
@@ -148,5 +157,5 @@ Controls when the plugin attempts to upload pending data.
 
 The **Custom** option exposes two additional toggles:
 
-- **Auto-sync on suspend** — upload the current session and all pending items when the device suspends.
-- **Connect WiFi on suspend** — automatically enable WiFi and wait up to 15 seconds for a connection when the device suspends.
+- **Auto-sync on suspend** - upload the current session and all pending items when the device suspends.
+- **Connect WiFi on suspend** - automatically enable WiFi and wait up to 15 seconds for a connection when the device suspends.

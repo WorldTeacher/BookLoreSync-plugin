@@ -8,8 +8,6 @@ template = "section.html"
 
 # Reference
 
-Technical reference material for the BookLore Sync plugin.
-
 | Page | Contents |
 |------|----------|
 | [Settings](@/reference/settings.md) | All configuration keys, types, defaults, and descriptions |

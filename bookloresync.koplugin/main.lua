@@ -1835,6 +1835,27 @@ File manager long-press: Sync all annotations for a single book.
 Looks up the book in the local DB, then calls syncHighlightsAndNotes.
 Requires the book to have been opened at least once so it has a book_cache entry.
 --]]
+
+--[[--
+Refresh Booklore credentials from DB into memory.
+
+File-dialog actions are registered on the FileManager CLASS table, meaning the
+closure's `self` may be a different plugin instance than the one the user
+configured credentials from (Reader vs FileManager context).  Call this at the
+top of every fileDialog* function to ensure the latest saved credentials are
+always in memory before use.
+
+@return string, string  username, password (may be "" if not configured)
+--]]
+function BookloreSync:_refreshCredentials()
+    if not self.db then return "", "" end
+    local username = self.settings:readSetting("booklore_username") or ""
+    local password = self.settings:readSetting("booklore_password") or ""
+    self.booklore_username = username
+    self.booklore_password = password
+    return username, password
+end
+
 function BookloreSync:fileDialogSyncAnnotations(file_path)
     if not self.db then
         UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
@@ -1844,7 +1865,8 @@ function BookloreSync:fileDialogSyncAnnotations(file_path)
         UIManager:show(InfoMessage:new{ text = _("Booklore: annotation sync is disabled in settings") })
         return
     end
-    if self.booklore_username == "" or self.booklore_password == "" then
+    local username, password = self:_refreshCredentials()
+    if username == "" or password == "" then
         UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
         return
     end
@@ -1898,7 +1920,10 @@ function BookloreSync:fileDialogMatchBook(file_path)
         UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
         return
     end
-    if self.booklore_username == "" or self.booklore_password == "" then
+    -- Re-read credentials from DB in case they were saved from a different
+    -- plugin context (Reader vs FileManager) after this instance was initialised.
+    local username, password = self:_refreshCredentials()
+    if username == "" or password == "" then
         UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
         return
     end
@@ -2129,7 +2154,8 @@ function BookloreSync:fileDialogSyncRating(file_path)
         UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
         return
     end
-    if self.booklore_username == "" or self.booklore_password == "" then
+    local username, password = self:_refreshCredentials()
+    if username == "" or password == "" then
         UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
         return
     end
@@ -2185,7 +2211,8 @@ function BookloreSync:_fileDialogBookloreSync(file_path)
         UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
         return
     end
-    if self.booklore_username == "" or self.booklore_password == "" then
+    local username, password = self:_refreshCredentials()
+    if username == "" or password == "" then
         UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
         return
     end
@@ -3464,6 +3491,13 @@ function BookloreSync:startSession()
                     end
                 else
                     self:logInfo("BookloreSync: Book not found on server (not in library)")
+                    -- First-time hash lookup returned no match — inform the user.
+                    -- We only show this when actually connected so we know the server
+                    -- was reached and genuinely has no book with this hash.
+                    UIManager:show(InfoMessage:new{
+                        text    = _("No match found based on hash.\nDoes this book exist in your Booklore library?"),
+                        timeout = 5,
+                    })
                 end
             else
                 self:logInfo("BookloreSync: No network connection, skipping server lookup")

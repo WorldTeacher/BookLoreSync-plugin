@@ -1,3 +1,11 @@
+## [3.5.1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.5.0...3.5.1) (2026-03-09)
+
+
+### Bug Fixes
+
+* **ci:** change pipeline to always run ([0a4fa45](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/0a4fa45dc4aaf74a377af1f006d4a62b47c4a948))
+* **match:** show popup when hash lookup finds no match in Booklore [release] ([0d6e73e](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/0d6e73e82e8e9075fd3984205e60eae3dd579c16))
+
 # [3.5.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.4.1...3.5.0) (2026-03-08)
 
 

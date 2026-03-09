@@ -796,6 +796,67 @@ function APIClient:getBookByHashWithAuth(book_hash, username, password)
 end
 
 --[[--
+Look up a book in the Booklore library by ISBN.
+
+Uses the metadata isbn-lookup endpoint which matches the ISBN against books
+already in the library and returns the matched book's ID.
+
+Endpoint: POST /api/v1/books/metadata/isbn-lookup
+Body: { "isbn": "<isbn_string>" }
+
+@param isbn string Raw ISBN digits (10 or 13, no prefix)
+@param username string Booklore username
+@param password string Booklore password
+@return boolean success
+@return number|string bookId on success, error message on failure
+--]]
+function APIClient:lookupBookByIsbn(isbn, username, password)
+    self:logInfo("BookloreSync API: Looking up book by ISBN via metadata endpoint:", isbn)
+
+    local login_success, token = self:getOrRefreshBearerToken(username, password)
+
+    if not login_success then
+        self:logErr("BookloreSync API: Failed to get Bearer token:", token)
+        return false, token or "Authentication failed"
+    end
+
+    local headers = {
+        ["Authorization"] = "Bearer " .. token
+    }
+
+    local body = { isbn = isbn }
+
+    local success, code, response = self:request("POST", "/api/v1/books/metadata/isbn-lookup", body, headers)
+
+    -- If we get 401/403, token might be invalid - retry with fresh token
+    if not success and (code == 401 or code == 403) then
+        self:logWarn("BookloreSync API: Token rejected (401/403), refreshing and retrying")
+
+        if self.db then
+            self.db:deleteBearerToken(username)
+        end
+
+        local refresh_success, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if refresh_success then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("POST", "/api/v1/books/metadata/isbn-lookup", body, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+
+    if success and type(response) == "table" and response.bookId then
+        local book_id = tonumber(response.bookId)
+        self:logInfo("BookloreSync API: ISBN lookup found book ID:", book_id)
+        return true, book_id
+    else
+        local error_msg = (type(response) == "string" and response) or "No book found for ISBN"
+        self:logWarn("BookloreSync API: ISBN lookup failed:", error_msg)
+        return false, error_msg
+    end
+end
+
+--[[--
 URL encode a string
 
 @param str String to encode

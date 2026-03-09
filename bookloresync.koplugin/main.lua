@@ -3549,14 +3549,23 @@ function BookloreSync:startSession()
                     self:logInfo("BookloreSync: Book not found on server by hash, trying ISBN fallback")
                     local isbn = self:_extractIsbnFromDocSettings(file_path)
                     if isbn then
-                        self:logInfo("BookloreSync: Attempting ISBN lookup for:", isbn)
-                        local isbn_success, isbn_result = self.api:lookupBookByIsbn(
+                        self:logInfo("BookloreSync: Attempting ISBN search for:", isbn)
+                        local isbn_success, isbn_results = self.api:searchBooksByIsbn(
                             isbn, self.booklore_username, self.booklore_password)
-                        if isbn_success then
-                            book_id = isbn_result
-                            self:logInfo("BookloreSync: Book ID resolved via ISBN lookup:", book_id)
+                        local matched_id = nil
+                        if isbn_success and isbn_results and #isbn_results > 0 then
+                            for _, result in ipairs(isbn_results) do
+                                if result.matchScore == 1 then
+                                    matched_id = tonumber(result.id)
+                                    break
+                                end
+                            end
+                        end
+                        if matched_id then
+                            book_id = matched_id
+                            self:logInfo("BookloreSync: Book ID resolved via ISBN search:", book_id)
                         else
-                            self:logWarn("BookloreSync: ISBN lookup failed or no results")
+                            self:logWarn("BookloreSync: ISBN search returned no exact match (matchScore=1)")
                             UIManager:show(InfoMessage:new{
                                 text    = _("No match found based on hash or ISBN.\nDoes this book exist in your Booklore library?"),
                                 timeout = 5,

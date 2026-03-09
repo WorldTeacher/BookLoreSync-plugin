@@ -1703,8 +1703,9 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
                 cfi = resolveCfi()
                 local in_book_ok, in_book_id
                 local bl_ok, bl_id
+                local requires_in_book = cfi ~= nil and cfi ~= ""
                 if not queue_only then
-                    if cfi then
+                    if requires_in_book then
                         in_book_ok, in_book_id = self.api:submitInBookNote(
                             book_id, cfi, ann.note,
                             {
@@ -1728,8 +1729,9 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
                         self:logWarn("BookloreSync: 'Both' - Booklore note failed:", bl_id)
                     end
                 end
-                -- Treat the combined op as ok if at least one destination succeeded
-                ok = (in_book_ok or bl_ok) or false
+                -- In "both" mode, keep retrying until every required destination
+                -- has succeeded. If no CFI exists, only the Booklore note is required.
+                ok = (requires_in_book and in_book_ok and bl_ok) or ((not requires_in_book) and bl_ok) or false
                 server_id = in_book_id or bl_id
 
             else
@@ -5305,11 +5307,13 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
 
         elseif row.ann_type == "both_note" then
             -- Submit as both an in-book note (CFI required) and a Booklore
-            -- web-UI note.  Only treat as success when both destinations succeed.
+            -- web-UI note.  Treat as success only when all required
+            -- destinations succeed.
             local in_book_ok, in_book_id
             local bl_ok,      bl_id
             local cfi = payload.cfi
-            if cfi and cfi ~= "" then
+            local requires_in_book = cfi and cfi ~= ""
+            if requires_in_book then
                 in_book_ok, in_book_id = self.api:submitInBookNote(
                     book_id, cfi, payload.note,
                     {
@@ -5324,10 +5328,6 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
                 end
             else
                 self:logInfo("BookloreSync: 'Both' retry - no CFI, skipping in-book note (id:", row.id, ")")
-                -- Without a CFI the in-book destination cannot be fulfilled;
-                -- leave the row pending until the book is opened again.
-                skipped_count = skipped_count + 1
-                goto continue_ann
             end
             bl_ok, bl_id = self.api:submitBookloreNote(
                 book_id, payload.note, payload.chapter,
@@ -5336,7 +5336,7 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
             if not bl_ok then
                 self:logWarn("BookloreSync: 'Both' retry - Booklore note failed:", bl_id)
             end
-            ok        = in_book_ok and bl_ok
+            ok        = (requires_in_book and in_book_ok and bl_ok) or ((not requires_in_book) and bl_ok) or false
             server_id = in_book_id or bl_id
 
         else

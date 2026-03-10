@@ -35,9 +35,9 @@ The process runs in two phases:
 
 1. **Auto-sync** - Sessions already matched during extraction (by file hash) are uploaded immediately.
 2. **Manual matching** - For each unmatched book the plugin attempts to find a match automatically using three strategies in order:
-   - **ISBN** — searches by ISBN-13 or ISBN-10 if embedded in the file metadata. If a match is found you are shown a confirmation dialog with "Proceed" / "Manual Match" / "Skip" options.
-   - **Hash** — queries the server by the file's MD5 hash. Auto-accepted if a match is returned.
-   - **Title search** — falls back to a title search and presents up to 5 results with match scores. Tap a result to confirm; tap "Skip this book" or "Cancel matching" to move on.
+   - **ISBN** - searches by ISBN-13 or ISBN-10 if embedded in the file metadata. If a match is found you are shown a confirmation dialog with "Proceed" / "Manual Match" / "Skip" options.
+   - **Hash** - queries the server by the file's MD5 hash. Auto-accepted if a match is returned.
+   - **Title search** - falls back to a title search and presents up to 5 results with match scores. Tap a result to confirm; tap "Skip this book" or "Cancel matching" to move on.
 
    Once confirmed, the sessions for that book are uploaded immediately.
 
@@ -86,7 +86,7 @@ Iterates over all books in the local cache that have no BookLore match yet, and 
 
 For each unmatched book an input dialog is shown, pre-filled with the book's cached title. You can:
 
-- **Edit the title** and press Search to search BookLore by title — up to 5 results are shown with match scores; tap a result to confirm the match.
+- **Edit the title** and press Search to search BookLore by title - up to 5 results are shown with match scores; tap a result to confirm the match.
 - **Enter a numeric ID** instead of a title to fetch a specific book directly from BookLore by its ID. The match is saved immediately without a confirmation step.
 - **Skip** the current book and move to the next.
 - **Cancel** to exit the matching flow entirely.

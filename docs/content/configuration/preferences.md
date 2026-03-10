@@ -65,8 +65,8 @@ Enable **Debug Logging** and **Secure Logs** together before capturing a log to 
 
 When enabled, the plugin prompts for confirmation before turning on WiFi for any sync operation. The prompt shows the action that requires WiFi (for example, "sync sessions" or "upload annotation"). Two options are presented:
 
-- **Enable** — turns on WiFi and proceeds with the action.
-- **Skip** — leaves WiFi off; the action is deferred and data remains in the pending queue for the next sync opportunity.
+- **Enable** - turns on WiFi and proceeds with the action.
+- **Skip** - leaves WiFi off; the action is deferred and data remains in the pending queue for the next sync opportunity.
 
 When disabled, the plugin enables WiFi automatically without prompting whenever a sync requires it.
 
@@ -80,7 +80,7 @@ Writes the current plugin configuration to a JSON file at:
 {koreader_settings_dir}/booklore_settings_export.json
 ```
 
-Sensitive fields are excluded from the export: server URL, username, and password are never written to the file. All other settings — sync mode, thresholds, feature toggles, and logging options — are included.
+Sensitive fields are excluded from the export: server URL, username, and password are never written to the file. All other settings - sync mode, thresholds, feature toggles, and logging options - are included.
 
 A confirmation toast shows the full path when the export succeeds.
 

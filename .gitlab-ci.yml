@@ -44,12 +44,6 @@ variables:
 # GITLAB_TOKEN: A GitLab 'project access token' or 'personal access token' with `api`, `read_repository` and `write repository` scopes.
 # SEMREL_GPG_SIGNKEY: Path to the GPG signkey exported with `gpg --armor --export-secret-key`.
 
-# your pipeline stages
-stages:
-  - build
-  - deploy
-  - publish
-
 zip-koplugin-release:
   stage: publish
   image: registry.gitlab.com/gitlab-org/cli:latest

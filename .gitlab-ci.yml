@@ -33,6 +33,10 @@ butler:
   image:
     name: registry.gitlab.com/to-be-continuous/tools/gitlab-butler:latest
     entrypoint: [""]
+  rules:
+    - if: '$GITLAB_TOKEN'
+      when: always
+    - when: never
 
 # Initialize git submodules (required for tanuki theme)
 variables:

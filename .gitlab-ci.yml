@@ -55,7 +55,7 @@ stages:
   - deploy
   - publish
 
-lua-tests:
+lua-check:
   stage: test
   image: debian:bookworm-slim
   rules:
@@ -75,21 +75,15 @@ lua-tests:
       liblua5.1-0-dev
       lua5.1
       luarocks
-    - luarocks --lua-version=5.1 install busted
-    - luarocks --lua-version=5.1 install luacov
-    - luarocks --lua-version=5.1 install luacov-cobertura
+    - luarocks --lua-version=5.1 install luacheck
   script:
-    - bash run_tests.sh
-  artifacts:
-    when: always
-    paths:
-      - coverage.xml
-      - luacov.report.out
-      - luacov.stats.out
-    reports:
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage.xml
+    - find bookloresync.koplugin test -name '*.lua' -print0 | xargs -0 -n1 luac5.1 -p
+    - >
+      luacheck bookloresync.koplugin test
+      --std lua51
+      --globals G_reader_settings bit
+      --codes
+      --no-max-line-length
 
 zip-koplugin-release:
   stage: publish

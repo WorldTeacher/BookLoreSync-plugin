@@ -1,6 +1,6 @@
 # The URL the site will be built for
 base_url = "https://docs.worldteacher.dev/wt-booklore/booklore-koreader-plugin"
-title = "Booklore Sync — KOReader Plugin"
+title = "Booklore Sync - KOReader Plugin"
 description = "Official documentation for the Booklore Sync KOReader plugin. Automatically track reading sessions, sync ratings, highlights, and notes to your self-hosted Booklore server."
 theme = "tanuki"
 # Whether to automatically compile all Sass files in the sass directory

@@ -1703,8 +1703,9 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
                 cfi = resolveCfi()
                 local in_book_ok, in_book_id
                 local bl_ok, bl_id
+                local requires_in_book = cfi ~= nil and cfi ~= ""
                 if not queue_only then
-                    if cfi then
+                    if requires_in_book then
                         in_book_ok, in_book_id = self.api:submitInBookNote(
                             book_id, cfi, ann.note,
                             {
@@ -1728,8 +1729,9 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
                         self:logWarn("BookloreSync: 'Both' - Booklore note failed:", bl_id)
                     end
                 end
-                -- Treat the combined op as ok if at least one destination succeeded
-                ok = (in_book_ok or bl_ok) or false
+                -- In "both" mode, keep retrying until every required destination
+                -- has succeeded. If no CFI exists, only the Booklore note is required.
+                ok = (requires_in_book and in_book_ok and bl_ok) or ((not requires_in_book) and bl_ok) or false
                 server_id = in_book_id or bl_id
 
             else
@@ -3424,6 +3426,60 @@ function BookloreSync:getBookIdByHash(book_hash)
 end
 
 --[[--
+Extract ISBN from KOReader doc settings for a given file.
+
+Checks the "identifiers" setting (a string that may contain multiple
+identifiers, e.g. "isbn:9781423137139,uuid:abc-123") for an isbn: entry.
+
+Uses the live in-memory self.ui.doc_settings when available (required at
+book-open time, since KOReader has not yet flushed settings to the .sdr
+sidecar). Falls back to loading from disk via metadata_extractor for
+contexts where the document is no longer open.
+
+ISBN-13 is preferred; ISBN-10 is used as a fallback.
+
+@param file_path string Full path to the document file
+@return string|nil Raw ISBN digits (without "isbn:" prefix), or nil if not found
+--]]
+function BookloreSync:_extractIsbnFromDocSettings(file_path)
+    local doc_settings
+    if self.ui and self.ui.doc_settings then
+        self:logDbg("BookloreSync: Using live in-memory doc_settings for ISBN extraction")
+        doc_settings = self.ui.doc_settings
+    else
+        self:logDbg("BookloreSync: Falling back to on-disk sidecar for ISBN extraction")
+        doc_settings = self.metadata_extractor:loadDocSettings(file_path)
+    end
+
+    if not doc_settings then
+        self:logDbg("BookloreSync: No doc settings found for ISBN extraction")
+        return nil
+    end
+
+    local doc_props = doc_settings:readSetting("doc_props")
+    if type(doc_props) ~= "table" then
+        self:logDbg("BookloreSync: No doc_props found in doc settings")
+        return nil
+    end
+
+    local identifiers = doc_props.identifiers
+    if type(identifiers) ~= "string" then
+        self:logDbg("BookloreSync: No identifiers string found in doc_props")
+        return nil
+    end
+
+    local isbn = identifiers:match("isbn:(%d%d%d%d%d%d%d%d%d%d%d%d%d)")
+              or identifiers:match("isbn:(%d%d%d%d%d%d%d%d%d%d)")
+    if isbn then
+        self:logInfo("BookloreSync: Found ISBN in doc settings:", isbn)
+        return isbn
+    end
+
+    self:logInfo("BookloreSync: No ISBN entry found in identifiers:", identifiers)
+    return nil
+end
+
+--[[--
 Start tracking a reading session
 
 Called when a document is opened
@@ -3490,14 +3546,40 @@ function BookloreSync:startSession()
                         self:logInfo("BookloreSync: Book has ISBN-10:", isbn10, "ISBN-13:", isbn13)
                     end
                 else
-                    self:logInfo("BookloreSync: Book not found on server (not in library)")
-                    -- First-time hash lookup returned no match — inform the user.
-                    -- We only show this when actually connected so we know the server
-                    -- was reached and genuinely has no book with this hash.
-                    UIManager:show(InfoMessage:new{
-                        text    = _("No match found based on hash.\nDoes this book exist in your Booklore library?"),
-                        timeout = 5,
-                    })
+                    self:logInfo("BookloreSync: Book not found on server by hash, trying ISBN fallback")
+                    local isbn = self:_extractIsbnFromDocSettings(file_path)
+                    if isbn then
+                        self:logInfo("BookloreSync: Attempting ISBN search for:", isbn)
+                        local isbn_success, isbn_results = self.api:searchBooksByIsbn(
+                            isbn, self.booklore_username, self.booklore_password)
+                        local matched_id = nil
+                        if isbn_success and isbn_results and #isbn_results > 0 then
+                            for _, result in ipairs(isbn_results) do
+                                if result.matchScore == 1 then
+                                    matched_id = tonumber(result.id)
+                                    break
+                                end
+                            end
+                        end
+                        if matched_id then
+                            book_id = matched_id
+                            self:logInfo("BookloreSync: Book ID resolved via ISBN search:", book_id)
+                        else
+                            self:logWarn("BookloreSync: ISBN search returned no exact match (matchScore=1)")
+                            UIManager:show(InfoMessage:new{
+                                text    = _("No match found based on hash or ISBN.\nDoes this book exist in your Booklore library?"),
+                                timeout = 5,
+                            })
+                        end
+                    else
+                        self:logInfo("BookloreSync: No ISBN available in doc settings")
+                        -- We only show this when actually connected so we know the server
+                        -- was reached and genuinely has no book with this hash.
+                        UIManager:show(InfoMessage:new{
+                            text    = _("No match found based on hash.\nDoes this book exist in your Booklore library?"),
+                            timeout = 5,
+                        })
+                    end
                 end
             else
                 self:logInfo("BookloreSync: No network connection, skipping server lookup")
@@ -3960,40 +4042,91 @@ Used when "Connect network on suspend" is enabled.
 @return boolean true if connected, false otherwise
 --]]
 function BookloreSync:connectNetwork()
-    local Device = require("device")
-    
-    if not Device:hasWifiToggle() then
-        self:logWarn("BookloreSync: Device does not support WiFi toggle")
-        return false
+    local function isNetworkConnected()
+        if not NetworkMgr or type(NetworkMgr.isConnected) ~= "function" then
+            return false
+        end
+        local ok_connected, connected = pcall(NetworkMgr.isConnected, NetworkMgr)
+        return ok_connected and connected and true or false
     end
-    
-    if Device.isOnline and Device:isOnline() then
+
+    if isNetworkConnected() then
         self:logInfo("BookloreSync: Network already connected")
         return true
     end
-    
+
     self:logInfo("BookloreSync: Attempting to connect to network")
-    
-    if not NetworkMgr:isConnected() then
-        self:logInfo("BookloreSync: Enabling WiFi")
-        Device:setWifiState(true)
+
+    local tried_enable = false
+    local manager_calls = {
+        { "turnOnWifi" },
+        { "enableWifi" },
+        { "setWifiEnabled", true },
+        { "setWifiState", true },
+        { "requestWifiOn" },
+        { "reconnect" },
+        { "obtainIP" },
+    }
+
+    local unpack_fn = table.unpack or unpack
+    for _, call in ipairs(manager_calls) do
+        local method = call[1]
+        if type(NetworkMgr[method]) == "function" then
+            local args = {}
+            for i = 2, #call do
+                args[#args + 1] = call[i]
+            end
+            self:logInfo("BookloreSync: Trying NetworkMgr method:", method)
+            local ok_call, call_result = pcall(NetworkMgr[method], NetworkMgr, unpack_fn(args))
+            if ok_call then
+                tried_enable = true
+                if call_result ~= false then
+                    break
+                end
+            else
+                self:logWarn("BookloreSync: NetworkMgr method failed:", method, tostring(call_result))
+            end
+        end
     end
-    
+
+    if not tried_enable then
+        self:logWarn("BookloreSync: No supported NetworkMgr WiFi-enable method found")
+        return false
+    end
+
+    local ok_ffi, ffiutil = pcall(require, "ffi/util")
+    local sleep_available = ok_ffi and ffiutil and type(ffiutil.sleep) == "function"
+
     local timeout = 15
     local elapsed = 0
     local check_interval = 0.5
-    
+
     while elapsed < timeout do
-        if Device.isOnline and Device:isOnline() then
+        if isNetworkConnected() then
             self:logInfo("BookloreSync: Network connected successfully after", elapsed, "seconds")
             return true
         end
-        
-        local ffiutil = require("ffi/util")
-        ffiutil.sleep(check_interval)
+
+        if sleep_available then
+            local ok_sleep, sleep_err = pcall(ffiutil.sleep, check_interval)
+            if not ok_sleep then
+                self:logWarn("BookloreSync: Sleep call failed while waiting for network:", tostring(sleep_err))
+                break
+            end
+        else
+            -- Some KOReader builds do not expose ffiutil.sleep().
+            -- In that case, avoid crashing and fall back to a single best-effort
+            -- connectivity check after requesting WiFi.
+            self:logWarn("BookloreSync: Sleep utility unavailable while waiting for network")
+            if isNetworkConnected() then
+                self:logInfo("BookloreSync: Network connected successfully (fallback check)")
+                return true
+            end
+            break
+        end
         elapsed = elapsed + check_interval
     end
-    
+
     self:logWarn("BookloreSync: Network connection timeout after", timeout, "seconds")
     return false
 end
@@ -4019,11 +4152,27 @@ plugin wants WiFi (e.g. "sync sessions", "upload annotation").
 @param on_deny    Callback invoked when the user declines (may be nil).
 --]]--
 function BookloreSync:_requestWifi(context, on_confirm, on_deny)
+    if type(on_confirm) ~= "function" then
+        on_confirm = function() end
+    end
     on_deny = on_deny or function() end
+
+    local function safeInvoke(cb, label)
+        local ok, err = pcall(cb)
+        if not ok then
+            self:logErr("BookloreSync: Error during", label, ":", tostring(err))
+            UIManager:show(InfoMessage:new{
+                text = _("Booklore Sync failed unexpectedly. See logs."),
+                timeout = 3,
+            })
+            return false
+        end
+        return true
+    end
 
     -- WiFi already up - proceed immediately without any prompt.
     if NetworkMgr:isConnected() then
-        on_confirm()
+        safeInvoke(on_confirm, "WiFi confirm callback")
         return
     end
 
@@ -4033,7 +4182,7 @@ function BookloreSync:_requestWifi(context, on_confirm, on_deny)
     -- want to enable WiFi (e.g. onSuspend with connect_network_on_suspend)
     -- should pass a context; the prompt is the only new behaviour here.
     if not self.ask_wifi_enable then
-        on_confirm()
+        safeInvoke(on_confirm, "WiFi confirm callback")
         return
     end
 
@@ -4051,21 +4200,32 @@ function BookloreSync:_requestWifi(context, on_confirm, on_deny)
         cancel_text = _("Skip"),
         ok_callback = function()
             self:logInfo("BookloreSync: User approved WiFi enable for:", context or "<unknown>")
-            local ok = self:connectNetwork()
+            local ok_connect, ok = pcall(function()
+                return self:connectNetwork()
+            end)
+            if not ok_connect then
+                self:logErr("BookloreSync: WiFi connection attempt crashed:", tostring(ok))
+                UIManager:show(InfoMessage:new{
+                    text    = _("Failed to enable WiFi"),
+                    timeout = 2,
+                })
+                safeInvoke(on_deny, "WiFi deny callback")
+                return
+            end
             if ok then
-                on_confirm()
+                safeInvoke(on_confirm, "WiFi confirm callback")
             else
                 self:logWarn("BookloreSync: WiFi enable approved but connection failed")
                 UIManager:show(InfoMessage:new{
                     text    = _("Could not connect to WiFi"),
                     timeout = 2,
                 })
-                on_deny()
+                safeInvoke(on_deny, "WiFi deny callback")
             end
         end,
         cancel_callback = function()
             self:logInfo("BookloreSync: User declined WiFi enable for:", context or "<unknown>")
-            on_deny()
+            safeInvoke(on_deny, "WiFi deny callback")
         end,
     })
 end
@@ -5305,11 +5465,13 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
 
         elseif row.ann_type == "both_note" then
             -- Submit as both an in-book note (CFI required) and a Booklore
-            -- web-UI note.  Only treat as success when both destinations succeed.
+            -- web-UI note.  Treat as success only when all required
+            -- destinations succeed.
             local in_book_ok, in_book_id
             local bl_ok,      bl_id
             local cfi = payload.cfi
-            if cfi and cfi ~= "" then
+            local requires_in_book = cfi and cfi ~= ""
+            if requires_in_book then
                 in_book_ok, in_book_id = self.api:submitInBookNote(
                     book_id, cfi, payload.note,
                     {
@@ -5324,10 +5486,6 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
                 end
             else
                 self:logInfo("BookloreSync: 'Both' retry - no CFI, skipping in-book note (id:", row.id, ")")
-                -- Without a CFI the in-book destination cannot be fulfilled;
-                -- leave the row pending until the book is opened again.
-                skipped_count = skipped_count + 1
-                goto continue_ann
             end
             bl_ok, bl_id = self.api:submitBookloreNote(
                 book_id, payload.note, payload.chapter,
@@ -5336,7 +5494,7 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
             if not bl_ok then
                 self:logWarn("BookloreSync: 'Both' retry - Booklore note failed:", bl_id)
             end
-            ok        = in_book_ok and bl_ok
+            ok        = (requires_in_book and in_book_ok and bl_ok) or ((not requires_in_book) and bl_ok) or false
             server_id = in_book_id or bl_id
 
         else
@@ -5937,8 +6095,8 @@ function BookloreSync:resolveUnmatchedBooks(silent)
         return
     end
     
-    local unmatched_books = self.db:getAllUnmatchedBooks()
-    
+    local unmatched_books = self.db:getAllUnmatchedBooks() or {}
+
     if #unmatched_books == 0 then
         self:logInfo("BookloreSync: No unmatched books to resolve")
         return

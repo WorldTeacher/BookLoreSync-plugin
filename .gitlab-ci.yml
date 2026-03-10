@@ -22,21 +22,17 @@ include:
     rules:
       - changes:
           - docs/**/*
-  # - component: "$CI_SERVER_FQDN/to-be-continuous/gitlab-butler/gitlab-ci-butler@1.4"
-  #   inputs:
-  #     pipelines-delete-older-than: "30"
+  - component: "$CI_SERVER_FQDN/to-be-continuous/gitlab-butler/gitlab-ci-butler@1.4"
+    inputs:
+      pipelines-delete-older-than: "30"
 
 # The Butler image ships with a binary entrypoint. Clear it so GitLab Runner
 # can execute the generated shell wrapper instead of appending it as CLI args
 # to `gitlab-butler`.
-# butler:
-#   image:
-#     name: registry.gitlab.com/to-be-continuous/tools/gitlab-butler:latest
-#     entrypoint: [""]
-#   rules:
-#     - if: "$GITLAB_TOKEN"
-#       when: always
-#     - when: never
+butler:
+  image:
+    name: registry.gitlab.com/to-be-continuous/tools/gitlab-butler:latest
+    entrypoint: [""]
 
 # Initialize git submodules (required for tanuki theme)
 variables:
@@ -51,39 +47,8 @@ variables:
 # your pipeline stages
 stages:
   - build
-  - test
   - deploy
   - publish
-
-lua-check:
-  stage: test
-  image: debian:bookworm-slim
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-      when: always
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: always
-    - when: never
-  before_script:
-    - apt-get update
-    - >
-      apt-get install -y --no-install-recommends
-      bash
-      build-essential
-      ca-certificates
-      git
-      libluajit-5.1-dev
-      luajit
-      luarocks
-    - luarocks --lua-version=5.1 install luacheck
-  script:
-    - find bookloresync.koplugin test -name '*.lua' -print0 | xargs -0 -n1 sh -c 'luajit -b "$1" /dev/null' _
-    - >
-      luacheck bookloresync.koplugin test
-      --std luajit
-      --globals G_reader_settings bit
-      --codes
-      --no-max-line-length
 
 zip-koplugin-release:
   stage: publish

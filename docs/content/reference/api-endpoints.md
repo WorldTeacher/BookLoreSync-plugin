@@ -126,7 +126,15 @@ Searches for a book by ISBN.
 
 **Authentication:** Bearer token
 
-Used as a further fallback for book lookup.
+**Query parameter:** `isbn` - an ISBN-10 or ISBN-13 value. If both are embedded in the file, ISBN-13 is preferred.
+
+**When it is called:** Automatically at book-open time, as a fallback when `GET /api/koreader/books/by-hash/:hash` returns no match and the device has a network connection.
+
+**Match requirement:** The plugin inspects each result for a `matchScore` field and only accepts a result where `matchScore == 1` (exact match). If no result meets this threshold, the lookup is treated as failed and the user is shown a notification. This prevents a low-confidence ISBN hit from being silently associated with the wrong book.
+
+**On success:** The resolved book ID is written to the local `book_cache` table and used for all subsequent sessions with that file.
+
+**On failure:** No book ID is cached from this call. The session is still saved locally and the book ID will need to be resolved through another means (hash lookup on a future open, or manual matching).
 
 ---
 
@@ -136,7 +144,7 @@ Fetches full metadata for a single book by its BookLore ID.
 
 **Authentication:** Bearer token
 
-**Path parameter:** `<id>` — the BookLore book ID (integer).
+**Path parameter:** `<id>` - the BookLore book ID (integer).
 
 **Successful response:**
 ```json

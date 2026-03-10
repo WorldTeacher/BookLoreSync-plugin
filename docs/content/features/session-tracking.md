@@ -133,6 +133,8 @@ The fingerprint is:
 
 If a book file is renamed or moved, the plugin detects the new path and updates the cache entry.
 
+If the hash lookup returns no match, the plugin automatically attempts a second lookup using the ISBN embedded in the book file's metadata. Only an exact match is accepted. See [Book ID Resolution](@/features/book-id-resolution.md) for how this works and how to prepare your files.
+
 ---
 
 ## Progress precision

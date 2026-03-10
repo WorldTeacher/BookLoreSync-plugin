@@ -49,6 +49,11 @@ variables:
 # SEMREL_GPG_SIGNKEY: Path to the GPG signkey exported with `gpg --armor --export-secret-key`.
 
 # your pipeline stages
+stages:
+  - build
+  - test
+  - deploy
+  - publish
 
 lua-tests:
   stage: test

@@ -31,7 +31,7 @@ Before syncing, a confirmation dialog warns:
 
 > **Will only sync to webUI, not in book, as spine is missing**
 
-This is because the book is not currently open, so no live rendering context (spine) is available. Annotations are sent to BookLore's web interface — they appear in BookLore but cannot be injected back into the book file itself. Tap **Continue** to proceed.
+This is because the book is not currently open, so no live rendering context (spine) is available. Annotations are sent to BookLore's web interface - they appear in BookLore but cannot be injected back into the book file itself. Tap **Continue** to proceed.
 
 The plugin reads annotations from the book's sidecar (`.sdr`) directory on disk and uploads any that have not already been synced. A toast shows how many were synced or failed.
 
@@ -63,7 +63,7 @@ Description: **accepts title or id**.
 Tapping **Match Book** opens an input dialog pre-filled with the book's title (or filename if no title is known). You can:
 
 - **Edit the search term** and tap **Search** to find the book by title.
-- **Enter a numeric BookLore ID** (e.g. `42`) and tap **Search** to match directly by ID — no confirmation dialog is shown.
+- **Enter a numeric BookLore ID** (e.g. `42`) and tap **Search** to match directly by ID - no confirmation dialog is shown.
 
 **Title search** returns up to five results, each showing the title, author, and a match-score percentage. Tap a result to confirm the match.
 
@@ -88,7 +88,7 @@ When tracking is disabled:
 
 - No session is recorded when you open, close, or sleep while reading the book.
 - No annotations or ratings are synced for the book.
-- The book is silently skipped — no notification is shown.
+- The book is silently skipped - no notification is shown.
 
 The tracking state is stored in the local database (`tracking_enabled` column in `book_cache`) and persists across KOReader restarts.
 

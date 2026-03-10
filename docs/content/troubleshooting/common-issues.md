@@ -115,6 +115,12 @@ This means the book's MD5 fingerprint does not match any book in your BookLore l
 - If you converted the file (e.g., MOBI → EPUB), the hash will differ. Add the converted version to BookLore.
 - The book may not yet have been added to BookLore. Add it to the server, then retry the sync.
 
+**ISBN fallback:**
+
+If you see the message *"No match found based on hash or ISBN"* at book open time, the plugin already attempted both a hash lookup and an ISBN lookup - neither returned a match. Confirm the book exists in BookLore with the correct ISBN.
+
+If you see *"No match found based on hash"* (without "or ISBN"), no ISBN was found embedded in the file. The ISBN fallback requires the ISBN to be physically written into the file's metadata - it is not enough for it to exist only on the server. See [Features → Book ID Resolution](@/features/book-id-resolution.md) for how to embed ISBNs using Calibre.
+
 ---
 
 ## "bad argument #1 to 'floor'" error

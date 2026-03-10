@@ -1,3 +1,10 @@
+## [3.6.1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.6.0...3.6.1) (2026-03-10)
+
+
+### Bug Fixes
+
+* **gestures:** sync now gesture also asks for wifi to be enabled ([5c1d431](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/5c1d43133bed8138ed54cd6687c587c79b7738f1))
+
 # [3.6.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.5.1...3.6.0) (2026-03-10)
 
 

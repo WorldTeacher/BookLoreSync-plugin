@@ -798,7 +798,7 @@ function Settings:buildPreferencesMenu(parent)
                 end,
             },
             {
-                text = _("Ask before enabling WiFi"),
+                text = _("Ask to enable WiFi"),
                 help_text = _("When enabled, the plugin will ask for your permission before turning on WiFi for syncing. On confirm, the action proceeds; on skip, syncs are deferred (queued for the next opportunity) and lookups are skipped."),
                 checked_func = function()
                     return parent.ask_wifi_enable
@@ -809,8 +809,8 @@ function Settings:buildPreferencesMenu(parent)
                     parent.settings:flush()
                     UIManager:show(InfoMessage:new{
                         text = parent.ask_wifi_enable
-                            and _("Ask before enabling WiFi: on")
-                            or  _("Ask before enabling WiFi: off"),
+                            and _("Ask to enable WiFi: on")
+                            or  _("Ask to enable WiFi: off"),
                         timeout = 2,
                     })
                 end,

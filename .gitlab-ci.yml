@@ -50,6 +50,42 @@ variables:
 
 # your pipeline stages
 
+lua-tests:
+  stage: test
+  image: debian:bookworm-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+      when: always
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+    - when: never
+  before_script:
+    - apt-get update
+    - >
+      apt-get install -y --no-install-recommends
+      bash
+      build-essential
+      ca-certificates
+      git
+      liblua5.1-0-dev
+      lua5.1
+      luarocks
+    - luarocks --lua-version=5.1 install busted
+    - luarocks --lua-version=5.1 install luacov
+    - luarocks --lua-version=5.1 install luacov-cobertura
+  script:
+    - bash run_tests.sh
+  artifacts:
+    when: always
+    paths:
+      - coverage.xml
+      - luacov.report.out
+      - luacov.stats.out
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
 zip-koplugin-release:
   stage: publish
   image: registry.gitlab.com/gitlab-org/cli:latest

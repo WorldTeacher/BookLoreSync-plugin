@@ -72,15 +72,15 @@ lua-check:
       build-essential
       ca-certificates
       git
-      liblua5.1-0-dev
-      lua5.1
+      libluajit-5.1-dev
+      luajit
       luarocks
     - luarocks --lua-version=5.1 install luacheck
   script:
-    - find bookloresync.koplugin test -name '*.lua' -print0 | xargs -0 -n1 luac5.1 -p
+    - find bookloresync.koplugin test -name '*.lua' -print0 | xargs -0 -n1 sh -c 'luajit -b "$1" /dev/null' _
     - >
       luacheck bookloresync.koplugin test
-      --std lua51
+      --std luajit
       --globals G_reader_settings bit
       --codes
       --no-max-line-length

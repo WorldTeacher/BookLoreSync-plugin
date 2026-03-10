@@ -26,6 +26,14 @@ include:
     inputs:
       pipelines-delete-older-than: "30"
 
+# The Butler image ships with a binary entrypoint. Clear it so GitLab Runner
+# can execute the generated shell wrapper instead of appending it as CLI args
+# to `gitlab-butler`.
+butler:
+  image:
+    name: registry.gitlab.com/to-be-continuous/tools/gitlab-butler:latest
+    entrypoint: [""]
+
 # Initialize git submodules (required for tanuki theme)
 variables:
   GIT_SUBMODULE_STRATEGY: recursive

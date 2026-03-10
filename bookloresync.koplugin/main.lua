@@ -472,14 +472,14 @@ function BookloreSync:registerDispatcherActions()
     Dispatcher:registerAction("booklore_toggle_sync", {
         category = "none",
         event = "ToggleBookloreSync",
-        title = _("BookLoreSync: Toggle Booklore Sync"),
+        title = _("BookLoreSync: Toggle Sync"),
         general = true,
     })
     
     Dispatcher:registerAction("booklore_sync_pending", {
         category = "none",
         event = "SyncBooklorePending",
-        title = _("BookLoreSync: Sync Booklore Pending Sessions"),
+        title = _("BookLoreSync: Sync Pending Items"),
         general = true,
     })
 
@@ -494,7 +494,7 @@ function BookloreSync:registerDispatcherActions()
     Dispatcher:registerAction("booklore_test_connection", {
         category = "none",
         event = "TestBookloreConnection",
-        title = _("BookLoreSync: Test Booklore Connection"),
+        title = _("BookLoreSync: Test Connection"),
         general = true,
     })
     Dispatcher:registerAction("booklore_sync_shelf", {
@@ -526,13 +526,28 @@ function BookloreSync:onToggleBookloreSync()
 end
 
 function BookloreSync:onSyncBooklorePending()
-    local pending_count = self.db and self.db:getPendingSessionCount() or 0
+    local pending_count = 0
+    if self.db then
+        local sessions    = tonumber(self.db:getPendingSessionCount())    or 0
+        local annotations = tonumber(self.db:getPendingAnnotationCount()) or 0
+        local ratings     = tonumber(self.db:getPendingRatingCount())     or 0
+        local bookmarks   = tonumber(self.db:getPendingBookmarkCount())   or 0
+        pending_count = sessions + annotations + ratings + bookmarks
+    end
+
     if pending_count > 0 and self.is_enabled then
-        self:syncPendingSessions()
+        self:_requestWifi(_("sync pending items"), function()
+            self:syncPendingSessions()
+        end, function()
+            UIManager:show(InfoMessage:new{
+                text = _("WiFi not enabled - pending items remain queued"),
+                timeout = 2,
+            })
+        end)
     else
         if pending_count == 0 then
             UIManager:show(InfoMessage:new{
-                text = _("No pending sessions to sync"),
+                text = _("No pending items to sync"),
                 timeout = 1,
             })
         end

@@ -22,21 +22,21 @@ include:
     rules:
       - changes:
           - docs/**/*
-  - component: "$CI_SERVER_FQDN/to-be-continuous/gitlab-butler/gitlab-ci-butler@1.4"
-    inputs:
-      pipelines-delete-older-than: "30"
+  # - component: "$CI_SERVER_FQDN/to-be-continuous/gitlab-butler/gitlab-ci-butler@1.4"
+  #   inputs:
+  #     pipelines-delete-older-than: "30"
 
 # The Butler image ships with a binary entrypoint. Clear it so GitLab Runner
 # can execute the generated shell wrapper instead of appending it as CLI args
 # to `gitlab-butler`.
-butler:
-  image:
-    name: registry.gitlab.com/to-be-continuous/tools/gitlab-butler:latest
-    entrypoint: [""]
-  rules:
-    - if: '$GITLAB_TOKEN'
-      when: always
-    - when: never
+# butler:
+#   image:
+#     name: registry.gitlab.com/to-be-continuous/tools/gitlab-butler:latest
+#     entrypoint: [""]
+#   rules:
+#     - if: "$GITLAB_TOKEN"
+#       when: always
+#     - when: never
 
 # Initialize git submodules (required for tanuki theme)
 variables:

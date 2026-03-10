@@ -11,6 +11,7 @@ template = "section.html"
 | Feature | Description |
 |---------|-------------|
 | [Session Tracking](@/features/session-tracking.md) | How reading sessions are detected, validated, and stored; per-book tracking toggle; session feedback; book deletion sync |
+| [Book ID Resolution](@/features/book-id-resolution.md) | How the plugin identifies which book in your library corresponds to the file you are reading, including the ISBN fallback and how to prepare files |
 | [Offline Support](@/features/offline-support.md) | Local queue, retry logic, batch upload, WiFi prompt, book deletion queue |
 | [Ratings](@/features/ratings.md) | Syncing book ratings from KOReader to BookLore and Hardcover |
 | [Annotations](@/features/annotations.md) | Syncing highlights, notes, and bookmarks; colour mapping; EPUB CFI; PDF mock CFI |

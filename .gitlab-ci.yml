@@ -26,6 +26,14 @@ include:
     inputs:
       pipelines-delete-older-than: "30"
 
+# The Butler image ships with a binary entrypoint. Clear it so GitLab Runner
+# can execute the generated shell wrapper instead of appending it as CLI args
+# to `gitlab-butler`.
+butler:
+  image:
+    name: registry.gitlab.com/to-be-continuous/tools/gitlab-butler:latest
+    entrypoint: [""]
+
 # Initialize git submodules (required for tanuki theme)
 variables:
   GIT_SUBMODULE_STRATEGY: recursive
@@ -35,8 +43,6 @@ variables:
 # (define the variables below in your GitLab group/project variables)
 # GITLAB_TOKEN: A GitLab 'project access token' or 'personal access token' with `api`, `read_repository` and `write repository` scopes.
 # SEMREL_GPG_SIGNKEY: Path to the GPG signkey exported with `gpg --armor --export-secret-key`.
-
-# your pipeline stages
 
 zip-koplugin-release:
   stage: publish

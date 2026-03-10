@@ -16,12 +16,19 @@ This page explains in detail what the plugin does from the moment you open a boo
 flowchart TD
     A["Open book"]
     A1["Calculate MD5 fingerprint"]
-    A2["Query server for book ID"]
-    A3["Record start time, progress"]
+    A2["Query server by hash"]
+    A3{"Hash matched?"}
+    A4["Extract ISBN from file metadata"]
+    A5{"ISBN present?"}
+    A6["Query server by ISBN"]
+    A7{"Exact match? (matchScore=1)"}
+    A8["Warn: no match found"]
+    A9["Book ID resolved & cached"]
+    A10["Record start time, progress"]
     B["Reading"]
     C["Session ends"]
     C1["Record end time, progress"]
-    C2["Calculate duration, pages,   delta"]
+    C2["Calculate duration, pages, delta"]
     D{"Passes validation?"}
     E["Discard session"]
     F["Save to pending_sessions"]
@@ -29,7 +36,15 @@ flowchart TD
     H["Upload to server"]
     H2["Stays in queue"]
 
-    A --> A1 --> A2 --> A3 --> B
+    A --> A1 --> A2 --> A3
+    A3 -->|"Yes"| A9
+    A3 -->|"No"| A4 --> A5
+    A5 -->|"Yes"| A6 --> A7
+    A5 -->|"No"| A8
+    A7 -->|"Yes"| A9
+    A7 -->|"No"| A8
+    A9 --> A10 --> B
+    A8 --> A10
     B -->|"Close book or device sleep"| C
     C --> C1 --> C2 --> D
     D -->|"No"| E
@@ -59,7 +74,17 @@ GET /api/koreader/books/by-hash/:hash
 
 The result is cached in the `book_cache` SQLite table alongside the file path, title, isbn10, isbn13 and author.
 
+If the hash lookup returns no match and the device is connected, the plugin automatically attempts a second lookup using the ISBN embedded in the book file:
+
+```
+GET /api/v1/books/search?isbn=<isbn>
+```
+
+A result from the ISBN search is only accepted if the server returns an exact match (`matchScore == 1`). If no exact match is found, or if no ISBN is embedded in the file, the user is shown a brief notification.
+
 If the server is unreachable when you open the book, the session is saved with `book_id = NULL`. When the plugin next attempts to sync (on resume, on the next session end, or via manual sync), it re-queries the server using the cached hash to resolve the ID before uploading.
+
+See [Features → Book ID Resolution](@/features/book-id-resolution.md) for the full details, including how to embed ISBNs into your book files so the fallback can work.
 
 ---
 

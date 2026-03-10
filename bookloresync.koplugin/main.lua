@@ -4842,24 +4842,29 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                 ::book_continue::
             end
 
-            -- Bidirectional sync: remove local files no longer on shelf
+            -- Bidirectional sync: remove local files no longer on shelf.
+            -- Uses DB lookup rather than filename pattern so that title-based
+            -- filenames (and legacy BookID_* files that have a cache entry) are
+            -- handled uniformly.  Files with no DB entry are left untouched.
             if self.delete_removed_shelf_books then
                 for entry in lfs.dir(self.download_dir) do
-                    local local_id = entry:match("^BookID_(%d+)%.[%a]+$")
-                    if local_id then
-                        local lid = tonumber(local_id)
-                        if lid and not shelf_book_ids[lid] then
-                            local fp = self.download_dir .. "/" .. entry
-                            UIManager:scheduleIn(0, function()
-                                if info_msg then
-                                    info_msg.text = T(_("Removing: BookID %1"), lid)
-                                    UIManager:forceRePaint()
+                    if entry ~= "." and entry ~= ".." then
+                        local fp = self.download_dir .. "/" .. entry
+                        if lfs.attributes(fp, "mode") == "file" then
+                            local cached = self.db:getBookByFilePath(fp)
+                            local lid = cached and cached.book_id
+                            if lid and not shelf_book_ids[lid] then
+                                UIManager:scheduleIn(0, function()
+                                    if info_msg then
+                                        info_msg.text = T(_("Removing: %1"), entry)
+                                        UIManager:forceRePaint()
+                                    end
+                                end)
+                                if os.remove(fp) then
+                                    deleted = deleted + 1
+                                else
+                                    errors = errors + 1
                                 end
-                            end)
-                            if os.remove(fp) then
-                                deleted = deleted + 1
-                            else
-                                errors = errors + 1
                             end
                         end
                     end
@@ -4920,17 +4925,36 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 end
 
 --[[--
-Generate a stable filename for a shelf book download.
+Generate a filename for a shelf book download.
 
-Format: "BookID_{id}.{extension}" - avoids filesystem-unsafe characters
-while keeping filenames predictable for the bidirectional deletion sweep.
+Uses the book title as the filename, sanitized of filesystem-unsafe characters
+and truncated so the full filename (including extension) is at most 150 chars.
+Falls back to "BookID_{id}.{extension}" when no usable title is available.
 
 @param book table  Book object from Booklore API
 @return string
 --]]
 function BookloreSync:_generateFilename(book)
     local extension = (book.extension or "epub"):lower()
-    return "BookID_" .. tostring(book.id) .. "." .. extension
+    local ext_suffix = "." .. extension
+    local title = book.title
+    if title and title ~= "" then
+        -- Strip characters that are illegal on common filesystems (FAT32, NTFS, ext4)
+        local safe = title
+            :gsub('[/\\:*?"<>|]', "")
+            :gsub("%s+", " ")
+            :gsub("^%s+", "")
+            :gsub("%s+$", "")
+        if safe ~= "" then
+            local max_stem = 150 - #ext_suffix
+            if #safe > max_stem then
+                safe = safe:sub(1, max_stem):gsub("%s+$", "")
+            end
+            return safe .. ext_suffix
+        end
+    end
+    -- Fallback when title is absent or becomes empty after sanitization
+    return "BookID_" .. tostring(book.id) .. ext_suffix
 end
 
 --[[--
@@ -8422,3 +8446,7 @@ function BookloreSync:fetchAndStoreHardcoverIds()
 end
 
 return BookloreSync
+
+
+
+

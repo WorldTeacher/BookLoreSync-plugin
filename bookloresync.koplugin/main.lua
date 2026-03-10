@@ -4042,40 +4042,91 @@ Used when "Connect network on suspend" is enabled.
 @return boolean true if connected, false otherwise
 --]]
 function BookloreSync:connectNetwork()
-    local Device = require("device")
-    
-    if not Device:hasWifiToggle() then
-        self:logWarn("BookloreSync: Device does not support WiFi toggle")
-        return false
+    local function isNetworkConnected()
+        if not NetworkMgr or type(NetworkMgr.isConnected) ~= "function" then
+            return false
+        end
+        local ok_connected, connected = pcall(NetworkMgr.isConnected, NetworkMgr)
+        return ok_connected and connected and true or false
     end
-    
-    if Device.isOnline and Device:isOnline() then
+
+    if isNetworkConnected() then
         self:logInfo("BookloreSync: Network already connected")
         return true
     end
-    
+
     self:logInfo("BookloreSync: Attempting to connect to network")
-    
-    if not NetworkMgr:isConnected() then
-        self:logInfo("BookloreSync: Enabling WiFi")
-        Device:setWifiState(true)
+
+    local tried_enable = false
+    local manager_calls = {
+        { "turnOnWifi" },
+        { "enableWifi" },
+        { "setWifiEnabled", true },
+        { "setWifiState", true },
+        { "requestWifiOn" },
+        { "reconnect" },
+        { "obtainIP" },
+    }
+
+    local unpack_fn = table.unpack or unpack
+    for _, call in ipairs(manager_calls) do
+        local method = call[1]
+        if type(NetworkMgr[method]) == "function" then
+            local args = {}
+            for i = 2, #call do
+                args[#args + 1] = call[i]
+            end
+            self:logInfo("BookloreSync: Trying NetworkMgr method:", method)
+            local ok_call, call_result = pcall(NetworkMgr[method], NetworkMgr, unpack_fn(args))
+            if ok_call then
+                tried_enable = true
+                if call_result ~= false then
+                    break
+                end
+            else
+                self:logWarn("BookloreSync: NetworkMgr method failed:", method, tostring(call_result))
+            end
+        end
     end
-    
+
+    if not tried_enable then
+        self:logWarn("BookloreSync: No supported NetworkMgr WiFi-enable method found")
+        return false
+    end
+
+    local ok_ffi, ffiutil = pcall(require, "ffi/util")
+    local sleep_available = ok_ffi and ffiutil and type(ffiutil.sleep) == "function"
+
     local timeout = 15
     local elapsed = 0
     local check_interval = 0.5
-    
+
     while elapsed < timeout do
-        if Device.isOnline and Device:isOnline() then
+        if isNetworkConnected() then
             self:logInfo("BookloreSync: Network connected successfully after", elapsed, "seconds")
             return true
         end
-        
-        local ffiutil = require("ffi/util")
-        ffiutil.sleep(check_interval)
+
+        if sleep_available then
+            local ok_sleep, sleep_err = pcall(ffiutil.sleep, check_interval)
+            if not ok_sleep then
+                self:logWarn("BookloreSync: Sleep call failed while waiting for network:", tostring(sleep_err))
+                break
+            end
+        else
+            -- Some KOReader builds do not expose ffiutil.sleep().
+            -- In that case, avoid crashing and fall back to a single best-effort
+            -- connectivity check after requesting WiFi.
+            self:logWarn("BookloreSync: Sleep utility unavailable while waiting for network")
+            if isNetworkConnected() then
+                self:logInfo("BookloreSync: Network connected successfully (fallback check)")
+                return true
+            end
+            break
+        end
         elapsed = elapsed + check_interval
     end
-    
+
     self:logWarn("BookloreSync: Network connection timeout after", timeout, "seconds")
     return false
 end
@@ -4101,11 +4152,27 @@ plugin wants WiFi (e.g. "sync sessions", "upload annotation").
 @param on_deny    Callback invoked when the user declines (may be nil).
 --]]--
 function BookloreSync:_requestWifi(context, on_confirm, on_deny)
+    if type(on_confirm) ~= "function" then
+        on_confirm = function() end
+    end
     on_deny = on_deny or function() end
+
+    local function safeInvoke(cb, label)
+        local ok, err = pcall(cb)
+        if not ok then
+            self:logErr("BookloreSync: Error during", label, ":", tostring(err))
+            UIManager:show(InfoMessage:new{
+                text = _("Booklore Sync failed unexpectedly. See logs."),
+                timeout = 3,
+            })
+            return false
+        end
+        return true
+    end
 
     -- WiFi already up - proceed immediately without any prompt.
     if NetworkMgr:isConnected() then
-        on_confirm()
+        safeInvoke(on_confirm, "WiFi confirm callback")
         return
     end
 
@@ -4115,7 +4182,7 @@ function BookloreSync:_requestWifi(context, on_confirm, on_deny)
     -- want to enable WiFi (e.g. onSuspend with connect_network_on_suspend)
     -- should pass a context; the prompt is the only new behaviour here.
     if not self.ask_wifi_enable then
-        on_confirm()
+        safeInvoke(on_confirm, "WiFi confirm callback")
         return
     end
 
@@ -4133,21 +4200,32 @@ function BookloreSync:_requestWifi(context, on_confirm, on_deny)
         cancel_text = _("Skip"),
         ok_callback = function()
             self:logInfo("BookloreSync: User approved WiFi enable for:", context or "<unknown>")
-            local ok = self:connectNetwork()
+            local ok_connect, ok = pcall(function()
+                return self:connectNetwork()
+            end)
+            if not ok_connect then
+                self:logErr("BookloreSync: WiFi connection attempt crashed:", tostring(ok))
+                UIManager:show(InfoMessage:new{
+                    text    = _("Failed to enable WiFi"),
+                    timeout = 2,
+                })
+                safeInvoke(on_deny, "WiFi deny callback")
+                return
+            end
             if ok then
-                on_confirm()
+                safeInvoke(on_confirm, "WiFi confirm callback")
             else
                 self:logWarn("BookloreSync: WiFi enable approved but connection failed")
                 UIManager:show(InfoMessage:new{
                     text    = _("Could not connect to WiFi"),
                     timeout = 2,
                 })
-                on_deny()
+                safeInvoke(on_deny, "WiFi deny callback")
             end
         end,
         cancel_callback = function()
             self:logInfo("BookloreSync: User declined WiFi enable for:", context or "<unknown>")
-            on_deny()
+            safeInvoke(on_deny, "WiFi deny callback")
         end,
     })
 end
@@ -6017,8 +6095,8 @@ function BookloreSync:resolveUnmatchedBooks(silent)
         return
     end
     
-    local unmatched_books = self.db:getAllUnmatchedBooks()
-    
+    local unmatched_books = self.db:getAllUnmatchedBooks() or {}
+
     if #unmatched_books == 0 then
         self:logInfo("BookloreSync: No unmatched books to resolve")
         return

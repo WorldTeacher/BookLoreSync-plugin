@@ -1,3 +1,27 @@
+# [3.6.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.5.1...3.6.0) (2026-03-10)
+
+
+### Bug Fixes
+
+* **annotations:** save to both now actually uploads to both locations ([bbe0018](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/bbe00181950e9a7286342a14a4886923602cf354))
+* **ci:** add lua-tests stage to CI pipeline for improved testing coverage ([15f558b](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/15f558b1817416a7cb76356bc4f398eea86f7738))
+* **ci:** add missing stages to CI pipeline configuration ([2364711](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/2364711c69e2d318d72c0c40b69108fbab5f85a2))
+* **ci:** comment out unused butler configuration in CI pipeline ([cfd2c46](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/cfd2c46cbb33b0623d6e4b677320a4fa06a4fefe))
+* **ci:** remove unused pipeline stages from configuration ([a1eacbe](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a1eacbee5479d8cd1657bc87e59f4e3fee8429c4))
+* **ci:** rename lua-tests to lua-check and update testing commands ([9c5e1a9](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/9c5e1a9c01de6e509a7e9a5bde4cf04b782e5bdd))
+* **ci:** restore butler configuration and remove unused lua-check stage ([5968d92](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/5968d925c26b692e357eaafb3c39b35d1ca8c6d9))
+* **ci:** update butler rules to ensure proper execution based on GITLAB_TOKEN ([f783f97](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/f783f97a8c49f863d7f9becdf64aa1ef9733e9bf))
+* **ci:** update lua-check to use luajit and adjust script for compatibility ([3fc5235](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/3fc52357b898ec80866495ec056b3140088ac2aa))
+* **docs:** standardize punctuation in documentation for clarity ([556d424](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/556d4242dff3e00c393874c2830c207fd62e48e7))
+* **isbn:** update ISBN lookup to use searchBooksByIsbn and handle exact match scoring ([14b4bd1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/14b4bd119ca96d57bc210e0dc042b96ccb1e20b9))
+* **network:** fix bug in ask to enable wifi, fixes crash related to networking by using networkmanager ([e0b0f26](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/e0b0f26682753e11282013d058556adf4f3219f8)), closes [#18](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/issues/18) [#25](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/issues/25)
+
+
+### Features
+
+* **api:** add ISBN lookup functionality to retrieve book ID ([8bfe89c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/8bfe89c18263d44a5a7623b261f0df5abeb62cec))
+* **isbn:** extract ISBN from KOReader doc settings and use as fallback for book lookup ([5389cd8](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/5389cd88fbd739f7e0fd4e1ec9c4a39232434d39))
+
 ## [3.5.1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.5.0...3.5.1) (2026-03-09)
 
 

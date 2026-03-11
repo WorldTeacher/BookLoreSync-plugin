@@ -10,7 +10,7 @@
 > - I do not regularly monitor this repository
 > - Without the mention, your issue may go unnoticed
 >
-> **Primary Support:** [Documentation Site](https://docs.worldteacher.dev/worldteacher/booklore-koreader-plugin/)
+> **Primary Support:** [Documentation Site](https://docs.worldteacher.dev/wt-booklore/booklore-koreader-plugin/)
 
 ---
 

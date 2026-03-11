@@ -23,6 +23,7 @@ local STUB_KEYS = {
   "booklore_metadata_extractor",
   "gettext",
   "ffi/util",
+  "ui/trapper",
 }
 
 local function install()
@@ -86,6 +87,7 @@ local function install()
       scheduleIn = function(_, _, fn) if fn then fn() end end,
       nextTick = function(_, fn) if fn then fn() end end,
       show = function() end,
+      close = function() end,
     }
   end
 
@@ -159,6 +161,32 @@ local function install()
         return tostring(args[tonumber(idx)] or "")
       end))
     end }
+  end
+
+  -- Minimal Trapper stub: runs everything synchronously on the test thread.
+  -- wrap() calls the coroutine directly; dismissableRunInSubprocess() calls
+  -- the worker inline and returns its result (no fork, no UIManager needed).
+  package.preload["ui/trapper"] = function()
+    return {
+      wrap = function(_, fn)
+        local co = coroutine.create(fn)
+        local ok, err = coroutine.resume(co)
+        if not ok then error(err) end
+      end,
+      info = function() end,
+      -- Returns (completed, result) matching Trapper's real API contract:
+      --   completed=false  → user dismissed (cancelled)
+      --   completed=true, result=nil → subprocess crashed with no output
+      --   completed=true, result=<table> → success
+      dismissableRunInSubprocess = function(_, worker_fn, _)
+        local ok, result = pcall(worker_fn)
+        if not ok then
+          -- Subprocess "crashed" — return completed=true, result=nil
+          return true, nil
+        end
+        return true, result
+      end,
+    }
   end
 
   return function()

@@ -2641,6 +2641,7 @@ function BookloreSync:addToMainMenu(menu_items)
                     return T(_("Shelf name: %1"), self.booklore_shelf_name)
                 end,
                 help_text = _("Name of the Booklore shelf to sync. The shelf is created automatically if it does not exist."),
+                keep_menu_open = true,
                 callback = function()
                     local dialog
                     dialog = InputDialog:new{
@@ -2678,6 +2679,7 @@ function BookloreSync:addToMainMenu(menu_items)
                     return T(_("Download dir: %1"), self.download_dir)
                 end,
                 help_text = _("Local directory where shelf books are downloaded. Detected automatically from device type; override here if needed."),
+                keep_menu_open = true,
                 callback = function()
                     local dialog
                     dialog = InputDialog:new{

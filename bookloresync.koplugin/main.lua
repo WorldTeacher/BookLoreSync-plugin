@@ -292,6 +292,10 @@ function BookloreSync:init()
     if self.shelf_use_original_filename == nil then
         self.shelf_use_original_filename = true  -- Default: use original server filename
     end
+    self.delete_sdr_on_book_delete   = self.settings:readSetting("delete_sdr_on_book_delete")
+    if self.delete_sdr_on_book_delete == nil then
+        self.delete_sdr_on_book_delete = false  -- Default disabled for safety
+    end
 
     -- Resume/wake-sync state (not persisted - reset each session)
     self.last_auto_sync_time  = 0     -- unix timestamp of last auto-sync (cooldown guard)
@@ -660,6 +664,96 @@ function BookloreSync:viewSessionDetails()
 end
 
 --[[--
+Recursively delete a directory and all its contents.
+
+@param path  Absolute path to the directory to remove.
+@return true on success, false + error string on failure.
+--]]
+function BookloreSync:_deleteDirRecursive(path)
+    if not path or path == "" or path == "/" then
+        return false, "invalid path"
+    end
+    local mode = lfs.attributes(path, "mode")
+    if mode == nil then
+        return true  -- already gone
+    end
+    if mode == "file" then
+        local ok, err = os.remove(path)
+        return ok, err
+    end
+    if mode ~= "directory" then
+        return false, "not a file or directory: " .. path
+    end
+    for entry in lfs.dir(path) do
+        if entry ~= "." and entry ~= ".." then
+            local child = path .. "/" .. entry
+            local ok, err = self:_deleteDirRecursive(child)
+            if not ok then
+                return false, err
+            end
+        end
+    end
+    local ok, err = lfs.rmdir(path)
+    return ok, err
+end
+
+--[[--
+Find all .sdr sidecar directories that exist on disk for a given document path.
+
+KOReader supports three sidecar storage locations:
+  - "doc"  : beside the book file (<book_path>.sdr)
+  - "dir"  : in a central docsettings directory (DataStorage:getDocSettingsDir())
+  - "hash" : in a hash-based directory (DataStorage:getDocSettingsHashDir())
+
+The user's preferred location is read from G_reader_settings
+("document_metadata_folder"). This function checks all three locations and
+returns every path that actually exists on disk, so callers can delete them
+all.
+
+@param doc_path  Absolute path to the document file.
+@return          Table of existing sidecar dir paths (may be empty).
+--]]
+function BookloreSync:getSdrPaths(doc_path)
+    if not doc_path or doc_path == "" then return {} end
+
+    local found = {}
+
+    -- Use DocSettings if available (KOReader >= 2022)
+    local ok_ds, DocSettings = pcall(require, "docsettings")
+    if ok_ds and DocSettings and DocSettings.getSidecarDir then
+        for _, location in ipairs({ "doc", "dir", "hash" }) do
+            local ok_p, sdr = pcall(function()
+                return DocSettings:getSidecarDir(doc_path, location)
+            end)
+            if ok_p and sdr and sdr ~= "" then
+                if lfs.attributes(sdr, "mode") == "directory" then
+                    -- Deduplicate (hash location may overlap with doc for some builds)
+                    local already = false
+                    for _, existing in ipairs(found) do
+                        if existing == sdr then already = true; break end
+                    end
+                    if not already then
+                        table.insert(found, sdr)
+                    end
+                end
+            end
+        end
+        -- If DocSettings found results, return them
+        if #found > 0 then
+            return found
+        end
+    end
+
+    -- Fallback: beside-book path only
+    local beside = doc_path .. ".sdr"
+    if lfs.attributes(beside, "mode") == "directory" then
+        table.insert(found, beside)
+    end
+
+    return found
+end
+
+--[[--
 Detect and store the KOReader sidecar (.sdr) path for the currently open book.
 
 Looks up or creates a book_cache entry, then upserts the sdr_path into book_metadata.
@@ -680,9 +774,11 @@ function BookloreSync:detectBookMetadataLocation()
         return
     end
 
-    -- Derive the .sdr folder path.
-    -- DocSettings stores the sidecar in: <doc_dir>/<doc_filename>.sdr/
-    local sdr_path = doc_path .. ".sdr"
+    -- Derive the .sdr folder path, respecting KOReader's document_metadata_folder
+    -- setting (beside-book "doc", central "dir", or hash-based "hash").
+    -- Use the first found sidecar dir; fall back to the beside-book convention.
+    local sdr_paths = self:getSdrPaths(doc_path)
+    local sdr_path = (sdr_paths[1]) or (doc_path .. ".sdr")
 
     -- Ensure a book_cache entry exists for this file path
     local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
@@ -2681,6 +2777,27 @@ function BookloreSync:addToMainMenu(menu_items)
                         text = self.shelf_use_original_filename
                             and _("Will use original server filename when downloading")
                             or  _("Will use book title as filename when downloading"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text = _("Also delete sidecar (.sdr) on removal"),
+                help_text = _("When a shelf book is deleted during sync, also delete its KOReader sidecar directory (.sdr folder containing reading progress, highlights, etc.). Only applies when 'Delete removed shelf books' is also enabled. Disabled by default."),
+                enabled_func = function()
+                    return self.delete_removed_shelf_books
+                end,
+                checked_func = function()
+                    return self.delete_sdr_on_book_delete
+                end,
+                callback = function()
+                    self.delete_sdr_on_book_delete = not self.delete_sdr_on_book_delete
+                    self.settings:saveSetting("delete_sdr_on_book_delete", self.delete_sdr_on_book_delete)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.delete_sdr_on_book_delete
+                            and _("Sidecar (.sdr) deletion enabled")
+                            or  _("Sidecar (.sdr) deletion disabled"),
                         timeout = 2,
                     })
                 end,
@@ -4805,6 +4922,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     local download_dir    = self.download_dir
     local delete_removed  = self.delete_removed_shelf_books
     local use_original_filename = self.shelf_use_original_filename
+    local delete_sdr      = self.delete_sdr_on_book_delete
 
     -- Helper: inline hash calculation for subprocess use.
     -- Mirrors BookloreSync:calculateBookHash but with no self dependency.
@@ -5200,6 +5318,18 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                             if lid and not shelf_book_ids[lid] then
                                 if os.remove(fp) then
                                     deleted = deleted + 1
+                                    -- Also remove any .sdr sidecar directories if
+                                    -- the user has enabled that option.
+                                    if delete_sdr then
+                                        local sdr_dirs = self:getSdrPaths(fp)
+                                        for _, sdr_dir in ipairs(sdr_dirs) do
+                                            self:logInfo("BookloreSync: Deleting sidecar:", sdr_dir)
+                                            local ok_rm, err_rm = self:_deleteDirRecursive(sdr_dir)
+                                            if not ok_rm then
+                                                self:logErr("BookloreSync: Failed to delete sidecar:", sdr_dir, err_rm)
+                                            end
+                                        end
+                                    end
                                 else
                                     errors = errors + 1
                                 end

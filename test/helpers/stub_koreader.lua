@@ -209,7 +209,7 @@ local function install()
       dismissableRunInSubprocess = function(_, worker_fn, _)
         local ok, result = pcall(worker_fn)
         if not ok then
-          -- Subprocess "crashed" — return completed=true, result=nil
+          -- Subprocess "crashed" - return completed=true, result=nil
           return true, nil
         end
         return true, result

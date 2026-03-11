@@ -4725,7 +4725,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     self:logInfo("BookloreSync: syncFromBookloreShelf - starting Trapper sync")
 
     -- Capture all subprocess inputs as plain values now, before the fork.
-    -- The child process gets a copy of Lua state — writes to self are invisible
+    -- The child process gets a copy of Lua state - writes to self are invisible
     -- to the parent, and self.db / self.api must not be used across the fork
     -- boundary (file-descriptor aliasing, socket state, etc.).
     local server_url      = self.server_url
@@ -4761,7 +4761,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
         return md5(table.concat(buffer))
     end
 
-    -- Helper: generate filename — pure Lua, no self, same logic as _generateFilename.
+    -- Helper: generate filename - pure Lua, no self, same logic as _generateFilename.
     local function genFilename(book)
         local extension = (book.extension or "epub"):lower()
         local ext_suffix = "." .. extension
@@ -4785,7 +4785,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 
     -- Trapper:wrap() hands control to a coroutine on the UI thread.
      -- Trapper:wrap() provides the coroutine context needed for coroutine.yield().
-     -- We do NOT use Trapper's TrapWidget machinery for cancellation — instead we
+     -- We do NOT use Trapper's TrapWidget machinery for cancellation - instead we
      -- poll the subprocess ourselves and honour cancel_requested set by the dialog.
      Trapper:wrap(function()
         -- runSubprocess: fork fn(), poll until done, yield control to UIManager

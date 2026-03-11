@@ -23,6 +23,7 @@ local STUB_KEYS = {
   "booklore_metadata_extractor",
   "gettext",
   "ffi/util",
+  "string.buffer",
   "ui/trapper",
 }
 
@@ -108,7 +109,11 @@ local function install()
   end
 
   package.preload["ui/widget/buttondialog"] = function()
-    return { new = function(_, o) return o or {} end }
+    local BD = {}
+    BD.__index = BD
+    function BD:new(o) o = o or {}; return setmetatable(o, self) end
+    function BD:setTitle(t) self.title = t end
+    return BD
   end
 
   package.preload["ui/widget/menu"] = function()
@@ -155,12 +160,33 @@ local function install()
   end
 
   package.preload["ffi/util"] = function()
-    return { template = function(fmt, ...)
-      local args = { ... }
-      return (fmt:gsub("%%(%d+)", function(idx)
-        return tostring(args[tonumber(idx)] or "")
-      end))
-    end }
+    -- Synchronous subprocess stub: runInSubProcess calls fn inline.
+    -- writeToFD stores data into fake_result; readAllFromFD returns it.
+    local fake_result
+    return {
+      template = function(fmt, ...)
+        local args = { ... }
+        return (fmt:gsub("%%(%d+)", function(idx)
+          return tostring(args[tonumber(idx)] or "")
+        end))
+      end,
+      runInSubProcess = function(fn, _)
+        pcall(fn, 1, 1)      -- fn calls writeToFD which sets fake_result
+        return 1, 1           -- fake pid, fake fd
+      end,
+      isSubProcessDone        = function() return true end,
+      getNonBlockingReadSize  = function() return 1 end,
+      readAllFromFD           = function() return fake_result end,
+      writeToFD               = function(_, data) fake_result = data end,
+      terminateSubProcess     = function() end,
+    }
+  end
+
+  package.preload["string.buffer"] = function()
+    local M = {}
+    function M.encode(t) return t end
+    function M.decode(t) return t end
+    return M
   end
 
   -- Minimal Trapper stub: runs everything synchronously on the test thread.
@@ -170,8 +196,10 @@ local function install()
     return {
       wrap = function(_, fn)
         local co = coroutine.create(fn)
-        local ok, err = coroutine.resume(co)
-        if not ok then error(err) end
+        repeat
+          local ok, err = coroutine.resume(co)
+          if not ok then error(err) end
+        until coroutine.status(co) == "dead"
       end,
       info = function() end,
       -- Returns (completed, result) matching Trapper's real API contract:

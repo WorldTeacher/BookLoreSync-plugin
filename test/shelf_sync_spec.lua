@@ -124,7 +124,7 @@ package.preload["ui/trapper"] = function()
 end
 
 -- bit stub (Lua 5.4 doesn't have bit global; LuaJIT does).
--- calcHash uses bit.lshift — stub it so hash tests don't blow up.
+-- calcHash uses bit.lshift - stub it so hash tests don't blow up.
 if not _G.bit then
   _G.bit = {
     lshift = function(n, s) return math.floor(n * (2 ^ s)) end,
@@ -409,7 +409,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     -- File does NOT exist on disk initially
     local filepath = "/tmp/test-dl/NewBook.epub"
     package.preload["libs/libkoreader-lfs"] = function()
-      -- Before download: file absent; subprocess also checks — simulate absence
+      -- Before download: file absent; subprocess also checks - simulate absence
       return make_lfs_stub({ files = {} })
     end
     package.preload["booklore_api_client"] = function()

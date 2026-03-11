@@ -1267,6 +1267,8 @@ function APIClient:_normalizeShelfBookObject(book)
     if not book or type(book) ~= "table" then return book end
 
     if book.metadata and type(book.metadata) == "table" then
+        -- Title lives under metadata on the shelf endpoint
+        book.title = book.title or book.metadata.title
         -- First author as scalar string
         if book.metadata.authors and type(book.metadata.authors) == "table"
            and #book.metadata.authors > 0 then

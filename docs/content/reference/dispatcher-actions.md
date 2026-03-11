@@ -6,7 +6,7 @@ weight = 3
 
 # Dispatcher Actions
 
-The plugin registers four actions with KOReader's dispatcher system. These can be assigned to hardware buttons, touch gestures, or KOReader profiles.
+The plugin registers five actions with KOReader's dispatcher system. These can be assigned to hardware buttons, touch gestures, or KOReader profiles.
 
 ---
 
@@ -18,6 +18,7 @@ The plugin registers four actions with KOReader's dispatcher system. These can b
 | Sync Pending Sessions | `SyncBooklorePending` | Triggers an immediate upload of all pending sessions, ratings, and annotations in the local queue. |
 | Toggle Manual Sync Only | `ToggleBookloreManualSyncOnly` | Switches between automatic sync (upload after each session) and manual sync (upload only when you trigger it). |
 | Test Connection | `TestBookloreConnection` | Runs a connection test and shows the result as a notification. Equivalent to tapping **Test Connection** in the Settings menu. |
+| Sync Shelf | `booklore_sync_shelf` | Triggers an immediate shelf sync - downloads new books from the configured BookLore shelf and optionally removes books no longer on the shelf. |
 
 ---
 

@@ -58,8 +58,8 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 |-----|------|---------|-------------|
 | `booklore_shelf_name` | string | `"KOReader"` | Name of the BookLore shelf to sync from; created automatically if it does not exist |
 | `shelf_id` | integer | `nil` | Cached ID of the resolved shelf (set automatically after first sync) |
-| `download_dir` | string | *(auto)* | Local directory where downloaded books are saved; defaults to `/mnt/onboard/Books` (Kobo) or `/sdcard/Books` (Android) |
-| `auto_sync_shelf_on_resume` | boolean | `false` | Automatically run shelf sync every time the device wakes from sleep |
+| `download_dir` | string | *(auto)* | Local directory where downloaded books are saved; resolved from KOReader's `home_dir` setting, then device default, then known platform paths (`/mnt/onboard/Books`, `/sdcard/Books`). Always a `Books` subdirectory. |
+| `auto_sync_shelf_on_resume` | boolean | `false` | Automatically run shelf sync 15 seconds after the device wakes from suspend, once Wi-Fi is connected |
 | `delete_removed_shelf_books` | boolean | `false` | Delete local book files when they are removed from the shelf |
 
 ---

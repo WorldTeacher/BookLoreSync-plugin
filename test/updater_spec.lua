@@ -61,6 +61,11 @@ package.preload["util"] = function()
   return {}
 end
 
+-- Clear any stubs cached by other spec files (e.g. shelf_sync_spec loads main.lua
+-- which registers a booklore_updater stub in package.loaded and package.preload).
+package.loaded["booklore_updater"] = nil
+package.preload["booklore_updater"] = nil
+
 local Updater = require("booklore_updater")
 
 describe("Updater helper methods", function()

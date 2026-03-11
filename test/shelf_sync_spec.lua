@@ -27,7 +27,13 @@ package.preload["ui/widget/eventlistener"]      = function() return {} end
 package.preload["ui/widget/infomessage"]        = function() return { new = function(_, o) return o or {} end } end
 package.preload["ui/widget/inputdialog"]        = function() return { new = function(_, o) return o or {} end } end
 package.preload["ui/widget/confirmbox"]         = function() return { new = function(_, o) return o or {} end } end
-package.preload["ui/widget/buttondialog"]       = function() return { new = function(_, o) return o or {} end } end
+package.preload["ui/widget/buttondialog"] = function()
+  local BD = {}
+  BD.__index = BD
+  function BD:new(o) o = o or {}; return setmetatable(o, self) end
+  function BD:setTitle(t) self.title = t end
+  return BD
+end
 package.preload["ui/widget/menu"]               = function() return { new = function(_, o) return o or {} end } end
 package.preload["ui/network/manager"]           = function() return { isOnline = function() return false end } end
 package.preload["luasettings"]                  = function() return { open = function() return { readSetting = function() return nil end } end } end
@@ -37,7 +43,31 @@ package.preload["booklore_updater"]             = function() return { new = func
 package.preload["booklore_file_logger"]         = function() return { new = function() return {} end } end
 package.preload["booklore_metadata_extractor"]  = function() return { new = function() return {} end } end
 package.preload["json"]                         = function() return { encode = function() return "{}" end, decode = function() return {} end } end
-package.preload["ffi/util"]                     = function() return { template = function(fmt, ...) local a={...}; return (fmt:gsub("%%(%d+)", function(i) return tostring(a[tonumber(i)] or "") end)) end } end
+package.preload["ffi/util"] = function()
+  -- Synchronous subprocess stub: runInSubProcess calls fn inline.
+  -- writeToFD stores data into fake_result; readAllFromFD returns it.
+  local fake_result
+  return {
+    template = function(fmt, ...) local a={...}; return (fmt:gsub("%%(%d+)", function(i) return tostring(a[tonumber(i)] or "") end)) end,
+    runInSubProcess = function(fn, _)
+      pcall(fn, 1, 1)       -- fn calls writeToFD which sets fake_result
+      return 1, 1            -- fake pid, fake fd
+    end,
+    isSubProcessDone        = function() return true end,
+    getNonBlockingReadSize  = function() return 1 end,
+    readAllFromFD           = function() return fake_result end,
+    writeToFD               = function(_, data) fake_result = data end,
+    terminateSubProcess     = function() end,
+  }
+end
+
+package.preload["string.buffer"] = function()
+  -- Passthrough stub: encode wraps the table, decode unwraps it.
+  local M = {}
+  function M.encode(t) return t end
+  function M.decode(t) return t end
+  return M
+end
 
 package.preload["gettext"] = function()
   -- Return a function that also supports T(fmt, ...) template substitution.
@@ -79,8 +109,10 @@ package.preload["ui/trapper"] = function()
   return {
     wrap = function(_, fn)
       local co = coroutine.create(fn)
-      local ok, err = coroutine.resume(co)
-      if not ok then error(err) end
+      repeat
+        local ok, err = coroutine.resume(co)
+        if not ok then error(err) end
+      until coroutine.status(co) == "dead"
     end,
     info = function() end,
     dismissableRunInSubprocess = function(_, worker_fn, _)

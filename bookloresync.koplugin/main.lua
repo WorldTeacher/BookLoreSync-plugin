@@ -31,6 +31,8 @@ local logger = require("logger")
 
 local _ = require("gettext")
 local T = require("ffi/util").template
+local ffiutil = require("ffi/util")
+local strbuf  = require("string.buffer")
 local Trapper = require("ui/trapper")
 
 local BookloreSync = WidgetContainer:extend{
@@ -4782,14 +4784,78 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     end
 
     -- Trapper:wrap() hands control to a coroutine on the UI thread.
-    -- dismissableRunInSubprocess() forks a child, polls via UIManager:scheduleIn,
-    -- and resumes the coroutine with the child's return value when done.
-    -- The user can dismiss the progress dialog to cancel mid-loop.
-    Trapper:wrap(function()
-        -- ── Phase 1: fetch shelf metadata (single subprocess) ──────────────
-        Trapper:info(_("Fetching book list from Booklore shelf..."))
+     -- Trapper:wrap() provides the coroutine context needed for coroutine.yield().
+     -- We do NOT use Trapper's TrapWidget machinery for cancellation — instead we
+     -- poll the subprocess ourselves and honour cancel_requested set by the dialog.
+     Trapper:wrap(function()
+        -- runSubprocess: fork fn(), poll until done, yield control to UIManager
+        -- between checks.  No TrapWidget is created, so no gesture can cancel
+        -- the sync except the explicit Cancel button in status_dialog.
+        -- Returns completed (bool), result (table).
+        local _coroutine = coroutine.running()
+        local function runSubprocess(fn)
+            local pid, read_fd = ffiutil.runInSubProcess(function(_, write_fd)
+                local results = table.pack(fn())
+                local ok, str = pcall(strbuf.encode, results)
+                if ok then ffiutil.writeToFD(write_fd, str, true) end
+            end, true)
+            if not pid then return false, nil end
+            local check_interval = 0.125
+            local check_num = 0
+            while true do
+                check_num = check_num + 1
+                if check_interval < 1 and check_num % 10 == 0 then
+                    check_interval = math.min(check_interval * 2, 1)
+                end
+                local resume_func = function() coroutine.resume(_coroutine) end
+                UIManager:scheduleIn(check_interval, resume_func)
+                coroutine.yield()
+                local done  = ffiutil.isSubProcessDone(pid)
+                local ready = read_fd and ffiutil.getNonBlockingReadSize(read_fd) ~= 0
+                if done or ready then
+                    local result
+                    if ready then
+                        local str = ffiutil.readAllFromFD(read_fd)
+                        local ok, t = pcall(strbuf.decode, str)
+                        if ok and t then result = table.unpack(t, 1, t.n) end
+                        if not done then
+                            local function collect()
+                                if not ffiutil.isSubProcessDone(pid) then
+                                    UIManager:scheduleIn(1, collect)
+                                end
+                            end
+                            UIManager:scheduleIn(1, collect)
+                        end
+                    else
+                        ffiutil.readAllFromFD(read_fd)
+                    end
+                    return true, result
+                end
+            end
+        end
 
-        local fetch_completed, fetch_result = Trapper:dismissableRunInSubprocess(function()
+
+        -- Show a persistent status dialog with an explicit Cancel button.
+        -- dismissable=false means tapping outside the dialog does nothing,
+        -- so the user cannot accidentally cancel by tapping the screen.
+        -- Cancel during Phase 2 completes the current book before stopping.
+        local cancel_requested = false
+        local status_dialog
+        status_dialog = ButtonDialog:new{
+            dismissable = false,
+            title = _("Fetching book list from shelf..."),
+            buttons = {{ {
+                text = _("Cancel"),
+                callback = function()
+                    cancel_requested = true
+                    UIManager:close(status_dialog)
+                end,
+            } }},
+        }
+        UIManager:show(status_dialog)
+
+        -- ── Phase 1: fetch shelf metadata (single subprocess) ──────────────
+        local fetch_completed, fetch_result = runSubprocess(function()
             -- Child process: no UIManager calls allowed here.
             local ChildDB  = require("booklore_database")
             local ChildAPI = require("booklore_api_client")
@@ -4811,10 +4877,11 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             end
 
             return { success = true, shelf_id = shelf_id, books = books or {} }
-        end, true)  -- true = show dismissable progress dialog
+        end)
 
-        -- completed=false means the user dismissed (cancelled)
+        -- completed=false means subprocess fork failed
         if not fetch_completed then
+            UIManager:close(status_dialog)
             self.sync_in_progress = false
             if not silent and not self.silent_messages then
                 UIManager:show(InfoMessage:new{ text = _("Sync cancelled"), timeout = 2 })
@@ -4825,6 +4892,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 
         -- completed=true but no result table means the subprocess crashed without output
         if type(fetch_result) ~= "table" then
+            UIManager:close(status_dialog)
             self.sync_in_progress = false
             local msg = _("Sync failed: subprocess returned no data")
             self:logErr("BookloreSync: syncFromBookloreShelf - phase 1 returned no data")
@@ -4836,6 +4904,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
         end
 
         if not fetch_result.success then
+            UIManager:close(status_dialog)
             self.sync_in_progress = false
             local msg = T(_("Sync failed: %1"), fetch_result.error or "unknown error")
             self:logErr("BookloreSync: syncFromBookloreShelf - phase 1 error:", fetch_result.error)
@@ -4856,6 +4925,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 
         local books = fetch_result.books
         if type(books) ~= "table" or #books == 0 then
+            UIManager:close(status_dialog)
             self.sync_in_progress = false
             local msg = _("Shelf is empty - no books to sync")
             if not silent and not self.silent_messages then
@@ -4873,6 +4943,32 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
         local new_books    = {}   -- accumulate DB writes for Phase 3
         local shelf_book_ids = {}
 
+        -- Update dialog title now that we know the total book count.
+        status_dialog:setTitle(T(_("Syncing shelf: %1 books"), total))
+
+        -- Helper: flush accumulated DB writes and report cancellation.
+        local function cancelSync(books_done)
+            self:logInfo("BookloreSync: sync cancelled by user after", books_done, "books")
+            self.sync_in_progress = false
+            if #new_books > 0 then
+                self.db:beginTransaction()
+                local ok_partial = pcall(function()
+                    for _, nb in ipairs(new_books) do
+                        self.db:saveBookCache(nb.filepath, nb.hash, nb.book_id,
+                            nb.title, nb.author, nb.isbn10, nb.isbn13)
+                    end
+                end)
+                if ok_partial then self.db:commit() else self.db:rollback() end
+            end
+            if not silent and not self.silent_messages then
+                UIManager:show(InfoMessage:new{
+                    text = T(_("Sync cancelled after %1 of %2 books"), books_done, total),
+                    timeout = 3,
+                })
+            end
+            if on_complete then on_complete(false, _("Sync cancelled")) end
+        end
+
         for i, book in ipairs(books) do
             local book_id = tonumber(book.id)
             if not book_id then goto book_continue end
@@ -4883,10 +4979,11 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             local filepath = download_dir .. "/" .. filename
             local already_exists = lfs.attributes(filepath, "mode") == "file"
 
+            -- Update the dialog title to show current book progress.
             if already_exists then
-                Trapper:info(T(_("Skipping: %1 (%2/%3)"), book.title or "Unknown", i, total))
+                status_dialog:setTitle(T(_("Skipping: %1 (%2/%3)"), book.title or "Unknown", i, total))
             else
-                Trapper:info(T(_("Downloading: %1 (%2/%3)"), book.title or "Unknown", i, total))
+                status_dialog:setTitle(T(_("Downloading: %1 (%2/%3)"), book.title or "Unknown", i, total))
             end
 
             -- Capture loop-local values for the closure (Lua upvalue semantics)
@@ -4897,7 +4994,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             local cap_isbn10   = book.isbn10
             local cap_isbn13   = book.isbn13
 
-            local book_completed, book_result = Trapper:dismissableRunInSubprocess(function()
+            local book_completed, book_result = runSubprocess(function()
                 -- Child: check / download / hash one book.
                 if lfs.attributes(cap_filepath, "mode") == "file" then
                     -- File already on disk; check if it needs a cache entry
@@ -4931,30 +5028,39 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 
                 local hash = calcHash(cap_filepath)
                 return { status = "downloaded", hash = hash }
-            end, true)
+            end)
 
-            -- completed=false means the user dismissed (cancelled)
+            -- completed=false means the subprocess fork failed
+            -- (should not happen in normal use; defensive).
             if not book_completed then
-                self:logInfo("BookloreSync: sync cancelled by user after", i - 1, "books")
-                self.sync_in_progress = false
-                if not silent and not self.silent_messages then
-                    UIManager:show(InfoMessage:new{
-                        text = T(_("Sync cancelled after %1 of %2 books"), i - 1, total),
-                        timeout = 3,
-                    })
+                UIManager:close(status_dialog)
+                cancelSync(i - 1)
+                return
+            end
+
+            -- Cancel button was pressed: current book just finished cleanly, stop now.
+            if cancel_requested then
+                -- Process this book's result before stopping so it is not lost.
+                if type(book_result) == "table" then
+                    if book_result.status == "downloaded" then
+                        downloaded = downloaded + 1
+                        table.insert(new_books, {
+                            filepath = cap_filepath, hash = book_result.hash,
+                            book_id  = cap_book_id,  title = cap_title,
+                            author   = cap_author,   isbn10 = cap_isbn10, isbn13 = cap_isbn13,
+                        })
+                    elseif book_result.status == "skipped_uncached" then
+                        skipped = skipped + 1
+                        table.insert(new_books, {
+                            filepath = cap_filepath, hash = book_result.hash,
+                            book_id  = cap_book_id,  title = cap_title,
+                            author   = cap_author,   isbn10 = cap_isbn10, isbn13 = cap_isbn13,
+                        })
+                    elseif book_result.status == "skipped" then
+                        skipped = skipped + 1
+                    end
                 end
-                -- Flush any DB writes accumulated so far before returning
-                if #new_books > 0 then
-                    self.db:beginTransaction()
-                    local ok_partial = pcall(function()
-                        for _, nb in ipairs(new_books) do
-                            self.db:saveBookCache(nb.filepath, nb.hash, nb.book_id,
-                                nb.title, nb.author, nb.isbn10, nb.isbn13)
-                        end
-                    end)
-                    if ok_partial then self.db:commit() else self.db:rollback() end
-                end
-                if on_complete then on_complete(false, _("Sync cancelled")) end
+                cancelSync(i)
                 return
             end
 
@@ -4988,6 +5094,8 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 
             ::book_continue::
         end
+
+        UIManager:close(status_dialog)
 
         -- ── Phase 3: DB writes + optional deletions (parent/UI thread) ─────
         local deleted = 0

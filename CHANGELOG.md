@@ -1,3 +1,15 @@
+# [3.7.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.6.1...3.7.0) (2026-03-11)
+
+
+### Bug Fixes
+
+* **sync:** improve shelf book synchronization and filename generation ([d9f6701](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d9f670164f453180c3053515fcc8e700b0b18555)), closes [#23](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/issues/23)
+
+
+### Features
+
+* **sync:** enhance shelf synchronization with improved subprocess handling and user feedback ([118ca0f](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/118ca0fbcce02413937e210d110d05bd9efb65de))
+
 ## [3.6.1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.6.0...3.6.1) (2026-03-10)
 
 

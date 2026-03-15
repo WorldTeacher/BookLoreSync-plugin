@@ -146,6 +146,33 @@ function DbSettings:flush()
 end
 
 function BookloreSync:init()
+    -- Load plugin-specific translations into KOReader's global gettext singleton.
+    -- KOReader uses a single shared gettext instance (textdomain "koreader"), so
+    -- we patch in our own .mo file by calling loadMO() directly.  This must be
+    -- done before any _() calls are evaluated at runtime.
+    local gettext = require("gettext")
+    local lang = gettext.current_lang
+    if lang and lang ~= "C" and lang ~= "en" then
+        -- Normalise e.g. "de_DE" → "de" as a fallback when exact match is absent
+        local mo_path = self.path .. "/locale/" .. lang .. "/LC_MESSAGES/bookloresync.mo"
+        local f = io.open(mo_path, "r")
+        if f then
+            f:close()
+            gettext.loadMO(mo_path)
+        else
+            -- Try short language code (e.g. "de" from "de_DE")
+            local short_lang = lang:match("^(%a+)")
+            if short_lang and short_lang ~= lang then
+                mo_path = self.path .. "/locale/" .. short_lang .. "/LC_MESSAGES/bookloresync.mo"
+                f = io.open(mo_path, "r")
+                if f then
+                    f:close()
+                    gettext.loadMO(mo_path)
+                end
+            end
+        end
+    end
+
     -- Bootstrap phase: open the legacy LuaSettings file so that settings needed
     -- before the database is ready (log_to_file, secure_logs) can be read.
     -- Once the database has been initialised and migration 10 has run, self.settings
@@ -3086,7 +3113,7 @@ function BookloreSync:testConnection()
         self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
         koreader_success, koreader_message = self.api:testAuth()
     else
-        koreader_message = "KOReader credentials not configured"
+        koreader_message = _("KOReader credentials not configured")
     end
     
     -- Test Booklore user authentication
@@ -3103,12 +3130,12 @@ function BookloreSync:testConnection()
             if self.db then
                 self.db:saveBearerToken(self.booklore_username, booklore_token)
             end
-            booklore_message = "Booklore login successful"
+            booklore_message = _("Booklore login successful")
         else
-            booklore_message = booklore_token or "Booklore login failed"
+            booklore_message = booklore_token or _("Booklore login failed")
         end
     else
-        booklore_message = "Booklore credentials not configured"
+        booklore_message = _("Booklore credentials not configured")
     end
     
     -- Test by-hash endpoint compatibility (critical for plugin operation)
@@ -3119,28 +3146,28 @@ function BookloreSync:testConnection()
         -- Only probe if at least one auth check passed so the server is reachable
         hash_endpoint_ok, hash_endpoint_message = self.api:testByHashEndpoint()
     else
-        hash_endpoint_message = "Skipped (no successful auth)"
+        hash_endpoint_message = _("Skipped (no successful auth)")
     end
 
     -- Build result message
     local result_parts = {}
     
     if koreader_success then
-        table.insert(result_parts, "✓ KOReader: " .. _("Success"))
+        table.insert(result_parts, T(_("✓ KOReader: %1"), _("Success")))
     else
-        table.insert(result_parts, "✗ KOReader: " .. koreader_message)
+        table.insert(result_parts, T(_("✗ KOReader: %1"), koreader_message))
     end
     
     if booklore_success then
-        table.insert(result_parts, "✓ Booklore: " .. _("Success"))
+        table.insert(result_parts, T(_("✓ Booklore: %1"), _("Success")))
     else
-        table.insert(result_parts, "✗ Booklore: " .. booklore_message)
+        table.insert(result_parts, T(_("✗ Booklore: %1"), booklore_message))
     end
 
     if hash_endpoint_ok then
-        table.insert(result_parts, "✓ by-hash endpoint: " .. _("OK"))
+        table.insert(result_parts, T(_("✓ by-hash endpoint: %1"), _("OK")))
     else
-        table.insert(result_parts, "✗ by-hash endpoint: " .. hash_endpoint_message)
+        table.insert(result_parts, T(_("✗ by-hash endpoint: %1"), hash_endpoint_message))
     end
     
     local overall_success = koreader_success or booklore_success
@@ -3166,7 +3193,7 @@ function BookloreSync:formatDuration(duration_seconds)
     duration_seconds = tonumber(duration_seconds)
     
     if not duration_seconds or duration_seconds < 0 then
-        return "0s"
+        return _("0s")
     end
     
     local hours = math.floor(duration_seconds / 3600)
@@ -3176,15 +3203,15 @@ function BookloreSync:formatDuration(duration_seconds)
     local parts = {}
     
     if hours > 0 then
-        table.insert(parts, string.format("%dh", hours))
+        table.insert(parts, T(_("%1h"), hours))
     end
     
     if minutes > 0 then
-        table.insert(parts, string.format("%dm", minutes))
+        table.insert(parts, T(_("%1m"), minutes))
     end
     
     if seconds > 0 or #parts == 0 then
-        table.insert(parts, string.format("%ds", seconds))
+        table.insert(parts, T(_("%1s"), seconds))
     end
     
     return table.concat(parts, " ")
@@ -6841,13 +6868,13 @@ function BookloreSync:_formatDuration(seconds)
     local secs = seconds % 60
     
     if hours > 0 then
-        table.insert(parts, string.format("%dh", hours))
+        table.insert(parts, T(_("%1h"), hours))
     end
     if mins > 0 then
-        table.insert(parts, string.format("%dm", mins))
+        table.insert(parts, T(_("%1m"), mins))
     end
     if secs > 0 or #parts == 0 then  -- Always show seconds if duration is 0
-        table.insert(parts, string.format("%ds", secs))
+        table.insert(parts, T(_("%1s"), secs))
     end
     
     return table.concat(parts, " ")

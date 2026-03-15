@@ -705,43 +705,38 @@ KOReader supports three sidecar storage locations:
   - "dir"  : in a central docsettings directory (DataStorage:getDocSettingsDir())
   - "hash" : in a hash-based directory (DataStorage:getDocSettingsHashDir())
 
-The user's preferred location is read from G_reader_settings
-("document_metadata_folder"). This function checks all three locations and
-returns every path that actually exists on disk, so callers can delete them
-all.
+Used by the book-deletion path to collect every residual sidecar directory so
+they can all be removed.  The configured preferred location is listed first.
 
 @param doc_path  Absolute path to the document file.
-@return          Table of existing sidecar dir paths (may be empty).
+@return          Table of existing sidecar dir paths (may be empty), preferred location first.
 --]]
 function BookloreSync:getSdrPaths(doc_path)
     if not doc_path or doc_path == "" then return {} end
 
     local found = {}
 
-    -- Use DocSettings if available (KOReader >= 2022)
     local ok_ds, DocSettings = pcall(require, "docsettings")
     if ok_ds and DocSettings and DocSettings.getSidecarDir then
-        for _, location in ipairs({ "doc", "dir", "hash" }) do
-            local ok_p, sdr = pcall(function()
-                return DocSettings:getSidecarDir(doc_path, location)
-            end)
-            if ok_p and sdr and sdr ~= "" then
-                if lfs.attributes(sdr, "mode") == "directory" then
-                    -- Deduplicate (hash location may overlap with doc for some builds)
-                    local already = false
-                    for _, existing in ipairs(found) do
-                        if existing == sdr then already = true; break end
-                    end
-                    if not already then
-                        table.insert(found, sdr)
-                    end
+        -- Check all three locations; force_location=nil for the first call so
+        -- DocSettings reads G_reader_settings and returns the preferred path.
+        local function addIfDir(sdr)
+            if sdr and sdr ~= "" and lfs.attributes(sdr, "mode") == "directory" then
+                for _, existing in ipairs(found) do
+                    if existing == sdr then return end
                 end
+                table.insert(found, sdr)
             end
         end
-        -- If DocSettings found results, return them
-        if #found > 0 then
-            return found
+        -- Preferred location first (no force_location → reads G_reader_settings)
+        local ok_p, sdr = pcall(DocSettings.getSidecarDir, DocSettings, doc_path)
+        if ok_p then addIfDir(sdr) end
+        -- Then scan the remaining explicit locations for any residual directories
+        for _, location in ipairs({ "doc", "dir", "hash" }) do
+            local ok_l, sdr_l = pcall(DocSettings.getSidecarDir, DocSettings, doc_path, location)
+            if ok_l then addIfDir(sdr_l) end
         end
+        if #found > 0 then return found end
     end
 
     -- Fallback: beside-book path only
@@ -756,8 +751,16 @@ end
 --[[--
 Detect and store the KOReader sidecar (.sdr) path for the currently open book.
 
-Looks up or creates a book_cache entry, then upserts the sdr_path into book_metadata.
-Called silently from onReaderReady whenever a book is opened.
+Looks up or creates a book_cache entry, then upserts the sdr_path into
+book_metadata.  Called silently from onReaderReady whenever a book is opened.
+
+The DB is checked first: if a non-empty sdr_path is already stored for this
+book the function returns immediately.
+
+The sidecar path is obtained via DocSettings:getSidecarDir(doc_path) with no
+forced location argument so it reads G_reader_settings directly, identical to
+how KOReader itself resolves the path.  This is correct on first open and on
+all three storage modes ("doc", "dir", "hash").
 --]]
 function BookloreSync:detectBookMetadataLocation()
     if not self.ui or not self.ui.document or not self.ui.document.file then
@@ -767,23 +770,35 @@ function BookloreSync:detectBookMetadataLocation()
     local doc_path = self.ui.document.file
     self:logInfo("BookloreSync: Detecting metadata location for:", doc_path)
 
-    -- Verify the sidecar is accessible via the metadata extractor
-    local doc_settings = self.metadata_extractor:loadDocSettings(doc_path)
-    if not doc_settings then
-        self:logInfo("BookloreSync: No KOReader sidecar found for:", doc_path)
+    -- Check whether we already have a valid sdr_path in the database.
+    local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    if book_cache_id then
+        local meta = self.db:getBookMetadata(book_cache_id)
+        if meta and meta.sdr_path and meta.sdr_path ~= "" then
+            self:logInfo("BookloreSync: sdr_path already cached in DB:", meta.sdr_path)
+            return
+        end
+    end
+
+    -- Ask DocSettings for the sidecar directory the same way KOReader does:
+    -- no force_location argument → reads G_reader_settings("document_metadata_folder")
+    -- and computes the correct path for "doc", "dir", or "hash" immediately,
+    -- without any disk scan or fallback guessing.
+    local ok_ds, DocSettings = pcall(require, "docsettings")
+    if not ok_ds or not DocSettings or not DocSettings.getSidecarDir then
+        self:logInfo("BookloreSync: DocSettings not available, skipping sdr_path detection")
         return
     end
 
-    -- Derive the .sdr folder path, respecting KOReader's document_metadata_folder
-    -- setting (beside-book "doc", central "dir", or hash-based "hash").
-    -- Use the first found sidecar dir; fall back to the beside-book convention.
-    local sdr_paths = self:getSdrPaths(doc_path)
-    local sdr_path = (sdr_paths[1]) or (doc_path .. ".sdr")
+    local ok_p, sdr_path = pcall(DocSettings.getSidecarDir, DocSettings, doc_path)
+    if not ok_p or not sdr_path or sdr_path == "" then
+        self:logInfo("BookloreSync: Could not determine sdr_path for:", doc_path)
+        return
+    end
+    self:logInfo("BookloreSync: sdr_path from DocSettings:getSidecarDir:", sdr_path)
 
-    -- Ensure a book_cache entry exists for this file path
-    local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    -- Ensure a book_cache entry exists (may not exist for a first-ever open).
     if not book_cache_id then
-        -- No cache entry yet - create a minimal one using whatever we know
         local file_hash = ""
         if self.current_session and self.current_session.doc_path == doc_path then
             file_hash = self.current_session.file_hash or ""

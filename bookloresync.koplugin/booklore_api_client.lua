@@ -1283,6 +1283,11 @@ function APIClient:_normalizeShelfBookObject(book)
         book.extension = book.bookType:lower()
     end
 
+    -- Extract original server filename from primaryFile if present
+    if book.primaryFile and type(book.primaryFile) == "table" then
+        book.original_filename = book.primaryFile.fileName
+    end
+
     return book
 end
 

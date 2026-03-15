@@ -288,6 +288,10 @@ function BookloreSync:init()
     if self.delete_removed_shelf_books == nil then
         self.delete_removed_shelf_books = false  -- Default disabled for safety
     end
+    self.shelf_use_original_filename = self.settings:readSetting("shelf_use_original_filename")
+    if self.shelf_use_original_filename == nil then
+        self.shelf_use_original_filename = true  -- Default: use original server filename
+    end
 
     -- Resume/wake-sync state (not persisted - reset each session)
     self.last_auto_sync_time  = 0     -- unix timestamp of last auto-sync (cooldown guard)
@@ -2664,6 +2668,24 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Use original server filename"),
+                help_text = _("Save downloaded books using the original filename from the Booklore server instead of deriving the name from the book title."),
+                checked_func = function()
+                    return self.shelf_use_original_filename
+                end,
+                callback = function()
+                    self.shelf_use_original_filename = not self.shelf_use_original_filename
+                    self.settings:saveSetting("shelf_use_original_filename", self.shelf_use_original_filename)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.shelf_use_original_filename
+                            and _("Will use original server filename when downloading")
+                            or  _("Will use book title as filename when downloading"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
                 text_func = function()
                     return T(_("Shelf name: %1"), self.booklore_shelf_name)
                 end,
@@ -4782,6 +4804,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     local secure_logs     = self.secure_logs
     local download_dir    = self.download_dir
     local delete_removed  = self.delete_removed_shelf_books
+    local use_original_filename = self.shelf_use_original_filename
 
     -- Helper: inline hash calculation for subprocess use.
     -- Mirrors BookloreSync:calculateBookHash but with no self dependency.
@@ -4809,6 +4832,22 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     local function genFilename(book)
         local extension = (book.extension or "epub"):lower()
         local ext_suffix = "." .. extension
+
+        -- If user chose original filename and the server provided one, use it directly.
+        -- Apply the same sanitization as the title path to stay safe on FAT32/exFAT.
+        -- This is the default behaviour.
+        if use_original_filename and book.original_filename and book.original_filename ~= "" then
+            local safe = book.original_filename
+                :gsub('[/\\:*?"<>|]', "")
+                :gsub("%s+", " ")
+                :gsub("^%s+", "")
+                :gsub("%s+$", "")
+            if safe ~= "" then
+                return safe
+            end
+        end
+
+        -- Default: derive filename from title (current behaviour).
         local title = book.title
         if title and title ~= "" then
             local safe = title

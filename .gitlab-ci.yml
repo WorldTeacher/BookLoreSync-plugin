@@ -70,9 +70,8 @@ zip-koplugin-release:
       done
 
     - echo "Creating koplugin release archive"
-    - cd "$CI_PROJECT_DIR/bookloresync.koplugin"
-    - zip -r "$CI_PROJECT_DIR/bookloresync.koplugin.zip" *.lua locale/
     - cd "$CI_PROJECT_DIR"
+    - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip"
 
     - ls -lah "$CI_PROJECT_DIR/bookloresync.koplugin.zip"
 

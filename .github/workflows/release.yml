@@ -35,9 +35,7 @@ jobs:
 
       - name: Create plugin archive
         run: |
-          cd bookloresync.koplugin
-          zip -r ../bookloresync.koplugin.zip *.lua locale/
-          cd ..
+          zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip"
 
       - name: Extract and prepare changelog
         id: changelog

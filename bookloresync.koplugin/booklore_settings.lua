@@ -330,12 +330,11 @@ function Settings:showVersion(parent)
     local version_info = require("plugin_version")
     local meta_info = require("_meta")
     
-    local version_text = string.format(
-        "Booklore Sync\n\nVersion: %s\nType: %s\nBuild Date: %s\nCommit: %s",
-        meta_info.version or version_info.version or "unknown",
-        version_info.version_type or "unknown",
-        version_info.build_date or "unknown",
-        version_info.git_commit or "unknown"
+    local version_text = T(_("Booklore Sync\n\nVersion: %1\nType: %2\nBuild Date: %3\nCommit: %4"),
+        meta_info.version or version_info.version or _("unknown"),
+        version_info.version_type or _("unknown"),
+        version_info.build_date or _("unknown"),
+        version_info.git_commit or _("unknown")
     )
     
     UIManager:show(InfoMessage:new{

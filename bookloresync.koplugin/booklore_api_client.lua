@@ -1278,9 +1278,29 @@ function APIClient:_normalizeShelfBookObject(book)
         book.isbn13 = book.isbn13 or book.metadata.isbn13
     end
 
-    -- bookType → extension (lowercase)
-    if book.bookType and not book.extension then
-        book.extension = book.bookType:lower()
+    -- Extract original server filename from primaryFile if present.
+    -- Do this before the extension resolution below so we can use the
+    -- filename's own extension as the most reliable source of truth.
+    if book.primaryFile and type(book.primaryFile) == "table" then
+        book.original_filename = book.primaryFile.fileName
+    end
+
+    -- Resolve extension in priority order:
+    --   1. Extension embedded in the original server filename (most reliable –
+    --      it is the actual file the server will serve).
+    --   2. bookType field (e.g. "EPUB", "PDF").
+    --   3. Nothing – leave book.extension as nil so callers can skip the book
+    --      rather than silently saving it with the wrong extension.
+    if not book.extension then
+        if book.original_filename and book.original_filename ~= "" then
+            local ext = book.original_filename:match("%.([^.]+)$")
+            if ext and ext ~= "" then
+                book.extension = ext:lower()
+            end
+        end
+        if not book.extension and book.bookType and book.bookType ~= "" then
+            book.extension = book.bookType:lower()
+        end
     end
 
     return book

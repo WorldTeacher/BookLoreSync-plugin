@@ -146,6 +146,33 @@ function DbSettings:flush()
 end
 
 function BookloreSync:init()
+    -- Load plugin-specific translations into KOReader's global gettext singleton.
+    -- KOReader uses a single shared gettext instance (textdomain "koreader"), so
+    -- we patch in our own .mo file by calling loadMO() directly.  This must be
+    -- done before any _() calls are evaluated at runtime.
+    local gettext = require("gettext")
+    local lang = gettext.current_lang
+    if lang and lang ~= "C" and lang ~= "en" then
+        -- Normalise e.g. "de_DE" → "de" as a fallback when exact match is absent
+        local mo_path = self.path .. "/locale/" .. lang .. "/LC_MESSAGES/bookloresync.mo"
+        local f = io.open(mo_path, "r")
+        if f then
+            f:close()
+            if gettext.loadMO then gettext.loadMO(mo_path) end
+        else
+            -- Try short language code (e.g. "de" from "de_DE")
+            local short_lang = lang:match("^(%a+)")
+            if short_lang and short_lang ~= lang then
+                mo_path = self.path .. "/locale/" .. short_lang .. "/LC_MESSAGES/bookloresync.mo"
+                f = io.open(mo_path, "r")
+                if f then
+                    f:close()
+                    if gettext.loadMO then gettext.loadMO(mo_path) end
+                end
+            end
+        end
+    end
+
     -- Bootstrap phase: open the legacy LuaSettings file so that settings needed
     -- before the database is ready (log_to_file, secure_logs) can be read.
     -- Once the database has been initialised and migration 10 has run, self.settings
@@ -260,6 +287,14 @@ function BookloreSync:init()
     self.delete_removed_shelf_books  = self.settings:readSetting("delete_removed_shelf_books")
     if self.delete_removed_shelf_books == nil then
         self.delete_removed_shelf_books = false  -- Default disabled for safety
+    end
+    self.shelf_use_original_filename = self.settings:readSetting("shelf_use_original_filename")
+    if self.shelf_use_original_filename == nil then
+        self.shelf_use_original_filename = true  -- Default: use original server filename
+    end
+    self.delete_sdr_on_book_delete   = self.settings:readSetting("delete_sdr_on_book_delete")
+    if self.delete_sdr_on_book_delete == nil then
+        self.delete_sdr_on_book_delete = false  -- Default disabled for safety
     end
 
     -- Resume/wake-sync state (not persisted - reset each session)
@@ -499,15 +534,11 @@ function BookloreSync:onToggleBookloreSync()
 end
 
 function BookloreSync:onSyncBooklorePending()
-    local pending_count = 0
-    if self.db then
-        local sessions    = tonumber(self.db:getPendingSessionCount())    or 0
-        local annotations = tonumber(self.db:getPendingAnnotationCount()) or 0
-        local ratings     = tonumber(self.db:getPendingRatingCount())     or 0
-        local bookmarks   = tonumber(self.db:getPendingBookmarkCount())   or 0
-        pending_count = sessions + annotations + ratings + bookmarks
-    end
-
+    local sessions    = tonumber(self.db and self.db:getPendingSessionCount())    or 0
+    local annotations = tonumber(self.db and self.db:getPendingAnnotationCount()) or 0
+    local ratings     = tonumber(self.db and self.db:getPendingRatingCount())     or 0
+    local bookmarks   = tonumber(self.db and self.db:getPendingBookmarkCount())   or 0
+    local pending_count = sessions + annotations + ratings + bookmarks
     if pending_count > 0 and self.is_enabled then
         self:_requestWifi(_("sync pending items"), function()
             self:syncPendingSessions()
@@ -629,10 +660,103 @@ function BookloreSync:viewSessionDetails()
 end
 
 --[[--
+Recursively delete a directory and all its contents.
+
+@param path  Absolute path to the directory to remove.
+@return true on success, false + error string on failure.
+--]]
+function BookloreSync:_deleteDirRecursive(path)
+    if not path or path == "" or path == "/" then
+        return false, "invalid path"
+    end
+    local mode = lfs.attributes(path, "mode")
+    if mode == nil then
+        return true  -- already gone
+    end
+    if mode == "file" then
+        local ok, err = os.remove(path)
+        return ok, err
+    end
+    if mode ~= "directory" then
+        return false, "not a file or directory: " .. path
+    end
+    for entry in lfs.dir(path) do
+        if entry ~= "." and entry ~= ".." then
+            local child = path .. "/" .. entry
+            local ok, err = self:_deleteDirRecursive(child)
+            if not ok then
+                return false, err
+            end
+        end
+    end
+    local ok, err = lfs.rmdir(path)
+    return ok, err
+end
+
+--[[--
+Find all .sdr sidecar directories that exist on disk for a given document path.
+
+KOReader supports three sidecar storage locations:
+  - "doc"  : beside the book file (<book_path>.sdr)
+  - "dir"  : in a central docsettings directory (DataStorage:getDocSettingsDir())
+  - "hash" : in a hash-based directory (DataStorage:getDocSettingsHashDir())
+
+Used by the book-deletion path to collect every residual sidecar directory so
+they can all be removed.  The configured preferred location is listed first.
+
+@param doc_path  Absolute path to the document file.
+@return          Table of existing sidecar dir paths (may be empty), preferred location first.
+--]]
+function BookloreSync:getSdrPaths(doc_path)
+    if not doc_path or doc_path == "" then return {} end
+
+    local found = {}
+
+    local ok_ds, DocSettings = pcall(require, "docsettings")
+    if ok_ds and DocSettings and DocSettings.getSidecarDir then
+        -- Check all three locations; force_location=nil for the first call so
+        -- DocSettings reads G_reader_settings and returns the preferred path.
+        local function addIfDir(sdr)
+            if sdr and sdr ~= "" and lfs.attributes(sdr, "mode") == "directory" then
+                for _, existing in ipairs(found) do
+                    if existing == sdr then return end
+                end
+                table.insert(found, sdr)
+            end
+        end
+        -- Preferred location first (no force_location → reads G_reader_settings)
+        local ok_p, sdr = pcall(DocSettings.getSidecarDir, DocSettings, doc_path)
+        if ok_p then addIfDir(sdr) end
+        -- Then scan the remaining explicit locations for any residual directories
+        for _, location in ipairs({ "doc", "dir", "hash" }) do
+            local ok_l, sdr_l = pcall(DocSettings.getSidecarDir, DocSettings, doc_path, location)
+            if ok_l then addIfDir(sdr_l) end
+        end
+        if #found > 0 then return found end
+    end
+
+    -- Fallback: beside-book path only
+    local beside = doc_path .. ".sdr"
+    if lfs.attributes(beside, "mode") == "directory" then
+        table.insert(found, beside)
+    end
+
+    return found
+end
+
+--[[--
 Detect and store the KOReader sidecar (.sdr) path for the currently open book.
 
-Looks up or creates a book_cache entry, then upserts the sdr_path into book_metadata.
-Called silently from onReaderReady whenever a book is opened.
+Looks up or creates a book_cache entry, then upserts the sdr_path into
+book_metadata.  Called silently from onReaderReady whenever a book is opened.
+
+The DB is checked first: if a non-empty sdr_path is already stored for this
+book the function returns immediately.
+
+The sidecar path is obtained via DocSettings:getSidecarDir(doc_path) with no
+forced location argument so it reads G_reader_settings directly, identical to
+how KOReader itself resolves the path.  This is correct on first open and on
+all three storage modes ("doc", "dir", "hash").
 --]]
 function BookloreSync:detectBookMetadataLocation()
     if not self.ui or not self.ui.document or not self.ui.document.file then
@@ -642,21 +766,35 @@ function BookloreSync:detectBookMetadataLocation()
     local doc_path = self.ui.document.file
     self:logInfo("BookloreSync: Detecting metadata location for:", doc_path)
 
-    -- Verify the sidecar is accessible via the metadata extractor
-    local doc_settings = self.metadata_extractor:loadDocSettings(doc_path)
-    if not doc_settings then
-        self:logInfo("BookloreSync: No KOReader sidecar found for:", doc_path)
+    -- Check whether we already have a valid sdr_path in the database.
+    local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    if book_cache_id then
+        local meta = self.db:getBookMetadata(book_cache_id)
+        if meta and meta.sdr_path and meta.sdr_path ~= "" then
+            self:logInfo("BookloreSync: sdr_path already cached in DB:", meta.sdr_path)
+            return
+        end
+    end
+
+    -- Ask DocSettings for the sidecar directory the same way KOReader does:
+    -- no force_location argument → reads G_reader_settings("document_metadata_folder")
+    -- and computes the correct path for "doc", "dir", or "hash" immediately,
+    -- without any disk scan or fallback guessing.
+    local ok_ds, DocSettings = pcall(require, "docsettings")
+    if not ok_ds or not DocSettings or not DocSettings.getSidecarDir then
+        self:logInfo("BookloreSync: DocSettings not available, skipping sdr_path detection")
         return
     end
 
-    -- Derive the .sdr folder path.
-    -- DocSettings stores the sidecar in: <doc_dir>/<doc_filename>.sdr/
-    local sdr_path = doc_path .. ".sdr"
+    local ok_p, sdr_path = pcall(DocSettings.getSidecarDir, DocSettings, doc_path)
+    if not ok_p or not sdr_path or sdr_path == "" then
+        self:logInfo("BookloreSync: Could not determine sdr_path for:", doc_path)
+        return
+    end
+    self:logInfo("BookloreSync: sdr_path from DocSettings:getSidecarDir:", sdr_path)
 
-    -- Ensure a book_cache entry exists for this file path
-    local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    -- Ensure a book_cache entry exists (may not exist for a first-ever open).
     if not book_cache_id then
-        -- No cache entry yet - create a minimal one using whatever we know
         local file_hash = ""
         if self.current_session and self.current_session.doc_path == doc_path then
             file_hash = self.current_session.file_hash or ""
@@ -2637,10 +2775,50 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Use original server filename"),
+                help_text = _("Save downloaded books using the original filename from the Booklore server instead of deriving the name from the book title."),
+                checked_func = function()
+                    return self.shelf_use_original_filename
+                end,
+                callback = function()
+                    self.shelf_use_original_filename = not self.shelf_use_original_filename
+                    self.settings:saveSetting("shelf_use_original_filename", self.shelf_use_original_filename)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.shelf_use_original_filename
+                            and _("Will use original server filename when downloading")
+                            or  _("Will use book title as filename when downloading"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text = _("Also delete sidecar (.sdr) on removal"),
+                help_text = _("When a shelf book is deleted during sync, also delete its KOReader sidecar directory (.sdr folder containing reading progress, highlights, etc.). Only applies when 'Delete removed shelf books' is also enabled. Disabled by default."),
+                enabled_func = function()
+                    return self.delete_removed_shelf_books
+                end,
+                checked_func = function()
+                    return self.delete_sdr_on_book_delete
+                end,
+                callback = function()
+                    self.delete_sdr_on_book_delete = not self.delete_sdr_on_book_delete
+                    self.settings:saveSetting("delete_sdr_on_book_delete", self.delete_sdr_on_book_delete)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.delete_sdr_on_book_delete
+                            and _("Sidecar (.sdr) deletion enabled")
+                            or  _("Sidecar (.sdr) deletion disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
                 text_func = function()
                     return T(_("Shelf name: %1"), self.booklore_shelf_name)
                 end,
                 help_text = _("Name of the Booklore shelf to sync. The shelf is created automatically if it does not exist."),
+                keep_menu_open = true,
                 callback = function()
                     local dialog
                     dialog = InputDialog:new{
@@ -2678,6 +2856,7 @@ function BookloreSync:addToMainMenu(menu_items)
                     return T(_("Download dir: %1"), self.download_dir)
                 end,
                 help_text = _("Local directory where shelf books are downloaded. Detected automatically from device type; override here if needed."),
+                keep_menu_open = true,
                 callback = function()
                     local dialog
                     dialog = InputDialog:new{
@@ -3084,7 +3263,7 @@ function BookloreSync:testConnection()
         self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
         koreader_success, koreader_message = self.api:testAuth()
     else
-        koreader_message = "KOReader credentials not configured"
+        koreader_message = _("KOReader credentials not configured")
     end
     
     -- Test Booklore user authentication
@@ -3101,12 +3280,12 @@ function BookloreSync:testConnection()
             if self.db then
                 self.db:saveBearerToken(self.booklore_username, booklore_token)
             end
-            booklore_message = "Booklore login successful"
+            booklore_message = _("Booklore login successful")
         else
-            booklore_message = booklore_token or "Booklore login failed"
+            booklore_message = booklore_token or _("Booklore login failed")
         end
     else
-        booklore_message = "Booklore credentials not configured"
+        booklore_message = _("Booklore credentials not configured")
     end
     
     -- Test by-hash endpoint compatibility (critical for plugin operation)
@@ -3117,28 +3296,28 @@ function BookloreSync:testConnection()
         -- Only probe if at least one auth check passed so the server is reachable
         hash_endpoint_ok, hash_endpoint_message = self.api:testByHashEndpoint()
     else
-        hash_endpoint_message = "Skipped (no successful auth)"
+        hash_endpoint_message = _("Skipped (no successful auth)")
     end
 
     -- Build result message
     local result_parts = {}
     
     if koreader_success then
-        table.insert(result_parts, "✓ KOReader: " .. _("Success"))
+        table.insert(result_parts, T(_("✓ KOReader: %1"), _("Success")))
     else
-        table.insert(result_parts, "✗ KOReader: " .. koreader_message)
+        table.insert(result_parts, T(_("✗ KOReader: %1"), koreader_message))
     end
     
     if booklore_success then
-        table.insert(result_parts, "✓ Booklore: " .. _("Success"))
+        table.insert(result_parts, T(_("✓ Booklore: %1"), _("Success")))
     else
-        table.insert(result_parts, "✗ Booklore: " .. booklore_message)
+        table.insert(result_parts, T(_("✗ Booklore: %1"), booklore_message))
     end
 
     if hash_endpoint_ok then
-        table.insert(result_parts, "✓ by-hash endpoint: " .. _("OK"))
+        table.insert(result_parts, T(_("✓ by-hash endpoint: %1"), _("OK")))
     else
-        table.insert(result_parts, "✗ by-hash endpoint: " .. hash_endpoint_message)
+        table.insert(result_parts, T(_("✗ by-hash endpoint: %1"), hash_endpoint_message))
     end
     
     local overall_success = koreader_success or booklore_success
@@ -3164,7 +3343,7 @@ function BookloreSync:formatDuration(duration_seconds)
     duration_seconds = tonumber(duration_seconds)
     
     if not duration_seconds or duration_seconds < 0 then
-        return "0s"
+        return _("0s")
     end
     
     local hours = math.floor(duration_seconds / 3600)
@@ -3174,15 +3353,15 @@ function BookloreSync:formatDuration(duration_seconds)
     local parts = {}
     
     if hours > 0 then
-        table.insert(parts, string.format("%dh", hours))
+        table.insert(parts, T(_("%1h"), hours))
     end
     
     if minutes > 0 then
-        table.insert(parts, string.format("%dm", minutes))
+        table.insert(parts, T(_("%1m"), minutes))
     end
     
     if seconds > 0 or #parts == 0 then
-        table.insert(parts, string.format("%ds", seconds))
+        table.insert(parts, T(_("%1s"), seconds))
     end
     
     return table.concat(parts, " ")
@@ -4227,9 +4406,81 @@ function BookloreSync:onSuspend()
     end
     
     self:logInfo("BookloreSync: Device suspending")
-    
+
+    -- Snapshot book_id before endSession() clears self.current_session.
+    local pre_book_id = self.current_session and self.current_session.book_id
+
     self:endSession({ silent = true, force_queue = true })
-    
+
+    -- ── Capture bookmarks and annotations while the document is still open ──
+    -- onCloseDocument is NOT fired on suspend; the book stays open in memory.
+    -- We therefore mirror its annotation/bookmark harvesting here so that
+    -- anything the user added during this reading session is queued before
+    -- the device goes to sleep.
+    if self.ui and self.ui.document then
+        local doc_path     = self.ui.document.file
+        local open_doc     = self.ui.document
+        local live_settings = self.ui and self.ui.doc_settings
+
+        -- book_id from snapshot or cache (best-effort; nil is fine – both sync
+        -- functions operate in queue_only mode when book_id is absent)
+        local book_id = pre_book_id
+        if not book_id and doc_path then
+            local cache_id = self.db and self.db:getBookCacheIdByFilePath(doc_path)
+            if cache_id then
+                local cached = self.db:getBookCacheById(cache_id)
+                if cached then book_id = cached.book_id end
+            end
+        end
+
+        -- Grab live annotations from the in-memory ReaderAnnotation module.
+        -- KOReader only flushes these to the .sdr sidecar after CloseDocument,
+        -- so reading from disk here would return stale / missing data.
+        local live_annotations = nil
+        if self.ui.annotation and self.ui.annotation.annotations then
+            live_annotations = self.ui.annotation.annotations
+            self:logInfo("BookloreSync: Suspend - captured", #live_annotations,
+                         "annotations from ReaderAnnotation module")
+        else
+            self:logInfo("BookloreSync: Suspend - ReaderAnnotation not available, will fall back to sidecar")
+        end
+
+        -- Derive bookmarks: entries without pos0/color are plain bookmarks.
+        local live_bookmarks = nil
+        if live_annotations then
+            live_bookmarks = {}
+            for _, ann in ipairs(live_annotations) do
+                if not ann.pos0 and not ann.color then
+                    table.insert(live_bookmarks, {
+                        pos0     = ann.page,
+                        pageno   = ann.pageno,
+                        notes    = ann.text,
+                        datetime = ann.datetime,
+                        chapter  = ann.chapter,
+                    })
+                end
+            end
+            if #live_bookmarks > 0 then
+                self:logInfo("BookloreSync: Suspend - derived", #live_bookmarks, "bookmarks")
+            else
+                self:logInfo("BookloreSync: Suspend - no bookmarks in live annotations array")
+                live_bookmarks = nil
+            end
+        end
+
+        if doc_path then
+            if self.highlights_notes_sync_enabled then
+                local strategy = self.upload_strategy or "on_session"
+                if strategy == "on_session" then
+                    self:logInfo("BookloreSync: Suspend - queuing annotations")
+                    self:syncHighlightsAndNotes(doc_path, book_id, open_doc, live_settings, live_annotations)
+                    self:logInfo("BookloreSync: Suspend - queuing bookmarks")
+                    self:syncBookmarks(doc_path, book_id, open_doc, live_settings, live_bookmarks)
+                end
+            end
+        end
+    end
+
     if self.force_push_session_on_suspend then
         self:logInfo("BookloreSync: Force push on suspend enabled")
         
@@ -4753,6 +5004,8 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     local secure_logs     = self.secure_logs
     local download_dir    = self.download_dir
     local delete_removed  = self.delete_removed_shelf_books
+    local use_original_filename = self.shelf_use_original_filename
+    local delete_sdr      = self.delete_sdr_on_book_delete
 
     -- Helper: inline hash calculation for subprocess use.
     -- Mirrors BookloreSync:calculateBookHash but with no self dependency.
@@ -4777,9 +5030,34 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     end
 
     -- Helper: generate filename - pure Lua, no self, same logic as _generateFilename.
+    -- Precondition: book.extension must already be set (non-nil, non-empty).
     local function genFilename(book)
-        local extension = (book.extension or "epub"):lower()
+        local extension = book.extension:lower()
         local ext_suffix = "." .. extension
+        local id_tag     = "_" .. tostring(book.id)
+
+        -- If user chose original filename and the server provided one, use it.
+        -- Strip the extension from the original filename, sanitize the stem,
+        -- then append "_id" so the book ID is embedded in every downloaded file.
+        if use_original_filename and book.original_filename and book.original_filename ~= "" then
+            -- Strip the trailing extension (last ".something") to get the stem.
+            local orig_stem = book.original_filename:match("^(.+)%.[^.]+$")
+                           or book.original_filename
+            local safe = orig_stem
+                :gsub('[/\\:*?"<>|]', "")
+                :gsub("%s+", " ")
+                :gsub("^%s+", "")
+                :gsub("%s+$", "")
+            if safe ~= "" then
+                local max_stem = 150 - #id_tag - #ext_suffix
+                if #safe > max_stem then
+                    safe = safe:sub(1, max_stem):gsub("%s+$", "")
+                end
+                return safe .. id_tag .. ext_suffix
+            end
+        end
+
+        -- Default: derive filename from title.
         local title = book.title
         if title and title ~= "" then
             local safe = title
@@ -4788,13 +5066,15 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                 :gsub("^%s+", "")
                 :gsub("%s+$", "")
             if safe ~= "" then
-                local max_stem = 150 - #ext_suffix
+                -- Reserve room for the "_id" tag so the total stays under 150 chars
+                local max_stem = 150 - #id_tag - #ext_suffix
                 if #safe > max_stem then
                     safe = safe:sub(1, max_stem):gsub("%s+$", "")
                 end
-                return safe .. ext_suffix
+                return safe .. id_tag .. ext_suffix
             end
         end
+        -- Fallback: "BookID_" already embeds the id; no extra tag needed.
         return "BookID_" .. tostring(book.id) .. ext_suffix
     end
 
@@ -4990,8 +5270,73 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 
             shelf_book_ids[book_id] = true
 
+            if not book.extension or book.extension == "" then
+                self:logWarn("BookloreSync: skipping book", book_id,
+                    "- extension unknown (bookType and originalFilename both absent)")
+                errors = errors + 1
+                goto book_continue
+            end
+
             local filename = genFilename(book)
             local filepath = download_dir .. "/" .. filename
+
+            -- ── Migration: rename old-scheme files to the new ID-tagged name ───
+            -- Before checking whether the target file exists, look for any file
+            -- that was downloaded under an older naming scheme (no "_id" suffix).
+            -- If found, rename it in place so we don't re-download unnecessarily.
+            if lfs.attributes(filepath, "mode") ~= "file" then
+                local extension = book.extension:lower()
+                local ext_suffix = "." .. extension
+                local id_tag     = "_" .. tostring(book_id)
+                -- Candidate 1: sanitized title without id tag
+                local old_safe_title = book.title and book.title
+                    :gsub('[/\\:*?"<>|]', "")
+                    :gsub("%s+", " ")
+                    :gsub("^%s+", "")
+                    :gsub("%s+$", "") or ""
+                -- Apply the same 150-char limit the old scheme used (no id_tag, just ext_suffix)
+                local old_max_stem = 150 - #ext_suffix
+                if #old_safe_title > old_max_stem then
+                    old_safe_title = old_safe_title:sub(1, old_max_stem):gsub("%s+$", "")
+                end
+                -- Candidate 2: sanitized original_filename stem without id tag
+                local orig_stem = (book.original_filename or ""):match("^(.+)%.[^.]+$")
+                               or book.original_filename or ""
+                local old_safe_orig = orig_stem
+                    :gsub('[/\\:*?"<>|]', "")
+                    :gsub("%s+", " ")
+                    :gsub("^%s+", "")
+                    :gsub("%s+$", "")
+                if #old_safe_orig > old_max_stem then
+                    old_safe_orig = old_safe_orig:sub(1, old_max_stem):gsub("%s+$", "")
+                end
+                local candidates = {}
+                if old_safe_title ~= "" then
+                    table.insert(candidates, download_dir .. "/" .. old_safe_title .. ext_suffix)
+                end
+                if old_safe_orig ~= "" and old_safe_orig ~= old_safe_title then
+                    table.insert(candidates, download_dir .. "/" .. old_safe_orig .. ext_suffix)
+                end
+                -- Candidate 3: BookID_ fallback from old scheme (no change needed if
+                -- it already matches the current fallback, but try just in case title
+                -- was added later to a book that previously had none)
+                table.insert(candidates, download_dir .. "/BookID_" .. tostring(book_id) .. ext_suffix)
+                for _, old_path in ipairs(candidates) do
+                    if old_path ~= filepath and lfs.attributes(old_path, "mode") == "file" then
+                        local ok_mv = os.rename(old_path, filepath)
+                        if ok_mv then
+                            self:logInfo("BookloreSync: migrated file", old_path, "->", filepath)
+                            if self.db and self.db.updateFilePath then
+                                self.db:updateFilePath(old_path, filepath)
+                            end
+                        else
+                            self:logWarn("BookloreSync: failed to migrate file", old_path, "->", filepath)
+                        end
+                        break
+                    end
+                end
+            end
+
             local already_exists = lfs.attributes(filepath, "mode") == "file"
 
             -- Update the dialog title to show current book progress.
@@ -5127,11 +5472,27 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                     if entry ~= "." and entry ~= ".." then
                         local fp = download_dir .. "/" .. entry
                         if lfs.attributes(fp, "mode") == "file" then
-                            local cached = self.db:getBookByFilePath(fp)
+                            -- Use the DB as the authoritative source of whether
+                            -- this file was placed here by the plugin.  This
+                            -- prevents accidental deletion of user-placed files
+                            -- whose names happen to end with _<number>.<ext>.
+                            local cached = self.db and self.db:getBookByFilePath(fp)
                             local lid = cached and cached.book_id
                             if lid and not shelf_book_ids[lid] then
                                 if os.remove(fp) then
                                     deleted = deleted + 1
+                                    -- Also remove any .sdr sidecar directories if
+                                    -- the user has enabled that option.
+                                    if delete_sdr then
+                                        local sdr_dirs = self:getSdrPaths(fp)
+                                        for _, sdr_dir in ipairs(sdr_dirs) do
+                                            self:logInfo("BookloreSync: Deleting sidecar:", sdr_dir)
+                                            local ok_rm, err_rm = self:_deleteDirRecursive(sdr_dir)
+                                            if not ok_rm then
+                                                self:logErr("BookloreSync: Failed to delete sidecar:", sdr_dir, err_rm)
+                                            end
+                                        end
+                                    end
                                 else
                                     errors = errors + 1
                                 end
@@ -5201,6 +5562,7 @@ Falls back to "BookID_{id}.{extension}" when no usable title is available.
 function BookloreSync:_generateFilename(book)
     local extension = (book.extension or "epub"):lower()
     local ext_suffix = "." .. extension
+    local id_tag     = "_" .. tostring(book.id)
     local title = book.title
     if title and title ~= "" then
         -- Strip characters that are illegal on common filesystems (FAT32, NTFS, ext4)
@@ -5210,14 +5572,16 @@ function BookloreSync:_generateFilename(book)
             :gsub("^%s+", "")
             :gsub("%s+$", "")
         if safe ~= "" then
-            local max_stem = 150 - #ext_suffix
+            -- Reserve room for the "_id" tag so the total stays under 150 chars
+            local max_stem = 150 - #id_tag - #ext_suffix
             if #safe > max_stem then
                 safe = safe:sub(1, max_stem):gsub("%s+$", "")
             end
-            return safe .. ext_suffix
+            return safe .. id_tag .. ext_suffix
         end
     end
-    -- Fallback when title is absent or becomes empty after sanitization
+    -- Fallback when title is absent or becomes empty after sanitization.
+    -- "BookID_" already encodes the id so no extra tag is needed.
     return "BookID_" .. tostring(book.id) .. ext_suffix
 end
 
@@ -5254,6 +5618,16 @@ function BookloreSync:preDeleteHook(filepath)
             end
         else
             self:logInfo("BookloreSync: preDeleteHook - book not in cache")
+        end
+    end
+
+    -- Fallback: parse book ID from the "_id" tag embedded in the filename.
+    -- This works even after a DB reset or a naming-scheme switch.
+    if not book_id then
+        local fname = filepath:match("([^/\\]+)$") or filepath
+        book_id = tonumber(fname:match("_(%d+)%.[^.]+$"))
+        if book_id then
+            self:logInfo("BookloreSync: preDeleteHook - book_id from filename:", book_id)
         end
     end
 
@@ -6839,13 +7213,13 @@ function BookloreSync:_formatDuration(seconds)
     local secs = seconds % 60
     
     if hours > 0 then
-        table.insert(parts, string.format("%dh", hours))
+        table.insert(parts, T(_("%1h"), hours))
     end
     if mins > 0 then
-        table.insert(parts, string.format("%dm", mins))
+        table.insert(parts, T(_("%1m"), mins))
     end
     if secs > 0 or #parts == 0 then  -- Always show seconds if duration is 0
-        table.insert(parts, string.format("%ds", secs))
+        table.insert(parts, T(_("%1s"), secs))
     end
     
     return table.concat(parts, " ")

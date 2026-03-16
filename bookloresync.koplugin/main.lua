@@ -5034,25 +5034,34 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     end
 
     -- Helper: generate filename - pure Lua, no self, same logic as _generateFilename.
+    -- Precondition: book.extension must already be set (non-nil, non-empty).
     local function genFilename(book)
-        local extension = (book.extension or "epub"):lower()
+        local extension = book.extension:lower()
         local ext_suffix = "." .. extension
+        local id_tag     = "_" .. tostring(book.id)
 
-        -- If user chose original filename and the server provided one, use it directly.
-        -- Apply the same sanitization as the title path to stay safe on FAT32/exFAT.
-        -- This is the default behaviour.
+        -- If user chose original filename and the server provided one, use it.
+        -- Strip the extension from the original filename, sanitize the stem,
+        -- then append "_id" so the book ID is embedded in every downloaded file.
         if use_original_filename and book.original_filename and book.original_filename ~= "" then
-            local safe = book.original_filename
+            -- Strip the trailing extension (last ".something") to get the stem.
+            local orig_stem = book.original_filename:match("^(.+)%.[^.]+$")
+                           or book.original_filename
+            local safe = orig_stem
                 :gsub('[/\\:*?"<>|]', "")
                 :gsub("%s+", " ")
                 :gsub("^%s+", "")
                 :gsub("%s+$", "")
             if safe ~= "" then
-                return safe
+                local max_stem = 150 - #id_tag - #ext_suffix
+                if #safe > max_stem then
+                    safe = safe:sub(1, max_stem):gsub("%s+$", "")
+                end
+                return safe .. id_tag .. ext_suffix
             end
         end
 
-        -- Default: derive filename from title (current behaviour).
+        -- Default: derive filename from title.
         local title = book.title
         if title and title ~= "" then
             local safe = title
@@ -5061,13 +5070,15 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                 :gsub("^%s+", "")
                 :gsub("%s+$", "")
             if safe ~= "" then
-                local max_stem = 150 - #ext_suffix
+                -- Reserve room for the "_id" tag so the total stays under 150 chars
+                local max_stem = 150 - #id_tag - #ext_suffix
                 if #safe > max_stem then
                     safe = safe:sub(1, max_stem):gsub("%s+$", "")
                 end
-                return safe .. ext_suffix
+                return safe .. id_tag .. ext_suffix
             end
         end
+        -- Fallback: "BookID_" already embeds the id; no extra tag needed.
         return "BookID_" .. tostring(book.id) .. ext_suffix
     end
 
@@ -5261,10 +5272,67 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             local book_id = tonumber(book.id)
             if not book_id then goto book_continue end
 
+            if not book.extension or book.extension == "" then
+                self:logWarn("BookloreSync: skipping book", book_id,
+                    "- extension unknown (bookType and originalFilename both absent)")
+                errors = errors + 1
+                goto book_continue
+            end
+
             shelf_book_ids[book_id] = true
 
             local filename = genFilename(book)
             local filepath = download_dir .. "/" .. filename
+
+            -- ── Migration: rename old-scheme files to the new ID-tagged name ───
+            -- Before checking whether the target file exists, look for any file
+            -- that was downloaded under an older naming scheme (no "_id" suffix).
+            -- If found, rename it in place so we don't re-download unnecessarily.
+            if lfs.attributes(filepath, "mode") ~= "file" then
+                local extension = book.extension:lower()
+                local ext_suffix = "." .. extension
+                local id_tag     = "_" .. tostring(book_id)
+                -- Candidate 1: sanitized title without id tag
+                local old_safe_title = book.title and book.title
+                    :gsub('[/\\:*?"<>|]', "")
+                    :gsub("%s+", " ")
+                    :gsub("^%s+", "")
+                    :gsub("%s+$", "") or ""
+                -- Candidate 2: sanitized original_filename stem without id tag
+                local orig_stem = (book.original_filename or ""):match("^(.+)%.[^.]+$")
+                               or book.original_filename or ""
+                local old_safe_orig = orig_stem
+                    :gsub('[/\\:*?"<>|]', "")
+                    :gsub("%s+", " ")
+                    :gsub("^%s+", "")
+                    :gsub("%s+$", "")
+                local candidates = {}
+                if old_safe_title ~= "" then
+                    table.insert(candidates, download_dir .. "/" .. old_safe_title .. ext_suffix)
+                end
+                if old_safe_orig ~= "" and old_safe_orig ~= old_safe_title then
+                    table.insert(candidates, download_dir .. "/" .. old_safe_orig .. ext_suffix)
+                end
+                -- Candidate 3: BookID_ fallback from old scheme (no change needed if
+                -- it already matches the current fallback, but try just in case title
+                -- was added later to a book that previously had none)
+                table.insert(candidates, download_dir .. "/BookID_" .. tostring(book_id) .. ext_suffix)
+                for _, old_path in ipairs(candidates) do
+                    if old_path ~= filepath and lfs.attributes(old_path, "mode") == "file" then
+                        local ok_mv = os.rename(old_path, filepath)
+                        if ok_mv then
+                            self:logInfo("BookloreSync: migrated file", old_path, "->", filepath)
+                            if self.db and self.db.updateFilePath then
+                                self.db:updateFilePath(old_path, filepath)
+                            end
+                        else
+                            self:logWarn("BookloreSync: failed to migrate file", old_path, "->", filepath)
+                        end
+                        break
+                    end
+                end
+            end
+
             local already_exists = lfs.attributes(filepath, "mode") == "file"
 
             -- Update the dialog title to show current book progress.
@@ -5400,8 +5468,10 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                     if entry ~= "." and entry ~= ".." then
                         local fp = download_dir .. "/" .. entry
                         if lfs.attributes(fp, "mode") == "file" then
-                            local cached = self.db:getBookByFilePath(fp)
-                            local lid = cached and cached.book_id
+                            -- Parse the book ID directly from the filename stem
+                            -- (e.g. "My Book_42.epub" → 42).  Files that do not
+                            -- carry an ID suffix are left untouched.
+                            local lid = tonumber(entry:match("_(%d+)%.[^.]+$"))
                             if lid and not shelf_book_ids[lid] then
                                 if os.remove(fp) then
                                     deleted = deleted + 1
@@ -5486,6 +5556,7 @@ Falls back to "BookID_{id}.{extension}" when no usable title is available.
 function BookloreSync:_generateFilename(book)
     local extension = (book.extension or "epub"):lower()
     local ext_suffix = "." .. extension
+    local id_tag     = "_" .. tostring(book.id)
     local title = book.title
     if title and title ~= "" then
         -- Strip characters that are illegal on common filesystems (FAT32, NTFS, ext4)
@@ -5495,14 +5566,16 @@ function BookloreSync:_generateFilename(book)
             :gsub("^%s+", "")
             :gsub("%s+$", "")
         if safe ~= "" then
-            local max_stem = 150 - #ext_suffix
+            -- Reserve room for the "_id" tag so the total stays under 150 chars
+            local max_stem = 150 - #id_tag - #ext_suffix
             if #safe > max_stem then
                 safe = safe:sub(1, max_stem):gsub("%s+$", "")
             end
-            return safe .. ext_suffix
+            return safe .. id_tag .. ext_suffix
         end
     end
-    -- Fallback when title is absent or becomes empty after sanitization
+    -- Fallback when title is absent or becomes empty after sanitization.
+    -- "BookID_" already encodes the id so no extra tag is needed.
     return "BookID_" .. tostring(book.id) .. ext_suffix
 end
 
@@ -5539,6 +5612,16 @@ function BookloreSync:preDeleteHook(filepath)
             end
         else
             self:logInfo("BookloreSync: preDeleteHook - book not in cache")
+        end
+    end
+
+    -- Fallback: parse book ID from the "_id" tag embedded in the filename.
+    -- This works even after a DB reset or a naming-scheme switch.
+    if not book_id then
+        local fname = filepath:match("([^/\\]+)$") or filepath
+        book_id = tonumber(fname:match("_(%d+)%.[^.]+$"))
+        if book_id then
+            self:logInfo("BookloreSync: preDeleteHook - book_id from filename:", book_id)
         end
     end
 

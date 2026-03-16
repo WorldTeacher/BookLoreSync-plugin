@@ -3,7 +3,7 @@
 > **⚠️ Important Notice**
 >
 > This GitHub repository is a **public-facing mirror** of the main development repository.
->
+> The main branch is currently not being updated, as the mirror is refused due to invalid login data, working on a fix. Releases are built using pushed tags and will continue to work
 > **If you encounter issues or bugs:**
 > - You are welcome to create GitHub issues
 > - **You MUST mention `@WorldTeacher` in your issue** - GitHub notifications do not reach me

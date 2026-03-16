@@ -4,14 +4,35 @@ description = "Solutions to common problems with the BookLore Sync plugin."
 sort_by = "weight"
 weight = 40
 template = "section.html"
+
+[extra]
+hide_page_list = true
 +++
 
-# Troubleshooting
+<div class="section-cards">
 
-| Page | What it covers |
-|------|---------------|
-| [Common Issues](@/troubleshooting/common-issues.md) | Plugin not appearing, connection failures, sessions not syncing |
-| [Logs and Debugging](@/troubleshooting/logs-and-debugging.md) | Enabling file logging, reading KOReader logs, secure log capture |
-| [Database](@/troubleshooting/database.md) | Inspecting and resetting the local SQLite database |
+  <a class="section-card" href="common-issues/">
+    <div class="section-card__icon">🩺</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Common Issues</div>
+      <div class="section-card__desc">Solutions to the most frequently encountered problems.</div>
+    </div>
+  </a>
 
-If you cannot find a solution here, check the [GitHub issue tracker](https://github.com/WorldTeacher/BookLoreSync-plugin/issues) or open a new issue with the information described on the [Logs and Debugging](@/troubleshooting/logs-and-debugging.md) page.
+  <a class="section-card" href="logs-and-debugging/">
+    <div class="section-card__icon">📋</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Logs and Debugging</div>
+      <div class="section-card__desc">How to capture and read debug logs from the BookLore Sync plugin.</div>
+    </div>
+  </a>
+
+  <a class="section-card" href="database/">
+    <div class="section-card__icon">🗄️</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Database</div>
+      <div class="section-card__desc">How to inspect and reset the plugin's local SQLite database.</div>
+    </div>
+  </a>
+
+</div>

@@ -4,17 +4,43 @@ description = "Install and configure the BookLore Sync plugin for KOReader."
 sort_by = "weight"
 weight = 10
 template = "section.html"
+
+[extra]
+hide_page_list = true
 +++
 
-# Getting Started
+<div class="section-cards">
 
-This section walks you through everything you need to get BookLore Sync up and running on your e-reader.
+  <a class="section-card" href="introduction/">
+    <div class="section-card__icon">📖</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Introduction</div>
+      <div class="section-card__desc">What the BookLore Sync plugin does and what formats it supports.</div>
+    </div>
+  </a>
 
-## In this section
+  <a class="section-card" href="installation/">
+    <div class="section-card__icon">📦</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Installation</div>
+      <div class="section-card__desc">How to install the BookLore Sync plugin on your KOReader device.</div>
+    </div>
+  </a>
 
-1. [Introduction](@/getting-started/introduction.md) - what the plugin does and which formats it supports.
-2. [Installation](@/getting-started/installation.md) - copy the plugin to KOReader and verify it loads correctly.
-3. [Quick Start](@/getting-started/quick-start.md) - five steps to confirm your first session syncs successfully.
-4. [First Session Walkthrough](@/getting-started/first-session.md) - a detailed look at what happens under the hood when you open and close a book.
+  <a class="section-card" href="quick-start/">
+    <div class="section-card__icon">⚡</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Quick Start</div>
+      <div class="section-card__desc">Five steps to confirm your first reading session syncs to BookLore.</div>
+    </div>
+  </a>
 
-If you are new to the plugin, read these pages in order. The whole process takes about ten minutes.
+  <a class="section-card" href="first-session/">
+    <div class="section-card__icon">🔍</div>
+    <div class="section-card__body">
+      <div class="section-card__title">First Session Walkthrough</div>
+      <div class="section-card__desc">A detailed look at what happens under the hood when you open and close a book.</div>
+    </div>
+  </a>
+
+</div>

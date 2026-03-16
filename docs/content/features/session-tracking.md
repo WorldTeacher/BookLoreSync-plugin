@@ -192,3 +192,28 @@ DELETE /api/v1/books/{id}
 If the book's server ID is not yet known (e.g., it was never synced), or if the device is offline, the deletion is stored in the `pending_deletions` table and retried on the next sync.
 
 This keeps your BookLore library in sync with your device - books you remove locally are also removed from the server.
+
+---
+
+## SDR detection {#sdr-detection}
+
+KOReader stores per-book metadata (reading progress, highlights, bookmarks) in a sidecar directory with the `.sdr` extension. The plugin needs to know where this directory is so that it can read annotations from disk when live in-memory objects are unavailable (for example, on a deferred retry after a sync failure).
+
+### Detection on initial open
+
+When a book is opened for the first time, the plugin queries `DocSettings.getSidecarDir()` - the same function KOReader itself uses - to obtain the exact sidecar path for the current `document_metadata_folder` setting (`doc`, `dir`, or `hash` mode). This call is authoritative: it never does a disk scan or guesses a fallback path; it computes the correct location based on KOReader's current configuration.
+
+The resolved path is written to the `sdr_path` column of the `book_metadata` table. Any subsequent open of the same book skips the detection call entirely.
+
+### Database-backed lookup (skip on subsequent opens)
+
+Before attempting any sidecar detection, the plugin checks the database for a cached `sdr_path`:
+
+1. If a non-empty `sdr_path` is already stored, it is used immediately. **No disk access or `DocSettings` call is made.**
+2. If no path is cached, the detection runs once and the result is persisted.
+
+This means that after the first open, sidecar lookups are effectively free - a single SQL read rather than a filesystem call.
+
+### Why this matters for annotations and ratings
+
+When the plugin reads highlights or the KOReader star rating at sync time, it falls back to the on-disk sidecar only when live in-memory objects (the `ReaderAnnotation` module and `doc_settings`) are unavailable. Having the sidecar path pre-cached in the database ensures that fallback reads are reliable and fast, without re-running the detection logic each time.

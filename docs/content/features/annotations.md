@@ -112,11 +112,21 @@ Annotations are checked and uploaded after every valid reading session. Only ann
 
 This is the recommended strategy for most users - your annotations are always up to date on the server without any manual action.
 
+### Upload on suspend (sleep)
+
+In addition to the normal session-end trigger, annotations and bookmarks are **also queued when the device suspends** (goes to sleep), regardless of the upload strategy setting. This ensures that any highlights or notes added just before the screen turns off are not lost if the book is not explicitly closed.
+
+The plugin captures annotations at suspend time by reading directly from KOReader's in-memory `ReaderAnnotation` module. Because KOReader only flushes annotation data to the `.sdr` sidecar *after* the document is closed - not on suspend - reading from disk at that point would return stale or incomplete data. The in-memory read avoids this race condition entirely.
+
+> **Note:** The suspend path only queues annotations; it does not attempt a network upload on its own. If **Force push on suspend** is enabled (see [Sync Settings](@/configuration/session-tracking.md)), the pending queue will be uploaded at the same time.
+
 ### Upload on read complete
 
 Annotations are only uploaded when reading progress reaches **99% or more**. This sends all annotations for the book in one batch when you finish it, rather than incrementally throughout reading.
 
 Use this if you prefer not to sync partial highlights (e.g., you frequently highlight and then delete).
+
+> **Note:** Even with this strategy selected, annotations are still captured and queued at suspend time to prevent data loss. They are held locally until the 99% threshold is reached or a manual sync is triggered.
 
 ---
 
@@ -134,7 +144,7 @@ When bookmark sync is enabled, the plugin:
    ```
 4. Records the uploaded bookmarks in the `synced_bookmarks` deduplication table.
 
-Bookmark sync is triggered at the same time as annotation sync (after a qualifying reading session or at read complete, depending on your upload strategy setting).
+Bookmark sync is triggered at the same time as annotation sync (after a qualifying reading session, at read complete, or when the device suspends - whichever applies to your upload strategy setting).
 
 To enable bookmark sync, toggle on **Sync bookmarks** in:
 

@@ -1097,6 +1097,48 @@ function Database:cacheBook(file_path, file_hash, book_id)
     return self:saveBookCache(file_path, file_hash, book_id, nil, nil, nil, nil)
 end
 
+--[[--
+Update the file_path of an existing book_cache row.
+
+Used when a downloaded shelf book is renamed on disk (e.g. migration from the
+old naming scheme to the new `{stem}_{id}.{ext}` scheme) so the DB stays in
+sync with the filesystem.
+
+@param old_path string  The current file_path stored in the DB.
+@param new_path string  The new file_path to store.
+@return boolean  true on success, false on failure.
+--]]
+function Database:updateFilePath(old_path, new_path)
+    old_path = tostring(old_path or "")
+    new_path = tostring(new_path or "")
+    if old_path == "" or new_path == "" then
+        logger.warn("BookloreSync Database: updateFilePath called with empty path(s)")
+        return false
+    end
+
+    local stmt = self.conn:prepare([[
+        UPDATE book_cache
+        SET file_path = ?, updated_at = CAST(strftime('%s', 'now') AS INTEGER)
+        WHERE file_path = ?
+    ]])
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare updateFilePath statement:", self.conn:errmsg())
+        return false
+    end
+
+    stmt:bind(new_path, old_path)
+    local result = stmt:step()
+    stmt:close()
+
+    if result ~= SQ3.DONE and result ~= SQ3.OK then
+        logger.err("BookloreSync Database: updateFilePath failed:", self.conn:errmsg())
+        return false
+    end
+
+    logger.dbg("BookloreSync Database: updateFilePath", old_path, "->", new_path)
+    return true
+end
+
 function Database:updateBookId(file_hash, book_id)
     if book_id ~= nil then
         book_id = tonumber(book_id)

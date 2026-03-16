@@ -4,19 +4,75 @@ description = "In-depth documentation for all BookLore Sync plugin features."
 sort_by = "weight"
 weight = 30
 template = "section.html"
+
+[extra]
+hide_page_list = true
 +++
 
-# Features
+<div class="section-cards">
 
-| Feature | Description |
-|---------|-------------|
-| [Session Tracking](@/features/session-tracking.md) | How reading sessions are detected, validated, and stored; per-book tracking toggle; session feedback; book deletion sync |
-| [Book ID Resolution](@/features/book-id-resolution.md) | How the plugin identifies which book in your library corresponds to the file you are reading, including the ISBN fallback and how to prepare files |
-| [Offline Support](@/features/offline-support.md) | Local queue, retry logic, batch upload, WiFi prompt, book deletion queue |
-| [Ratings](@/features/ratings.md) | Syncing book ratings from KOReader to BookLore and Hardcover |
-| [Annotations](@/features/annotations.md) | Syncing highlights, notes, and bookmarks; colour mapping; EPUB CFI; PDF mock CFI |
-| [Shelf Sync](@/features/shelf-sync.md) | Downloading books from a BookLore shelf directly to your device |
-| [Auto-Update](@/features/auto-update.md) | Keeping the plugin up to date from within KOReader |
-| [Gestures and Buttons](@/features/gestures.md) | Assigning plugin actions to gestures, tap zones, and hardware buttons |
+  <a class="section-card" href="session-tracking/">
+    <div class="section-card__icon">⏱️</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Session Tracking</div>
+      <div class="section-card__desc">How reading sessions are detected, validated, and recorded.</div>
+    </div>
+  </a>
 
-For configuration of these features, see the [Configuration](@/configuration/_index.md) section.
+  <a class="section-card" href="book-id-resolution/">
+    <div class="section-card__icon">🔎</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Book ID Resolution</div>
+      <div class="section-card__desc">How the plugin identifies which book in your BookLore library corresponds to the file you are reading, including the ISBN fallback.</div>
+    </div>
+  </a>
+
+  <a class="section-card" href="offline-support/">
+    <div class="section-card__icon">📶</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Offline Support</div>
+      <div class="section-card__desc">How the plugin handles reading sessions when no network connection is available.</div>
+    </div>
+  </a>
+
+  <a class="section-card" href="ratings/">
+    <div class="section-card__icon">⭐</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Ratings</div>
+      <div class="section-card__desc">Syncing book ratings from KOReader to BookLore and Hardcover.</div>
+    </div>
+  </a>
+
+  <a class="section-card" href="annotations/">
+    <div class="section-card__icon">✏️</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Annotations</div>
+      <div class="section-card__desc">Syncing highlights and notes from KOReader to BookLore.</div>
+    </div>
+  </a>
+
+  <a class="section-card" href="shelf-sync/">
+    <div class="section-card__icon">📚</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Shelf Sync</div>
+      <div class="section-card__desc">Downloading books from a BookLore shelf directly to your device, and keeping the shelf in sync when books are deleted locally.</div>
+    </div>
+  </a>
+
+  <a class="section-card" href="auto-update/">
+    <div class="section-card__icon">🔄</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Auto-Update</div>
+      <div class="section-card__desc">How the plugin keeps itself up to date from within KOReader.</div>
+    </div>
+  </a>
+
+  <a class="section-card" href="gestures/">
+    <div class="section-card__icon">👆</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Gestures and Buttons</div>
+      <div class="section-card__desc">How to assign BookLore Sync actions to gestures, tap zones, and hardware buttons in KOReader.</div>
+    </div>
+  </a>
+
+</div>

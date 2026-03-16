@@ -88,6 +88,8 @@ If the device is offline at the time of deletion, the removal is queued and retr
 3. Optionally change the **Download directory** (see [Download directory](#download-directory) below).
 4. Optionally enable **Auto-sync shelf on wake** to download books automatically 15 seconds after the device wakes from suspend, once Wi-Fi is connected.
 5. Optionally enable **Delete removed shelf books** to remove local files when a book is no longer on the shelf.
+6. Optionally enable **Use original server filename** (default: **on**) to save downloaded books using the server's own filename instead of deriving it from the book title.
+7. Optionally enable **Also delete sidecar (.sdr) on removal** to also remove the KOReader reading-progress folder when a book is deleted. This option is only active when **Delete removed shelf books** is also enabled.
 
 ---
 
@@ -109,12 +111,21 @@ A **Reset** button in that dialog restores the automatically detected path.
 
 ### Filenames
 
-Downloaded books are saved with a filename derived from the book's **title** in BookLore:
+Every downloaded filename has the BookLore **book ID appended to the stem** (e.g., `My Book_42.epub`). This tag is embedded regardless of the filename mode chosen below, and it is what the plugin uses to identify previously-downloaded files during subsequent syncs - so renaming or moving a file without preserving the `_<id>` suffix will cause it to be downloaded again.
 
-- Filesystem-unsafe characters (`/ \ : * ? " < > |`) are stripped.
+The plugin supports two filename modes, selectable via **Tools → BookLore Sync → Shelf Sync → Use original server filename**:
+
+| Mode | How the filename is formed | Default? |
+|------|---------------------------|----------|
+| **Original server filename** (enabled) | Takes the filename stored on the BookLore server (the primary file's original name), strips its extension, appends `_<id>`, and re-adds the extension. | ✓ Yes |
+| **Title-derived** (disabled) | Sanitises the book title from BookLore metadata, appends `_<id>`, and adds the extension. | No |
+
+In both modes:
+
+- Filesystem-unsafe characters (`/ \ : * ? " < > |`) are stripped from the stem.
 - Consecutive whitespace is collapsed.
-- The title stem is truncated to 150 characters (including the file extension) if necessary.
-- If no usable title is available, the filename falls back to `BookID_<id>.<extension>`.
+- The stem is truncated so the total filename (including the `_<id>` suffix and extension) stays under 150 characters.
+- If neither the original filename nor the title produces a usable stem, the filename falls back to `BookID_<id>.<extension>`.
 
 ---
 
@@ -172,6 +183,14 @@ The shelf name defaults to `KOReader` and can be changed in settings. Changing t
 
 ---
 
+## SDR sidecar detection
+
+When a book is downloaded via shelf sync, the plugin records its [SDR sidecar path](@/features/session-tracking.md#sdr-detection) in the local database as soon as the file is first opened. This is the same database-backed detection used by the session tracker.
+
+When **Delete removed shelf books** is enabled and a book is deleted during sync, the plugin also deletes all matching `.sdr` sidecar directories (using the stored path plus a disk scan for all three KOReader sidecar locations: beside the file, in the `metadata` folder, and the hash-named folder), provided **Also delete sidecar (.sdr) on removal** is also enabled.
+
+---
+
 ## Credits
 
-Shelf sync was originally contributed by [cporcellijr/BookLoreSync-plugin](https://github.com/cporcellijr/BookLoreSync-plugin) and has since been significantly reworked with a three-phase subprocess architecture, title-based filenames, a two-way deletion flow, and a cancellable progress dialog.
+Shelf sync was originally contributed by [cporcellijr/BookLoreSync-plugin](https://github.com/cporcellijr/BookLoreSync-plugin) and has since been significantly reworked with a three-phase subprocess architecture, ID-tagged filenames with original-filename and title-derived modes, improved SDR sidecar detection and cleanup, a two-way deletion flow, and a cancellable progress dialog.

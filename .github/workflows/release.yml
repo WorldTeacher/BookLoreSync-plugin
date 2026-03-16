@@ -24,6 +24,15 @@ jobs:
           chmod +x generate-version.sh
           ./generate-version.sh
 
+      - name: Compile gettext translations
+        run: |
+          sudo apt-get install -y gettext
+          find bookloresync.koplugin/locale -name "*.po" | while read po; do
+            mo="${po%.po}.mo"
+            echo "Compiling $po -> $mo"
+            msgfmt "$po" -o "$mo"
+          done
+
       - name: Create plugin archive
         run: |
           zip -r bookloresync.koplugin.zip bookloresync.koplugin/

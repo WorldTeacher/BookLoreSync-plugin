@@ -42,6 +42,205 @@
 * new ci ([23c8a9f](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/23c8a9fb5c6169d2f68188859c08a9b4cc1f1789))
 * new ci ([529250f](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/529250f98668d0bcd581205959dd8e48dc890674))
 * **pop-up:** show synced / skipped for other areas ([e1b03a8](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/e1b03a828d104200ea76493684adb3256c63139e))
+* **pre-commit:** remove MAX_LINE_LENGTH environment variable ([59095c9](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/59095c97ee5e53f9a5728f776242437b4464cebd))
+* **rating:** delay keyboard display in rating dialog to prevent crashes on Linux ([89188f4](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/89188f4147ca5cec86c04a4a5af6ef2150fab455))
+* **reading-session:** correct page retrieval method for EPUB format ([97adae7](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/97adae7891d5745a94f910da5c392982f750b16d))
+* **settings:** change upload strategy for notes ([8e7bbe0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/8e7bbe0b262b26b2b5c6f238e95febe6025aa39a))
+* **shelf-sync:** add sdr deletion and improved sidecar detection ([da9b94a](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/da9b94a7a1f5fe3f3d1f2c59472d6fdfdce777e5))
+* **shelf-sync:** enhance filename generation and migration handling for shelf books ([7db0fd4](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/7db0fd4bee718871dbaac4893e336df660930fc0))
+* **shelf-sync:** read KOReader home_dir for download dir detection ([3c43ac8](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/3c43ac8825f05646ad22af54e01dca0b859ae65f))
+* **shelf:** add option to use original server filename for downloaded books ([cf54bc0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/cf54bc00e863adf3f4681506c80fecb9c14533c0))
+* **sidecar:** fix and enhance sdr detection ([bdff9c5](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/bdff9c58c716e546841e56ee21254095cc02a88b))
+* **sync:** capture bookmarks and annotations on device suspend ([c75c7b0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/c75c7b05f1bd2704e4b3d97c0a3e3bd5fafc6148))
+* **sync:** enhance language loading and improve pending items handling ([0a93ed7](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/0a93ed7ea50e683614940158074ba47029aca856))
+* **sync:** fallback to individual upload on 403 Forbidden ([33e3f50](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/33e3f500e530002c614ae4474c6a1441013b93c8))
+* **sync:** handle nil progress values in session processing and batch uploads ([59f37ed](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/59f37ede5b195180aa0b9d8538565088cf3bc563))
+* **sync:** improve pending items count calculation and update sync messages ([8a56749](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/8a567499805f3f506527fa983ceec3df4181f928))
+* **sync:** improve shelf book synchronization and filename generation ([375b6ab](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/375b6abe51ed0d5711ccb46d16cab2f2f5904004)), closes [#23](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/issues/23)
+* **sync:** improve user feedback in sync dialog for missing spine ([ce3f7bf](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/ce3f7bf00a3e3d4921267968dc1534976214c194))
+* **sync:** mark annotations as synced when CFI cannot be built ([c8e0025](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/c8e002592d9afc0cf86cfaa12db91bb044b28303))
+* tag version in github ([8159028](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/81590283895dd7999938f8e761be840a2cdebc7b))
+* **update, log:** change path handling ([94e3541](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/94e3541ea5f39644ad9d9a90e2d709712b560165))
+* **updater:** handle HTTP redirects manually for KOReader compatibility ([6dfac88](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/6dfac88b4d5f44b3bb15f5f216df01cf9c4b94b6))
+* **updater:** handle HTTP redirects manually for KOReader compatibility ([54a4b54](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/54a4b54aaed747f0386cf12f15b79ac09f7addf0))
+* **updater:** remove duplicate restart confirmation dialog ([76e458d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/76e458dc734aa0e62aedd69ab724936580ae42f1))
+* **updater:** remove duplicate restart confirmation dialog ([42f1ee1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/42f1ee1af1acb091cca40f7996a539617308dc02))
+* **updater:** use correct lfs library path for KOReader ([a577d43](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a577d438dc78d0ad338b5b38732e81a460108eae))
+* **updater:** use correct lfs library path for KOReader ([672475d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/672475df681d1f3d6940692a63589fbd590a1745))
+
+
+### Features
+
+* add auto-updater system with GitHub integration ([33ad50a](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/33ad50a61a85c9c12652c4d17677f039daf1b74e))
+* add auto-updater system with GitHub integration ([a64659d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a64659d85c4135d2dbddcb0a0ece6fabf16e905f))
+* add file manager hold menu items (sync annotations, match book, sync rating) ([0d2a736](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/0d2a7363536b719cc11405dc723b01018f3c4242))
+* add file manager hold menu items (sync annotations, match book, sync rating) ([38e424c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/38e424c80b4d88b749e23565a9a207515c5221ec))
+* add Manual Matching placeholder to Import Reading History menu ([33b136e](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/33b136ee36824d9428683ebf1e7f5b337dfea93b))
+* **annotations:** add 'Both' destination and PDF mock CFI support ([3efbbeb](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/3efbbeb4e6bbf7509db1b66982e14f5b5e038b9f))
+* **api:** add annotation support ([7f3328a](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/7f3328a4c7cb9adb2de5ca97c6c1a2a730d186cb))
+* **api:** add batch session upload endpoint with intelligent batching ([d951ded](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d951ded34253b078bd34cbbee81c4e7718766b89))
+* **api:** add ISBN lookup functionality to retrieve book ID ([bb96d12](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/bb96d12079d17cb03d4c4c127ba490a6d84bb4cf))
+* **api:** add submitRating function for personal book ratings ([53eb9f5](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/53eb9f57113790b85bd180a47af770e51be776ab))
+* **bookmarks:** calculate bookmark cfi ([960c57c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/960c57ca168e90152ed70071bf9cc7ea129f75dd))
+* **bookmarks:** sync bookmarks to Booklore via api/v1/bookmarks ([79353eb](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/79353eb9a5f0b86b99a361afa51fc14f8ce77db8))
+* **database:** add annotation sync helpers for KOReader ([16c7ae8](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/16c7ae85698613b0f10a6a7b503e1b1c5f5731bb))
+* **database:** add hardcover_id column to book_cache for rating sync ([9a0639c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/9a0639c5434d496918eecec34305c8f8d33692f0))
+* **database:** update schema to version 9 and add book metadata sync functionality ([1bcd707](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/1bcd707c75ce65a18f67a99fd453b2f36a5c6921))
+* **db:** add hardcover_id column to book_cache (migration 16) ([01f6424](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/01f64246ea23441c474450d47a9733f39dd88523))
+* **deletion:** notify Booklore when books are deleted from file manager ([594865c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/594865c40374160f43e5485ed115c08f6ea7c544))
+* **docs:** add documentation and zola support ([60013cf](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/60013cffdbfeb1df2e5aae76ebfbd342ccbbad24))
+* **docs:** add versioned docs with version selector ([12cae57](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/12cae57a58317febe1561ae014025a128203f5af))
+* **hardcover:** add debug menu with 'Request book metadata from BookLore' action ([ccadf46](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/ccadf463f65251ef135b9d932d79b8970271603f))
+* **hardcover:** implement Hardcover API client and integrate with BookloreSync for rating and book search ([cc20f35](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/cc20f3502a9a6c3b754d018bf49e98e67230fc93))
+* **isbn:** extract ISBN from KOReader doc settings and use as fallback for book lookup ([1ac7279](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/1ac72799741dcc09ea77c09d031620e55e72c92b))
+* log obfuscation ([a3f28e6](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a3f28e6c6dd6f25b69a8275ff7ba99baeb845d8d))
+* **logging:** enhance file logging with initialization and closure handling ([b6510e5](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/b6510e56e69209b1c0501bfccb6cac69b5c78fe9))
+* **logging:** implement file-based logging with daily rotation and automatic cleanup ([6ce67cc](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/6ce67ccd60c4d3a52ba85d41d978dc3a8367660f))
+* **metadata:** add metadata parser ([17cea86](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/17cea864364f453939482183ae745c2a56648eaf))
+* **metadata:** enhance bookmark extraction from DocSettings and improve filtering logic ([a6f7e60](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a6f7e60a1beb73691397a8cdb5ad82435f66745b))
+* **notes:** add  color mapping, cfi generation, sync  for notes ([d044964](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d0449645bec39449ba8eabdb48975f01b4f30089))
+* probe by-hash endpoint in test connection ([f1f5a70](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/f1f5a7034feed4239cc04535f93edaea0556bf1f))
+* **rating:** enhance rating sync with live in-memory support and retry mechanism ([a31c8a0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a31c8a090166192960041a7069187f4a42bd51a3))
+* **rating:** respect user settings for rating sync and improve handling of deferred ratings ([439d5df](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/439d5dfd311ce8c885a3cea71839d009a5f2cbef))
+* **release:** trigger major version bump [release] ([050bd81](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/050bd819ddd7ef0814caa2fd0e660b570f7fe9b7))
+* **resume:** add 5min cooldown, deferred wake sync, onNetworkConnected ([8502d8a](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/8502d8acd5234aaae12ee085ae440e049ced2557))
+* **sessions:** add support for pdf and archive-type formats ([0ee7f07](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/0ee7f071ba59b01301b3162b91ca41cf5efce844))
+* **settings:** add hardcover token configuration and rating sync options ([e1271fd](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/e1271fde811e052c00caf78625535fbec4b21dfa))
+* **settings:** add new sync menu for ratings and notes ([aeaa2cf](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/aeaa2cf374ed34d7e20f6e7e81b3c950d9e43ba6))
+* **settings:** add settiings export for debug ([a84304c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a84304ca57038e7adebd42deeeca84c3b2bfda05))
+* **settings:** rework clear cache to select entries to be cleared on category level ([391f2c7](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/391f2c7583e6f0a2f076a10061d6b41420207d43))
+* **settings:** sanitize server URL input and enhance connection test messages ([126f93e](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/126f93e8347f3967ddef6837a434f445680fe2b0))
+* **shelf-sync:** pull books from Booklore shelf with bidirectional sync ([cd7608f](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/cd7608f93e98670ba01bb6a2dd7df035a89b61ea))
+* **shelf-sync:** smart download dir detection + shelf name/dir config UI ([13e739d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/13e739db89ae25e960295548b8ba7780a50974d5))
+* **skip-book:** per-book tracking toggle via file manager long-press ([3932d21](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/3932d21aa138dfccc80996344590464866835338))
+* **sync:** add bookmarks sync configuration and toggle functionality ([0db4e85](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/0db4e85bc114fcf4b5754b23d76fd77269132e2e))
+* **sync:** add bookmarks sync functionality and update related methods; add check for existing annotations ([a1d7ca8](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a1d7ca8a24d2434de7f64d454f98425f495385f0))
+* **sync:** enhance book synchronization with interactive matching and improved UI dialogs ([da1ff94](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/da1ff94a52feab37d2e1908362a87233a2a18abf))
+* **sync:** enhance session details view and improve pending uploads handling ([24130e3](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/24130e34f0fea73c08897878a5d30e2e8a1741ac))
+* **sync:** enhance shelf synchronization with improved subprocess handling and user feedback ([c08ef1c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/c08ef1ceed73b413ec12164f648fc1c3522f52b0))
+* **sync:** implement hardcover rating sync with token validation and fallback search ([d7dca74](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d7dca74563229eeddd96986e0b81bee4d45bc213))
+* **test:** Add unit tests for BookloreSync and Updater helper functions ([1a116e2](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/1a116e273007a2df68aa163b9469f785195ec74a))
+* **translation:** add translation files ([844fcb4](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/844fcb4669ebb3bfe7245c026032e046f819aeba))
+* **translation:** convert every string to be translateable ([9660080](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/9660080c5c7e4216c79c120e81d8a6949b4cfbc4))
+* **ui:** Merge branch 'skip-book' ([a55512c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a55512c9b38ec9e3069f56c97ccce368d583ee2d))
+* **ui:** register file manager hold menu actions for syncing annotations, matching book, and syncing rating ([57954e3](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/57954e3d386a63f2eb4900ff659e6244bf781fe5))
+* **wifi:** add user confirmation for enabling WiFi before syncing ([b2bd648](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/b2bd648f81e73c4ef24e8fd92a9085a891b95f93))
+
+
+### BREAKING CHANGES
+
+* **release:** trigger a major release bump.
+* Database schema version 7 -> 8, requires migration
+
+New Features:
+- Auto-update check on startup (configurable)
+- Manual update check with changelog preview
+- One-tap update installation
+- Automatic version backup before update
+- Rollback support if update fails
+- Update cache to respect GitHub API rate limits
+- Download size display in confirmation dialog
+- Progress tracking during download
+- Restart prompt after successful update
+
+Technical Details:
+- booklore_updater.lua: ~500 lines, 734 total with comments
+- main.lua: +368 lines (7 new functions)
+- booklore_database.lua: +93 lines (Migration 8 + cache functions)
+- features.md: Updated to 119 total features (88.2% implemented)
+- All Lua syntax checks passed
+- All version comparison tests passed (9/9)
+- GitHub API integration verified
+- Download mechanism validated
+
+Files Added:
+- bookloresync.koplugin/booklore_updater.lua
+- AUTO_UPDATER_TESTING.md (comprehensive test checklist)
+- test_updater.lua (standalone version comparison tests)
+- features.md (feature tracking document)
+
+Files Modified:
+- bookloresync.koplugin/main.lua (new About & Updates menu)
+- bookloresync.koplugin/booklore_database.lua (Migration 8)
+- README.md (auto-update documentation)
+* Database schema version 7 -> 8, requires migration
+
+New Features:
+- Auto-update check on startup (configurable)
+- Manual update check with changelog preview
+- One-tap update installation
+- Automatic version backup before update
+- Rollback support if update fails
+- Update cache to respect GitHub API rate limits
+- Download size display in confirmation dialog
+- Progress tracking during download
+- Restart prompt after successful update
+
+Technical Details:
+- booklore_updater.lua: ~500 lines, 734 total with comments
+- main.lua: +368 lines (7 new functions)
+- booklore_database.lua: +93 lines (Migration 8 + cache functions)
+- features.md: Updated to 119 total features (88.2% implemented)
+- All Lua syntax checks passed
+- All version comparison tests passed (9/9)
+- GitHub API integration verified
+- Download mechanism validated
+
+Files Added:
+- bookloresync.koplugin/booklore_updater.lua
+- AUTO_UPDATER_TESTING.md (comprehensive test checklist)
+- test_updater.lua (standalone version comparison tests)
+- features.md (feature tracking document)
+
+Files Modified:
+- bookloresync.koplugin/main.lua (new About & Updates menu)
+- bookloresync.koplugin/booklore_database.lua (Migration 8)
+- README.md (auto-update documentation)
+
+# 1.0.0 (2026-03-16)
+
+
+### Bug Fixes
+
+* **.gitignore:** add missing patterns for gettext translations and new file types ([fdf70ad](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/fdf70add23bad16b3e4828285c31dfc988a12b20))
+* **annotations:** save to both now actually uploads to both locations ([9c5bf0f](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/9c5bf0f2aa6ff36c23ab4822a3c68159585536a8))
+* another ci ([a02981c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a02981cc51775781dcd0f97542c7da42246256da))
+* **api:** improve error message formatting in extractErrorMessage function [release] ([5c8db41](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/5c8db41d5b5423ba71b5cee7a249dcd9ac724b80))
+* **changelog:** change changelog match ([aabf190](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/aabf190123fcbf000253844f13428197576f60e0))
+* ci file ([7befd0c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/7befd0c9e2258bc64cc7eba3fd30b2b65f43f7c2))
+* ci now allows addition? ([b279e43](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/b279e437d47f43d54ee82550b876f078129acaf5))
+* **ci:** add lua-tests stage to CI pipeline for improved testing coverage ([5c11463](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/5c1146383811dd6f5eb54cc8e6356f02e7febf1d))
+* **ci:** add missing stages to CI pipeline configuration ([6fe8df6](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/6fe8df6d95e4301582a390dca75c15f5236671b9))
+* **ci:** add submodul handling ([eaecd0d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/eaecd0dd3c1d9eea0941206d613189d5ec62fb62))
+* **ci:** add workspace dir for zola ([f328261](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/f3282619530feece35f1c761e1a28ce2742bbf0c))
+* **ci:** change pipeline to always run ([95bc959](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/95bc959996755df7d3cb3f52af39da4e63ede8af))
+* **ci:** comment out unused butler configuration in CI pipeline ([b955701](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/b95570191d62a7a9a01aa0b0721458452e2b4f0e))
+* **ci:** remove unused pipeline stages from configuration ([0a3afb1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/0a3afb176e178802b78a4e9de33a4c1d0345dc70))
+* **ci:** rename lua-tests to lua-check and update testing commands ([b85629a](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/b85629a0954ab459dfa1015373788f959b472fb9))
+* **ci:** restore butler configuration and remove unused lua-check stage ([9865dcf](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/9865dcf168faa47e886acc969960ef50b5dbf159))
+* **ci:** streamline commit-analyzer configuration in release setup [release] ([c9f0f8d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/c9f0f8d9dc0ed022e645411e3a7d22cd9869459e))
+* **ci:** update butler rules to ensure proper execution based on GITLAB_TOKEN ([7635874](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/76358746a6ce73b92545cde41b84fa8607e6668e))
+* **ci:** update lua-check to use luajit and adjust script for compatibility ([e340146](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/e340146e85c514acc416175558c55279e80c191c))
+* **database:** improve error handling in setBookTracking and isBookTrackingEnabled functions ([24813d0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/24813d000389b36513784beaa0f658955ccc81de))
+* **database:** improve journal mode handling for better reliability ([bd55a63](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/bd55a63f6b21b69326c89b3bfbff3bfe7a7a4720))
+* **database:** update schema version and relax constraints for pending annotations and ratings ([78719bf](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/78719bfef347c0b77a098b1e1c7c9cd1b8f239ec))
+* **docs:** standardize punctuation in documentation for clarity ([3fb2f1e](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/3fb2f1e2b51cff61fa42c508da73785fb8032b77))
+* **documentation:** add sidebar template with table of contents, remove version picker ([cdf3ab2](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/cdf3ab23993dc6c65e54b283b1a106ea151fa6d8))
+* **gestures:** sync now gesture also asks for wifi to be enabled ([b9e56ff](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/b9e56ff1422b37a8dc091ae52ec42b874ba365a2))
+* **hardcover:** use self.server_url instead of self.booklore_url in fetchAndStoreHardcoverIds ([82128a1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/82128a1f84e9acfac0417cca714fb879d71ca821))
+* **isbn:** update ISBN lookup to use searchBooksByIsbn and handle exact match scoring ([9181ffd](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/9181ffdc3d353497d6fbb8177809ebc6b307bc88))
+* **logging:** enhance logging for batch upload sessions with book ID details ([99d153b](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/99d153b94741bb43234e40db14661ef1518d7d89))
+* **main:** re-remove extended_sync ([2eba5f2](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/2eba5f2eafc7a234d3f3695137ab2aec71d7f243))
+* **match:** show popup when hash lookup finds no match in Booklore [release] ([db8488a](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/db8488aea0547b12fc76fd1606774da6e2036af1))
+* **menu:** add function to integrate items into the main menu ([6e75110](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/6e751105da28a962b3cd8af5a7225c7c549d54d0))
+* **menu:** keep menu open when input dialogs are shown ([ea90728](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/ea907289e7d3abc18a25f3574130a5bde7e8322e))
+* **menu:** update menu item text for fetching Hardcover Book IDs ([a9f1087](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a9f1087a36a7f168aced1248ff805515c5e8f601))
+* **menu:** use text_func instead of text for dynamic pending count ([2df8e5d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/2df8e5de99def2b33a56fdd0d5aec773dd64a868))
+* **network:** add missing options ([ae1c624](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/ae1c62437425fb5d9cbbde123ead1b990f626909))
+* **network:** fix bug in ask to enable wifi, fixes crash related to networking by using networkmanager ([9061c27](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/9061c27b74685d578eea5e1654f07fae87ccfa12)), closes [#18](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/issues/18) [#25](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/issues/25)
+* new ci ([23c8a9f](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/23c8a9fb5c6169d2f68188859c08a9b4cc1f1789))
+* new ci ([529250f](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/529250f98668d0bcd581205959dd8e48dc890674))
+* **pop-up:** show synced / skipped for other areas ([e1b03a8](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/e1b03a828d104200ea76493684adb3256c63139e))
 * **rating:** delay keyboard display in rating dialog to prevent crashes on Linux ([89188f4](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/89188f4147ca5cec86c04a4a5af6ef2150fab455))
 * **reading-session:** correct page retrieval method for EPUB format ([97adae7](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/97adae7891d5745a94f910da5c392982f750b16d))
 * **settings:** change upload strategy for notes ([8e7bbe0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/8e7bbe0b262b26b2b5c6f238e95febe6025aa39a))

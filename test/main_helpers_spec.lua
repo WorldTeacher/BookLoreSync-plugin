@@ -47,7 +47,7 @@ describe("BookloreSync helper methods", function()
   end)
 
   it("builds deterministic download filenames", function()
-    -- Fallback (no title): BookID_{id}.ext — ID already embedded, no extra tag
+    -- Fallback (no title): BookID_{id}.ext - ID already embedded, no extra tag
     assert.are.equal("BookID_5.epub", plugin:_generateFilename({ id = 5, extension = "EPUB" }))
     assert.are.equal("BookID_7.epub", plugin:_generateFilename({ id = 7 }))
     -- Title present: "{safe_title}_{id}.ext"

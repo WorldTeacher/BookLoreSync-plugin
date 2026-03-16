@@ -61,6 +61,8 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 | `download_dir` | string | *(auto)* | Local directory where downloaded books are saved; resolved from KOReader's `home_dir` setting, then device default, then known platform paths (`/mnt/onboard/Books`, `/sdcard/Books`). Always a `Books` subdirectory. |
 | `auto_sync_shelf_on_resume` | boolean | `false` | Automatically run shelf sync 15 seconds after the device wakes from suspend, once Wi-Fi is connected |
 | `delete_removed_shelf_books` | boolean | `false` | Delete local book files when they are removed from the shelf |
+| `shelf_use_original_filename` | boolean | `true` | Save downloaded books using the server's original filename (stem + `_<id>`) instead of deriving the name from the book title |
+| `delete_sdr_on_book_delete` | boolean | `false` | When deleting a shelf book, also delete its `.sdr` sidecar directory. Only applies when `delete_removed_shelf_books` is also `true` |
 
 ---
 

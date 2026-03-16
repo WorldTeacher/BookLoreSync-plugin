@@ -50,6 +50,7 @@ Beyond session tracking, the plugin also supports:
 | Supported formats: EPUB, PDF, CBZ, CBR | Fully implemented |
 | Manual sync mode | Fully implemented |
 | SQLite local database with migrations | Fully implemented |
+| UI translation support | Initial support (German included; translations not yet fully vetted) |
 
 ---
 

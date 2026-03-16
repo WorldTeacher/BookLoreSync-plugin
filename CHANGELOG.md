@@ -1,3 +1,10 @@
+## [3.8.3](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.8.2...3.8.3) (2026-03-16)
+
+
+### Bug Fixes
+
+* **release:** correct plugin archive creation path in workflow ([fc82eb3](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/fc82eb3283f74c9698b39d477804c309401a32ef))
+
 # 1.0.0 (2026-03-16)
 
 

@@ -534,23 +534,14 @@ function BookloreSync:onToggleBookloreSync()
 end
 
 function BookloreSync:onSyncBooklorePending()
-    local pending_count = 0
-    if self.db then
-        local sessions    = tonumber(self.db:getPendingSessionCount())    or 0
-        local annotations = tonumber(self.db:getPendingAnnotationCount()) or 0
-        local ratings     = tonumber(self.db:getPendingRatingCount())     or 0
-        local bookmarks   = tonumber(self.db:getPendingBookmarkCount())   or 0
-        pending_count = sessions + annotations + ratings + bookmarks
-    end
-
+    local sessions    = tonumber(self.db and self.db:getPendingSessionCount())    or 0
+    local annotations = tonumber(self.db and self.db:getPendingAnnotationCount()) or 0
+    local ratings     = tonumber(self.db and self.db:getPendingRatingCount())     or 0
+    local bookmarks   = tonumber(self.db and self.db:getPendingBookmarkCount())   or 0
+    local pending_count = sessions + annotations + ratings + bookmarks
     if pending_count > 0 and self.is_enabled then
         self:_requestWifi(_("sync pending items"), function()
             self:syncPendingSessions()
-        end, function()
-            UIManager:show(InfoMessage:new{
-                text = _("WiFi not enabled - pending items remain queued"),
-                timeout = 2,
-            })
         end)
     else
         if pending_count == 0 then
@@ -5272,14 +5263,14 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             local book_id = tonumber(book.id)
             if not book_id then goto book_continue end
 
+            shelf_book_ids[book_id] = true
+
             if not book.extension or book.extension == "" then
                 self:logWarn("BookloreSync: skipping book", book_id,
                     "- extension unknown (bookType and originalFilename both absent)")
                 errors = errors + 1
                 goto book_continue
             end
-
-            shelf_book_ids[book_id] = true
 
             local filename = genFilename(book)
             local filepath = download_dir .. "/" .. filename

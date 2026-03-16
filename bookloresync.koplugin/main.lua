@@ -158,7 +158,7 @@ function BookloreSync:init()
         local f = io.open(mo_path, "r")
         if f then
             f:close()
-            gettext.loadMO(mo_path)
+            if gettext.loadMO then gettext.loadMO(mo_path) end
         else
             -- Try short language code (e.g. "de" from "de_DE")
             local short_lang = lang:match("^(%a+)")
@@ -167,7 +167,7 @@ function BookloreSync:init()
                 f = io.open(mo_path, "r")
                 if f then
                     f:close()
-                    gettext.loadMO(mo_path)
+                    if gettext.loadMO then gettext.loadMO(mo_path) end
                 end
             end
         end
@@ -542,6 +542,11 @@ function BookloreSync:onSyncBooklorePending()
     if pending_count > 0 and self.is_enabled then
         self:_requestWifi(_("sync pending items"), function()
             self:syncPendingSessions()
+        end, function()
+            UIManager:show(InfoMessage:new{
+                text = _("WiFi not enabled - pending items remain queued"),
+                timeout = 2,
+            })
         end)
     else
         if pending_count == 0 then
@@ -4469,9 +4474,9 @@ function BookloreSync:onSuspend()
                 if strategy == "on_session" then
                     self:logInfo("BookloreSync: Suspend - queuing annotations")
                     self:syncHighlightsAndNotes(doc_path, book_id, open_doc, live_settings, live_annotations)
+                    self:logInfo("BookloreSync: Suspend - queuing bookmarks")
+                    self:syncBookmarks(doc_path, book_id, open_doc, live_settings, live_bookmarks)
                 end
-                self:logInfo("BookloreSync: Suspend - queuing bookmarks")
-                self:syncBookmarks(doc_path, book_id, open_doc, live_settings, live_bookmarks)
             end
         end
     end
@@ -5289,6 +5294,11 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                     :gsub("%s+", " ")
                     :gsub("^%s+", "")
                     :gsub("%s+$", "") or ""
+                -- Apply the same 150-char limit the old scheme used (no id_tag, just ext_suffix)
+                local old_max_stem = 150 - #ext_suffix
+                if #old_safe_title > old_max_stem then
+                    old_safe_title = old_safe_title:sub(1, old_max_stem):gsub("%s+$", "")
+                end
                 -- Candidate 2: sanitized original_filename stem without id tag
                 local orig_stem = (book.original_filename or ""):match("^(.+)%.[^.]+$")
                                or book.original_filename or ""
@@ -5297,6 +5307,9 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                     :gsub("%s+", " ")
                     :gsub("^%s+", "")
                     :gsub("%s+$", "")
+                if #old_safe_orig > old_max_stem then
+                    old_safe_orig = old_safe_orig:sub(1, old_max_stem):gsub("%s+$", "")
+                end
                 local candidates = {}
                 if old_safe_title ~= "" then
                     table.insert(candidates, download_dir .. "/" .. old_safe_title .. ext_suffix)
@@ -5459,10 +5472,12 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                     if entry ~= "." and entry ~= ".." then
                         local fp = download_dir .. "/" .. entry
                         if lfs.attributes(fp, "mode") == "file" then
-                            -- Parse the book ID directly from the filename stem
-                            -- (e.g. "My Book_42.epub" → 42).  Files that do not
-                            -- carry an ID suffix are left untouched.
-                            local lid = tonumber(entry:match("_(%d+)%.[^.]+$"))
+                            -- Use the DB as the authoritative source of whether
+                            -- this file was placed here by the plugin.  This
+                            -- prevents accidental deletion of user-placed files
+                            -- whose names happen to end with _<number>.<ext>.
+                            local cached = self.db and self.db:getBookByFilePath(fp)
+                            local lid = cached and cached.book_id
                             if lid and not shelf_book_ids[lid] then
                                 if os.remove(fp) then
                                     deleted = deleted + 1

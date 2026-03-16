@@ -4410,9 +4410,81 @@ function BookloreSync:onSuspend()
     end
     
     self:logInfo("BookloreSync: Device suspending")
-    
+
+    -- Snapshot book_id before endSession() clears self.current_session.
+    local pre_book_id = self.current_session and self.current_session.book_id
+
     self:endSession({ silent = true, force_queue = true })
-    
+
+    -- ── Capture bookmarks and annotations while the document is still open ──
+    -- onCloseDocument is NOT fired on suspend; the book stays open in memory.
+    -- We therefore mirror its annotation/bookmark harvesting here so that
+    -- anything the user added during this reading session is queued before
+    -- the device goes to sleep.
+    if self.ui and self.ui.document then
+        local doc_path     = self.ui.document.file
+        local open_doc     = self.ui.document
+        local live_settings = self.ui and self.ui.doc_settings
+
+        -- book_id from snapshot or cache (best-effort; nil is fine – both sync
+        -- functions operate in queue_only mode when book_id is absent)
+        local book_id = pre_book_id
+        if not book_id and doc_path then
+            local cache_id = self.db and self.db:getBookCacheIdByFilePath(doc_path)
+            if cache_id then
+                local cached = self.db:getBookCacheById(cache_id)
+                if cached then book_id = cached.book_id end
+            end
+        end
+
+        -- Grab live annotations from the in-memory ReaderAnnotation module.
+        -- KOReader only flushes these to the .sdr sidecar after CloseDocument,
+        -- so reading from disk here would return stale / missing data.
+        local live_annotations = nil
+        if self.ui.annotation and self.ui.annotation.annotations then
+            live_annotations = self.ui.annotation.annotations
+            self:logInfo("BookloreSync: Suspend - captured", #live_annotations,
+                         "annotations from ReaderAnnotation module")
+        else
+            self:logInfo("BookloreSync: Suspend - ReaderAnnotation not available, will fall back to sidecar")
+        end
+
+        -- Derive bookmarks: entries without pos0/color are plain bookmarks.
+        local live_bookmarks = nil
+        if live_annotations then
+            live_bookmarks = {}
+            for _, ann in ipairs(live_annotations) do
+                if not ann.pos0 and not ann.color then
+                    table.insert(live_bookmarks, {
+                        pos0     = ann.page,
+                        pageno   = ann.pageno,
+                        notes    = ann.text,
+                        datetime = ann.datetime,
+                        chapter  = ann.chapter,
+                    })
+                end
+            end
+            if #live_bookmarks > 0 then
+                self:logInfo("BookloreSync: Suspend - derived", #live_bookmarks, "bookmarks")
+            else
+                self:logInfo("BookloreSync: Suspend - no bookmarks in live annotations array")
+                live_bookmarks = nil
+            end
+        end
+
+        if doc_path then
+            if self.highlights_notes_sync_enabled then
+                local strategy = self.upload_strategy or "on_session"
+                if strategy == "on_session" then
+                    self:logInfo("BookloreSync: Suspend - queuing annotations")
+                    self:syncHighlightsAndNotes(doc_path, book_id, open_doc, live_settings, live_annotations)
+                end
+                self:logInfo("BookloreSync: Suspend - queuing bookmarks")
+                self:syncBookmarks(doc_path, book_id, open_doc, live_settings, live_bookmarks)
+            end
+        end
+    end
+
     if self.force_push_session_on_suspend then
         self:logInfo("BookloreSync: Force push on suspend enabled")
         

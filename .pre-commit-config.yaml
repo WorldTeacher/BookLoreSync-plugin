@@ -5,5 +5,3 @@ repos:
       - id: conventional-pre-commit
         stages: [commit-msg]
         args: ["--strict", "--force-scope"]
-        env:
-          MAX_LINE_LENGTH: "80"

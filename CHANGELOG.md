@@ -1,3 +1,23 @@
+# [3.8.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.7.0...3.8.0) (2026-03-16)
+
+
+### Bug Fixes
+
+* **menu:** keep menu open when input dialogs are shown ([12b342b](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/12b342be683873650aaabf2ed6c9c09e22e69ae8))
+* **shelf-sync:** add sdr deletion and improved sidecar detection ([6dd0b31](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/6dd0b31b0fe7b053261260f778664f8a358afbc9))
+* **shelf-sync:** enhance filename generation and migration handling for shelf books ([9f1f02b](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/9f1f02b9c1a0aeedf98cee5ea3ba60d69f15f5c3))
+* **shelf:** add option to use original server filename for downloaded books ([cdcdcd7](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/cdcdcd7e089b6895046cb964a0e4bc00b3754185))
+* **sidecar:** fix and enhance sdr detection ([01927f3](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/01927f373c295dbabe33c88aef948119c7572fea))
+* **sync:** capture bookmarks and annotations on device suspend ([44b7441](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/44b7441dd8ec811b0949e46fca5ee032a896e6ef))
+* **sync:** enhance language loading and improve pending items handling ([9350613](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/93506138451f147ae7b7d9c65dbee75df7d46682))
+* **sync:** improve pending items count calculation and update sync messages ([d303f35](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d303f35f28031649095f727447aefca62be8ee7b))
+
+
+### Features
+
+* **translation:** add translation files ([a3b461d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a3b461dae98ebca8bd9be1d4c86a43d5fbe50f61))
+* **translation:** convert every string to be translateable ([0a9ef63](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/0a9ef63d84e0996f1d691fba9c04ffb045c3fd6c))
+
 # [3.7.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.6.1...3.7.0) (2026-03-11)
 
 

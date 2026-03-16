@@ -1,3 +1,10 @@
+## [3.8.1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.8.0...3.8.1) (2026-03-16)
+
+
+### Bug Fixes
+
+* **.gitignore:** add missing patterns for gettext translations and new file types ([cd5fd38](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/cd5fd38ca52f4e6d451ddb77a41f79a0bf74e084))
+
 # [3.8.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.7.0...3.8.0) (2026-03-16)
 
 

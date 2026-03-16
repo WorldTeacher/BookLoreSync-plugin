@@ -47,7 +47,13 @@ describe("BookloreSync helper methods", function()
   end)
 
   it("builds deterministic download filenames", function()
+    -- Fallback (no title): BookID_{id}.ext — ID already embedded, no extra tag
     assert.are.equal("BookID_5.epub", plugin:_generateFilename({ id = 5, extension = "EPUB" }))
     assert.are.equal("BookID_7.epub", plugin:_generateFilename({ id = 7 }))
+    -- Title present: "{safe_title}_{id}.ext"
+    assert.are.equal("My Book_3.epub",  plugin:_generateFilename({ id = 3, title = "My Book",  extension = "epub" }))
+    assert.are.equal("The Hobbit_42.epub", plugin:_generateFilename({ id = 42, title = "The Hobbit", extension = "epub" }))
+    -- Title with filesystem-unsafe chars is sanitized before appending _id
+    assert.are.equal("My Book_9.epub", plugin:_generateFilename({ id = 9, title = "My: Book?", extension = "epub" }))
   end)
 end)

@@ -193,6 +193,7 @@ local function make_plugin(overrides)
       rollback         = function() end,
       saveBookCache    = function() end,
       getBookByFilePath = function() return nil end,
+      updateFilePath   = function() end,
     },
     settings = {
       saveSetting = function() end,
@@ -209,9 +210,11 @@ end
 local function make_lfs_stub(opts)
   -- opts.download_dir_exists: bool (default true)
   -- opts.files: table of filepath -> bool (true = file exists)
+  -- opts.dir_entries: list of filename strings yielded by lfs.dir("/tmp/test-dl")
   opts = opts or {}
   local dir_exists = opts.download_dir_exists ~= false
   local files = opts.files or {}
+  local dir_entries = opts.dir_entries or {}
   return {
     attributes = function(path, attr)
       if attr == "mode" then
@@ -222,7 +225,18 @@ local function make_lfs_stub(opts)
       return nil
     end,
     mkdir = function() return true end,
-    dir   = function() return function() return nil end end,
+    dir   = function(dirpath)
+      if dirpath == "/tmp/test-dl" then
+        local i = 0
+        local all = { ".", ".." }
+        for _, e in ipairs(dir_entries) do table.insert(all, e) end
+        return function()
+          i = i + 1
+          return all[i]
+        end
+      end
+      return function() return nil end
+    end,
   }
 end
 
@@ -379,7 +393,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
   -- ── Phase 2: per-book download loop ──────────────────────────────────────
 
   it("skips books that are already on disk and cached in DB", function()
-    local filepath = "/tmp/test-dl/MyBook.epub"
+    local filepath = "/tmp/test-dl/MyBook_1.epub"
     package.preload["libs/libkoreader-lfs"] = function()
       return make_lfs_stub({ files = { [filepath] = true } })
     end
@@ -407,7 +421,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
 
   it("downloads a missing book and queues a DB write", function()
     -- File does NOT exist on disk initially
-    local filepath = "/tmp/test-dl/NewBook.epub"
+    local filepath = "/tmp/test-dl/NewBook_7.epub"
     package.preload["libs/libkoreader-lfs"] = function()
       -- Before download: file absent; subprocess also checks - simulate absence
       return make_lfs_stub({ files = {} })
@@ -483,4 +497,188 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     assert.is_false(callback_ok)
     assert.is_false(p.sync_in_progress)
   end)
+
+  -- ── Phase 3: deletion walk ────────────────────────────────────────────────
+
+  it("deletion walk removes a file whose book ID is not on the shelf", function()
+    -- Shelf has book id=3; disk has OldBook_5.epub (id=5, not on shelf)
+    local old_file = "/tmp/test-dl/OldBook_5.epub"
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({
+        files       = { [old_file] = true },
+        dir_entries = { "OldBook_5.epub" },
+      })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({
+        books = { { id = 3, title = "CurrentBook", extension = "epub" } },
+      })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub()
+    end
+
+    local p = make_plugin({ delete_removed_shelf_books = true })
+    local removed = {}
+    local real_remove = os.remove
+    os.remove = function(path) table.insert(removed, path); return true end
+
+    p:syncFromBookloreShelf(true)
+
+    os.remove = real_remove
+    assert.are.equal(1, #removed)
+    assert.are.equal(old_file, removed[1])
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  it("deletion walk keeps a file whose book ID is still on the shelf", function()
+    -- Shelf has book id=3; disk has CurrentBook_3.epub (id=3, still on shelf)
+    local keep_file = "/tmp/test-dl/CurrentBook_3.epub"
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({
+        files       = { [keep_file] = true },
+        dir_entries = { "CurrentBook_3.epub" },
+      })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({
+        books = { { id = 3, title = "CurrentBook", extension = "epub" } },
+      })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub()
+    end
+
+    local p = make_plugin({ delete_removed_shelf_books = true })
+    local removed = {}
+    local real_remove = os.remove
+    os.remove = function(path) table.insert(removed, path); return true end
+
+    p:syncFromBookloreShelf(true)
+
+    os.remove = real_remove
+    assert.are.equal(0, #removed)
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  it("deletion walk ignores files with no embedded book ID", function()
+    -- A file without _id suffix (legacy or non-book file) must never be deleted
+    local legacy_file = "/tmp/test-dl/SomeBook.epub"
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({
+        files       = { [legacy_file] = true },
+        dir_entries = { "SomeBook.epub" },
+      })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({ books = {} })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub()
+    end
+
+    local p = make_plugin({ delete_removed_shelf_books = true })
+    local removed = {}
+    local real_remove = os.remove
+    os.remove = function(path) table.insert(removed, path); return true end
+
+    p:syncFromBookloreShelf(true)
+
+    os.remove = real_remove
+    assert.are.equal(0, #removed)
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  it("skips a book with no extension and counts it as an error", function()
+    -- Book id=9 has no extension (bookType absent, no primaryFile.fileName).
+    -- Sync must not crash; errors counter must be > 0 and callback still ok=true.
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({ files = {} })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({
+        books = {
+          { id = 9, title = "Mystery", extension = nil },
+        },
+      })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub()
+    end
+
+    local p = make_plugin()
+    local warn_called = false
+    p.logWarn = function(...) warn_called = true end
+    local saved = {}
+    p.db.saveBookCache = function(_, fp, hash, bid)
+      table.insert(saved, bid)
+    end
+    local callback_ok = nil
+    p:syncFromBookloreShelf(true, function(ok) callback_ok = ok end)
+
+    -- No files downloaded for the nil-extension book
+    assert.are.equal(0, #saved)
+    -- A warning should have been emitted
+    assert.is_true(warn_called)
+    -- Sync overall still completes (errors don't abort the whole sync)
+    assert.is_true(callback_ok)
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  it("migration renames an old-scheme file and updates the DB path", function()
+    -- Disk has "MyBook.epub" (old name, no ID). Shelf has book id=1 title="MyBook".
+    -- After sync the file should be renamed to "MyBook_1.epub".
+    local old_file = "/tmp/test-dl/MyBook.epub"
+    local new_file = "/tmp/test-dl/MyBook_1.epub"
+    local files_on_disk = { [old_file] = true }
+    package.preload["libs/libkoreader-lfs"] = function()
+      return {
+        attributes = function(path, attr)
+          if attr == "mode" then
+            if files_on_disk[path] then return "file" end
+            if path == "/tmp/test-dl" then return "directory" end
+            return nil
+          end
+          return nil
+        end,
+        mkdir = function() return true end,
+        dir   = function() return function() return nil end end,
+      }
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({
+        books = { { id = 1, title = "MyBook", extension = "epub" } },
+      })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub()
+    end
+
+    local p = make_plugin()
+    local renamed_from, renamed_to
+    local real_rename = os.rename
+    os.rename = function(from, to)
+      renamed_from = from
+      renamed_to   = to
+      -- simulate: old file disappears, new file appears
+      files_on_disk[from] = nil
+      files_on_disk[to]   = true
+      return true
+    end
+    local db_updated_from, db_updated_to
+    p.db.updateFilePath = function(_, old, new)
+      db_updated_from = old
+      db_updated_to   = new
+    end
+
+    p:syncFromBookloreShelf(true)
+
+    os.rename = real_rename
+    assert.are.equal(old_file, renamed_from)
+    assert.are.equal(new_file, renamed_to)
+    assert.are.equal(old_file, db_updated_from)
+    assert.are.equal(new_file, db_updated_to)
+    assert.is_false(p.sync_in_progress)
+  end)
+
 end)

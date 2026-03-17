@@ -138,7 +138,11 @@ function DbSettings:readSetting(key)
 end
 
 function DbSettings:saveSetting(key, value)
-    self._db:savePluginSetting(key, value)
+    local success = self._db:savePluginSetting(key, value)
+    if not success then
+        logger.err("BookloreSync: Failed to save setting:", key)
+    end
+    return success
 end
 
 -- No-op: SQLite writes are atomic and immediate, no flush needed.

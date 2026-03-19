@@ -31,6 +31,7 @@ local logger = require("logger")
 
 local _ = require("gettext")
 local T = require("ffi/util").template
+local ffi = require("ffi")
 local ffiutil = require("ffi/util")
 local strbuf  = require("string.buffer")
 local Trapper = require("ui/trapper")
@@ -276,6 +277,10 @@ function BookloreSync:init()
     self.delete_sdr_on_book_delete   = self.settings:readSetting("delete_sdr_on_book_delete")
     if self.delete_sdr_on_book_delete == nil then
         self.delete_sdr_on_book_delete = false  -- Default disabled for safety
+    end
+    self.min_free_space_mb = self.settings:readSetting("min_free_space_mb")
+    if self.min_free_space_mb == nil then
+        self.min_free_space_mb = 500  -- Default: 500MB minimum free space
     end
 
     -- Resume/wake-sync state (not persisted - reset each session)
@@ -713,6 +718,66 @@ function BookloreSync:_deleteDirRecursive(path)
     end
     local ok, err = lfs.rmdir(path)
     return ok, err
+end
+
+--[[--
+Get available disk space for a given path.
+
+Uses POSIX statvfs to check filesystem statistics.
+
+@param path  Absolute path to check (file or directory)
+@return number  Available bytes on success
+@return nil, string  nil + error message on failure
+--]]
+function BookloreSync:getAvailableSpace(path)
+    if not path or path == "" then
+        return nil, "Invalid path"
+    end
+
+    -- Define statvfs structure and function if not already defined
+    local ok, _ = pcall(function()
+        ffi.cdef[[
+            struct statvfs {
+                unsigned long f_bsize;    /* Filesystem block size */
+                unsigned long f_frsize;   /* Fragment size */
+                uint64_t      f_blocks;   /* Size of fs in f_frsize units */
+                uint64_t      f_bfree;    /* Number of free blocks */
+                uint64_t      f_bavail;   /* Number of free blocks for unprivileged users */
+                uint64_t      f_files;    /* Number of inodes */
+                uint64_t      f_ffree;    /* Number of free inodes */
+                uint64_t      f_favail;   /* Number of free inodes for unprivileged users */
+                unsigned long f_fsid;     /* Filesystem ID */
+                unsigned long f_flag;     /* Mount flags */
+                unsigned long f_namemax;  /* Maximum filename length */
+            };
+            int statvfs(const char *path, struct statvfs *buf);
+        ]]
+    end)
+    
+    if not ok then
+        -- statvfs already defined, this is fine
+    end
+
+    -- Create buffer for statvfs structure
+    local buf = ffi.new("struct statvfs")
+    
+    -- Call statvfs
+    local result = ffi.C.statvfs(path, buf)
+    
+    if result ~= 0 then
+        local err_msg = "statvfs failed for path: " .. path
+        self:logErr("BookloreSync: getAvailableSpace -", err_msg)
+        return nil, err_msg
+    end
+
+    -- Calculate available bytes: f_bavail * f_frsize
+    -- f_bavail is the number of blocks available to non-root users
+    -- f_frsize is the fragment size (fundamental block size)
+    local available_bytes = tonumber(buf.f_bavail) * tonumber(buf.f_frsize)
+    
+    self:logDbg("BookloreSync: getAvailableSpace - path:", path, "available:", available_bytes, "bytes")
+    
+    return available_bytes
 end
 
 --[[--
@@ -3078,6 +3143,46 @@ function BookloreSync:addToMainMenu(menu_items)
                     dialog:onShowKeyboard()
                 end,
             },
+            {
+                text_func = function()
+                    return T(_("Minimum free space: %1 MB"), self.min_free_space_mb)
+                end,
+                help_text = _("Minimum free disk space (in MB) required before downloading books. Sync will stop if available space drops below this threshold. Default: 500 MB"),
+                keep_menu_open = true,
+                callback = function()
+                    local dialog
+                    dialog = InputDialog:new{
+                        title   = _("Minimum free space (MB)"),
+                        input   = tostring(self.min_free_space_mb),
+                        input_type = "number",
+                        buttons = {{
+                            {
+                                text     = _("Cancel"),
+                                callback = function() UIManager:close(dialog) end,
+                            },
+                            {
+                                text     = _("Save"),
+                                is_enter_default = true,
+                                callback = function()
+                                    local val = tonumber(dialog:getInputText())
+                                    if val and val >= 0 then
+                                        self.min_free_space_mb = val
+                                        self.settings:saveSetting("min_free_space_mb", val)
+                                        self.settings:flush()
+                                        UIManager:show(InfoMessage:new{
+                                            text = T(_("Minimum free space set to %1 MB"), val),
+                                            timeout = 2,
+                                        })
+                                    end
+                                    UIManager:close(dialog)
+                                end,
+                            },
+                        }},
+                    }
+                    UIManager:show(dialog)
+                    dialog:onShowKeyboard()
+                end,
+            },
         },
     })
 
@@ -5415,6 +5520,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
         local errors       = 0
         local new_books    = {}   -- accumulate DB writes for Phase 3
         local shelf_book_ids = {}
+        local space_error_info = nil  -- Track space error details for final notification
 
         -- Update dialog title now that we know the total book count.
         status_dialog:setTitle(T(_("Syncing shelf: %1 books"), total))
@@ -5516,6 +5622,49 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             end
 
             local already_exists = lfs.attributes(filepath, "mode") == "file"
+
+            -- ── Check disk space before downloading ─────────────────────────────
+            if not already_exists then
+                -- Get file size from server using HTTP HEAD request
+                local file_size, size_err = self.api:getBookFileSize(book_id, self.username, self.password)
+                if not file_size then
+                    self:logWarn("BookloreSync: could not get file size for book", book_id, ":", size_err or "unknown error")
+                    -- Continue anyway - better to try downloading than to stop completely
+                else
+                    -- Get available disk space
+                    local available_bytes, space_err = self:getAvailableSpace(download_dir)
+                    if not available_bytes then
+                        self:logErr("BookloreSync: could not check available space:", space_err or "unknown error")
+                        -- Continue anyway - better to try downloading than to stop completely
+                    else
+                        local min_free_bytes = self.min_free_space_mb * 1024 * 1024
+                        local required_bytes = file_size + min_free_bytes
+                        
+                        if available_bytes < required_bytes then
+                            -- Not enough space - stop sync and record error details
+                            local available_mb = math.floor(available_bytes / (1024 * 1024))
+                            local file_size_mb = math.floor(file_size / (1024 * 1024) * 100) / 100  -- 2 decimal places
+                            local required_mb = math.floor(required_bytes / (1024 * 1024))
+                            
+                            space_error_info = {
+                                book_title = book.title or "Unknown",
+                                available_mb = available_mb,
+                                file_size_mb = file_size_mb,
+                                min_free_mb = self.min_free_space_mb,
+                                required_mb = required_mb,
+                                books_downloaded = downloaded,
+                                books_total = total,
+                            }
+                            
+                            self:logWarn("BookloreSync: insufficient disk space for book", book_id, 
+                                "- available:", available_mb, "MB, required:", required_mb, "MB")
+                            
+                            -- Break out of the download loop
+                            break
+                        end
+                    end
+                end
+            end
 
             -- Update the dialog title to show current book progress.
             if already_exists then
@@ -5702,6 +5851,41 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
         end
 
         self.sync_in_progress = false
+
+        -- ── Show space error notification if sync stopped due to insufficient space ───
+        if space_error_info then
+            local ConfirmBox = require("ui/widget/confirmbox")
+            local space_msg = T(
+                _("No space left on device\n\n" ..
+                  "Book: %1\n" ..
+                  "File size: %2 MB\n" ..
+                  "Available space: %3 MB\n" ..
+                  "Required space: %4 MB (file + %5 MB buffer)\n\n" ..
+                  "Downloaded %6 of %7 books before stopping."),
+                space_error_info.book_title,
+                space_error_info.file_size_mb,
+                space_error_info.available_mb,
+                space_error_info.required_mb,
+                space_error_info.min_free_mb,
+                space_error_info.books_downloaded,
+                space_error_info.books_total
+            )
+            
+            if not silent and not self.silent_messages then
+                UIManager:show(ConfirmBox:new{
+                    text = space_msg,
+                    ok_text = _("Close"),
+                    ok_callback = function()
+                        -- Just close the dialog
+                    end,
+                })
+            end
+            
+            if on_complete then 
+                on_complete(false, _("Sync stopped: insufficient disk space"))
+            end
+            return
+        end
 
         local final_msg = T(
             _("Sync complete!\n\nDownloaded: %1\nSkipped: %2\nDeleted: %3\nErrors: %4"),

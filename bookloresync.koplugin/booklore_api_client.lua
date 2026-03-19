@@ -1469,4 +1469,91 @@ function APIClient:downloadBook(book_id, save_path, username, password)
     return false, err_msg
 end
 
+--[[--
+Get the file size of a book by making an HTTP HEAD request.
+
+This function makes a HEAD request to the book download endpoint to retrieve
+the Content-Length header without downloading the full file.
+
+@param book_id   number  Book ID
+@param username  string  Username for authentication
+@param password  string  Password for authentication
+@return number|nil       File size in bytes on success, nil on failure
+@return string|nil       Error message on failure, nil on success
+--]]
+function APIClient:getBookFileSize(book_id, username, password)
+    self:logInfo("BookloreSync API: getBookFileSize - id:", book_id)
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password)
+    if not token_ok then
+        self:logErr("BookloreSync API: getBookFileSize - auth failed:", token)
+        return nil, "Authentication failed"
+    end
+
+    local url = self.server_url .. "/api/v1/books/" .. book_id .. "/download"
+    local http_client = url:match("^https://") and https or http
+
+    local response_body = {}
+    local req_args = {
+        url     = url,
+        method  = "HEAD",
+        headers = { ["Authorization"] = "Bearer " .. token },
+        sink    = ltn12.sink.table(response_body),
+    }
+    http_client.TIMEOUT = self.timeout
+
+    local res, code, response_headers = http_client.request(req_args)
+
+    -- Retry on 401/403
+    if type(code) == "number" and (code == 401 or code == 403) then
+        self:logWarn("BookloreSync API: getBookFileSize - token rejected, refreshing")
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            req_args.headers = { ["Authorization"] = "Bearer " .. new_token }
+            res, code, response_headers = http_client.request(req_args)
+        end
+    end
+
+    if not code then
+        local err_msg = "Network error: " .. tostring(res)
+        self:logErr("BookloreSync API: getBookFileSize failed:", err_msg)
+        return nil, err_msg
+    end
+
+    if type(code) ~= "number" or code < 200 or code >= 300 then
+        local err_msg = "HTTP " .. tostring(code) .. ": HEAD request failed"
+        self:logErr("BookloreSync API: getBookFileSize failed:", err_msg)
+        return nil, err_msg
+    end
+
+    -- Extract Content-Length from response headers
+    if not response_headers then
+        local err_msg = "No response headers received"
+        self:logErr("BookloreSync API: getBookFileSize failed:", err_msg)
+        return nil, err_msg
+    end
+
+    -- HTTP headers can be in various cases (content-length, Content-Length, etc.)
+    local content_length = response_headers["content-length"] 
+                        or response_headers["Content-Length"]
+                        or response_headers["CONTENT-LENGTH"]
+    
+    if not content_length then
+        local err_msg = "Content-Length header not found in response"
+        self:logErr("BookloreSync API: getBookFileSize failed:", err_msg)
+        return nil, err_msg
+    end
+
+    local file_size = tonumber(content_length)
+    if not file_size or file_size < 0 then
+        local err_msg = "Invalid Content-Length: " .. tostring(content_length)
+        self:logErr("BookloreSync API: getBookFileSize failed:", err_msg)
+        return nil, err_msg
+    end
+
+    self:logInfo("BookloreSync API: getBookFileSize - success, size:", file_size, "bytes")
+    return file_size, nil
+end
+
 return APIClient

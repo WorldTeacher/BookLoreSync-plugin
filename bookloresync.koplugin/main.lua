@@ -381,7 +381,8 @@ function BookloreSync:init()
     -- the live instance; Lua's __index chain finds the entry on the class table.
     -- Registration must be unconditional - init() is always called from the reader
     -- context where self.ui.file_chooser is nil.
-    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions", function(file, is_file, _book_props)
+    -- Row 1: primary actions
+    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row1", function(file, is_file, _book_props)
         if not is_file then return nil end
         return {
             {
@@ -400,6 +401,34 @@ function BookloreSync:init()
                     self:fileDialogMatchBook(file)
                 end,
             },
+        }
+    end)
+    -- Row 2: data actions
+    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row2", function(file, is_file, _book_props)
+        if not is_file then return nil end
+        return {
+            {
+                text = _("Show Stored Data"),
+                callback = function()
+                    local fc = FileManager.instance and FileManager.instance.file_chooser
+                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
+                    self:fileDialogShowStoredData(file)
+                end,
+            },
+            {
+                text = _("Extract from Sidecar"),
+                callback = function()
+                    local fc = FileManager.instance and FileManager.instance.file_chooser
+                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
+                    self:fileDialogExtractFromSidecar(file)
+                end,
+            },
+        }
+    end)
+    -- Row 3: tracking toggle (full width)
+    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row3", function(file, is_file, _book_props)
+        if not is_file then return nil end
+        return {
             {
                 text_func = function()
                     if self.db and not self.db:isBookTrackingEnabled(file) then
@@ -2518,6 +2547,163 @@ function BookloreSync:fileDialogToggleTracking(file_path)
             timeout = 2,
         })
     end
+end
+
+--[[--
+Show stored data counts for the selected book.
+
+Displays a summary of synced and pending sessions, annotations, and bookmarks
+stored locally in the Booklore database for the given file.
+
+@param file_path string  Absolute path to the book file
+--]]
+function BookloreSync:fileDialogShowStoredData(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised"), timeout = 2 })
+        return
+    end
+
+    local book = self.db:getBookByFilePath(file_path)
+    if not book then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: no local record found for this book.\nOpen the book first to register it."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local book_cache_id = book.id
+
+    -- Sessions: koreader_book_id in historical_sessions == book_cache.id
+    local all_sessions = self.db:getHistoricalSessionsForBook(book_cache_id)
+    local total_sessions = #all_sessions
+    local synced_sessions = 0
+    for _, s in ipairs(all_sessions) do
+        if (tonumber(s.synced) or 0) == 1 then
+            synced_sessions = synced_sessions + 1
+        end
+    end
+    local unsynced_sessions = total_sessions - synced_sessions
+
+    -- Annotations
+    local synced_ann   = self.db:getSyncedAnnotationCountForBook(book_cache_id)
+    local pending_ann  = self.db:getPendingAnnotationCountForBook(book_cache_id)
+
+    -- Bookmarks
+    local synced_bm    = self.db:getSyncedBookmarkCountForBook(book_cache_id)
+    local pending_bm   = self.db:getPendingBookmarkCountForBook(book_cache_id)
+
+    local book_title = book.title or (file_path:match("([^/]+)$") or file_path):gsub("%.[^.]+$", "")
+    local is_matched = (book.book_id ~= nil)
+
+    local lines = {}
+    table.insert(lines, book_title)
+    table.insert(lines, string.rep("─", 40))
+    table.insert(lines, "")
+    if is_matched then
+        table.insert(lines, _("Server ID:") .. " " .. tostring(book.book_id))
+    else
+        table.insert(lines, _("Server ID:") .. " " .. _("(not matched)"))
+    end
+    table.insert(lines, "")
+    table.insert(lines, "── " .. _("Reading Sessions") .. " ──")
+    table.insert(lines, _("  Synced:  ") .. tostring(synced_sessions))
+    table.insert(lines, _("  Pending: ") .. tostring(unsynced_sessions))
+    table.insert(lines, _("  Total:   ") .. tostring(total_sessions))
+    table.insert(lines, "")
+    table.insert(lines, "── " .. _("Annotations") .. " ──")
+    table.insert(lines, _("  Synced:  ") .. tostring(synced_ann))
+    table.insert(lines, _("  Pending: ") .. tostring(pending_ann))
+    table.insert(lines, _("  Total:   ") .. tostring(synced_ann + pending_ann))
+    table.insert(lines, "")
+    table.insert(lines, "── " .. _("Bookmarks") .. " ──")
+    table.insert(lines, _("  Synced:  ") .. tostring(synced_bm))
+    table.insert(lines, _("  Pending: ") .. tostring(pending_bm))
+    table.insert(lines, _("  Total:   ") .. tostring(synced_bm + pending_bm))
+
+    local TextViewer = require("ui/widget/textviewer")
+    local Screen = require("device").screen
+    UIManager:show(TextViewer:new{
+        title = _("Stored Data"),
+        text = table.concat(lines, "\n"),
+        width = math.floor(Screen:getWidth() * 0.85),
+        height = math.floor(Screen:getHeight() * 0.7),
+    })
+end
+
+--[[--
+Extract annotations and bookmarks from the sidecar file and push them to Booklore.
+
+Reads the KOReader sidecar (.sdr) for the given book, shows detected counts, then
+(after confirmation) calls syncHighlightsAndNotes + syncBookmarks followed by the
+pending-queue flushes.
+
+For unmatched books the user is offered to match the book first before syncing.
+
+@param file_path string  Absolute path to the book file
+--]]
+function BookloreSync:fileDialogExtractFromSidecar(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised"), timeout = 2 })
+        return
+    end
+
+    -- Read sidecar counts first (fast, no network)
+    local counts = self.metadata_extractor:getCounts(file_path)
+    local total_sidecar = (counts.highlights or 0) + (counts.notes or 0) + (counts.bookmarks or 0)
+
+    if total_sidecar == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: no annotations or bookmarks found in sidecar for this book."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local book = self.db:getBookByFilePath(file_path)
+
+    -- Book not yet in the local cache → create a stub so the user can match it
+    if not book then
+        local stem = (file_path:match("([^/\\]+)%.[^%.]+$") or file_path:match("([^/\\]+)$") or "Unknown")
+        self.db:saveBookCache(file_path, "", nil, stem, nil, nil, nil)
+        book = self.db:getBookByFilePath(file_path)
+    end
+
+    local counts_text = T(_("Highlights: %1\nNotes: %2\nBookmarks: %3"),
+        tostring(counts.highlights or 0),
+        tostring(counts.notes or 0),
+        tostring(counts.bookmarks or 0))
+
+    -- Book not matched to a Booklore server book → offer to match first
+    if not book or not book.book_id then
+        UIManager:show(ConfirmBox:new{
+            text = T(_("Sidecar data detected:\n\n%1\n\nThis book is not yet matched to Booklore.\nMatch it now to enable sync?"),
+                counts_text),
+            ok_text = _("Match Book"),
+            ok_callback = function()
+                self:fileDialogMatchBook(file_path)
+            end,
+        })
+        return
+    end
+
+    -- Book is matched → confirm then sync
+    local book_cache_id = book.id
+    local server_book_id = book.book_id
+
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Sidecar data detected:\n\n%1\n\nSync these to Booklore now?"), counts_text),
+        ok_text = _("Sync"),
+        ok_callback = function()
+            -- Sync annotations (highlights + notes)
+            self:syncHighlightsAndNotes(file_path, server_book_id, nil, nil, nil)
+            self:syncPendingAnnotations(false, book_cache_id)
+
+            -- Sync bookmarks
+            self:syncBookmarks(file_path, server_book_id, nil, nil, nil)
+            self:syncPendingBookmarks(false, book_cache_id)
+        end,
+    })
 end
 
 function BookloreSync:addToMainMenu(menu_items)

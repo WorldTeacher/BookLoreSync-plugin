@@ -3001,6 +3001,106 @@ function Database:getPendingBookmarkCount()
 end
 
 --[[--
+Count pending annotations for a specific book.
+
+@param book_cache_id integer  book_cache.id for the book
+@return integer count
+--]]
+function Database:getPendingAnnotationCountForBook(book_cache_id)
+    if not book_cache_id then return 0 end
+    book_cache_id = tonumber(book_cache_id)
+    if not book_cache_id then return 0 end
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_annotations WHERE book_cache_id = ?")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getPendingAnnotationCountForBook:", self.conn:errmsg())
+        return 0
+    end
+    stmt:bind(book_cache_id)
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
+    stmt:close()
+    return count
+end
+
+--[[--
+Count pending bookmarks for a specific book.
+
+@param book_cache_id integer  book_cache.id for the book
+@return integer count
+--]]
+function Database:getPendingBookmarkCountForBook(book_cache_id)
+    if not book_cache_id then return 0 end
+    book_cache_id = tonumber(book_cache_id)
+    if not book_cache_id then return 0 end
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_bookmarks WHERE book_cache_id = ?")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getPendingBookmarkCountForBook:", self.conn:errmsg())
+        return 0
+    end
+    stmt:bind(book_cache_id)
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
+    stmt:close()
+    return count
+end
+
+--[[--
+Count synced annotations for a specific book.
+
+@param book_cache_id integer  book_cache.id for the book
+@return integer count
+--]]
+function Database:getSyncedAnnotationCountForBook(book_cache_id)
+    if not book_cache_id then return 0 end
+    book_cache_id = tonumber(book_cache_id)
+    if not book_cache_id then return 0 end
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM synced_annotations WHERE book_cache_id = ?")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getSyncedAnnotationCountForBook:", self.conn:errmsg())
+        return 0
+    end
+    stmt:bind(book_cache_id)
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
+    stmt:close()
+    return count
+end
+
+--[[--
+Count synced bookmarks for a specific book.
+
+@param book_cache_id integer  book_cache.id for the book
+@return integer count
+--]]
+function Database:getSyncedBookmarkCountForBook(book_cache_id)
+    if not book_cache_id then return 0 end
+    book_cache_id = tonumber(book_cache_id)
+    if not book_cache_id then return 0 end
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM synced_bookmarks WHERE book_cache_id = ?")
+    if not stmt then
+        logger.err("BookloreSync Database: Failed to prepare getSyncedBookmarkCountForBook:", self.conn:errmsg())
+        return 0
+    end
+    stmt:bind(book_cache_id)
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
+    stmt:close()
+    return count
+end
+
+--[[--
 Delete all rows from the pending_bookmarks queue.
 
 @return boolean success

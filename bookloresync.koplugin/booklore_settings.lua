@@ -39,7 +39,7 @@ function Settings:configureServerUrl(parent)
                         parent.settings:flush()
 
                         if parent.api then
-                            parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
+                            parent.api:init(parent.server_url, parent.username, parent.password, parent.db)
                         end
 
                         UIManager:close(input_dialog)
@@ -103,7 +103,7 @@ function Settings:configureConnection(parent)
                                             parent.settings:flush()
 
                                             if parent.api then
-                                                parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
+                                                parent.api:init(parent.server_url, parent.username, parent.password, parent.db)
                                             end
 
                                             UIManager:close(password_input)
@@ -693,7 +693,6 @@ function Settings:exportSettings(parent)
         is_enabled                    = parent.is_enabled,
         silent_messages               = parent.silent_messages,
         log_to_file                   = parent.log_to_file,
-        secure_logs                   = parent.secure_logs,
         min_duration                  = parent.min_duration,
         min_pages                     = parent.min_pages,
         session_detection_mode        = parent.session_detection_mode,
@@ -759,8 +758,8 @@ function Settings:buildPreferencesMenu(parent)
                 end,
             },
             {
-                text = _("Debug logging"),
-                help_text = _("Enable detailed logging to files for debugging purposes. Logs are saved daily to the plugin's logs directory. The last 3 log files are kept automatically."),
+                text = _("Log to file"),
+                help_text = _("Enable detailed logging to files for debugging purposes. Logs are saved daily to the plugin's logs directory with URLs automatically redacted. The last 3 log files are kept automatically."),
                 checked_func = function()
                     return parent.log_to_file
                 end,
@@ -789,25 +788,9 @@ function Settings:buildPreferencesMenu(parent)
                     end
                     
                     UIManager:show(InfoMessage:new{
-                        text = parent.log_to_file and _("Debug logging enabled") or _("Debug logging disabled"),
+                        text = parent.log_to_file and _("File logging enabled") or _("File logging disabled"),
                         timeout = 2,
                     })
-                end,
-            },
-            {
-                text = _("Secure logs"),
-                help_text = _("Redact URLs from logs to protect sensitive information. When enabled, all URLs in log messages will be replaced with [URL REDACTED] so logs can be safely shared."),
-                checked_func = function()
-                    return parent.secure_logs
-                end,
-                callback = function()
-                    parent.secure_logs = not parent.secure_logs
-                    parent.settings:saveSetting("secure_logs", parent.secure_logs)
-                    parent.settings:flush()
-                UIManager:show(InfoMessage:new{
-                    text = parent.secure_logs and _("Secure logging enabled") or _("Secure logging disabled"),
-                    timeout = 2,
-                })
                 end,
             },
             {

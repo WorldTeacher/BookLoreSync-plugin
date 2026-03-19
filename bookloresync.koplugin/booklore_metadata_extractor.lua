@@ -21,42 +21,45 @@ local BookloreMetadataExtractor = {}
 
 --[[--
 Initialize the metadata extractor
-
-@param secure_logs Enable secure logging (default: false)
 --]]
 function BookloreMetadataExtractor:new(o)
     o = o or {}
     setmetatable(o, self)
     self.__index = self
-    self.secure_logs = o.secure_logs or false
+    self.plugin = o.plugin
     return o
 end
 
 --[[--
-Log message with secure logging support
+Log message using plugin logger
 
 @param level Log level (info, warn, err, dbg)
 @param ... Log arguments
 --]]
 function BookloreMetadataExtractor:log(level, ...)
-    local args = {...}
-    if self.secure_logs then
-        -- Redact file paths in secure mode
-        for i = 1, #args do
-            if type(args[i]) == "string" then
-                args[i] = args[i]:gsub("/[^%s]+", "[PATH REDACTED]")
-            end
+    if not self.plugin then
+        -- Fallback to native logger if plugin not available
+        if level == "info" then
+            logger.info("MetadataExtractor:", ...)
+        elseif level == "warn" then
+            logger.warn("MetadataExtractor:", ...)
+        elseif level == "err" then
+            logger.err("MetadataExtractor:", ...)
+        elseif level == "dbg" then
+            logger.dbg("MetadataExtractor:", ...)
         end
+        return
     end
     
+    -- Use plugin logger (handles redaction automatically)
     if level == "info" then
-        logger.info("MetadataExtractor:", table.unpack(args))
+        self.plugin:logInfo("MetadataExtractor:", ...)
     elseif level == "warn" then
-        logger.warn("MetadataExtractor:", table.unpack(args))
+        self.plugin:logWarn("MetadataExtractor:", ...)
     elseif level == "err" then
-        logger.err("MetadataExtractor:", table.unpack(args))
+        self.plugin:logErr("MetadataExtractor:", ...)
     elseif level == "dbg" then
-        logger.dbg("MetadataExtractor:", table.unpack(args))
+        self.plugin:logDbg("MetadataExtractor:", ...)
     end
 end
 

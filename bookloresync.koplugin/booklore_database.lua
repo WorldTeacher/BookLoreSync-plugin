@@ -570,11 +570,11 @@ Database.migration_hooks = {
         if not has_col then
             local res = db.conn:exec("ALTER TABLE book_cache ADD COLUMN hardcover_id INTEGER")
             if res ~= SQ3.OK then
-                logger.err("BookloreSync Database: Migration 17 hook: failed to add hardcover_id:", db.conn:errmsg())
+                self.plugin:logErr("BookloreSync Database: Migration 17 hook: failed to add hardcover_id:", db.conn:errmsg())
                 return false
             end
         else
-            logger.info("BookloreSync Database: Migration 17 hook: hardcover_id already exists, skipping ALTER")
+            self.plugin:logInfo("BookloreSync Database: Migration 17 hook: hardcover_id already exists, skipping ALTER")
         end
         db.conn:exec("CREATE INDEX IF NOT EXISTS idx_book_cache_hardcover_id ON book_cache(hardcover_id)")
         return true
@@ -596,11 +596,11 @@ Database.migration_hooks = {
         if not has_col then
             local res = db.conn:exec("ALTER TABLE book_cache ADD COLUMN tracking_enabled INTEGER DEFAULT 1")
             if res ~= SQ3.OK then
-                logger.err("BookloreSync Database: Migration 21 hook: failed to add tracking_enabled:", db.conn:errmsg())
+                self.plugin:logErr("BookloreSync Database: Migration 21 hook: failed to add tracking_enabled:", db.conn:errmsg())
                 return false
             end
         else
-            logger.info("BookloreSync Database: Migration 21 hook: tracking_enabled already exists, skipping ALTER")
+            self.plugin:logInfo("BookloreSync Database: Migration 21 hook: tracking_enabled already exists, skipping ALTER")
         end
         return true
     end,
@@ -610,18 +610,18 @@ Database.migration_hooks = {
         local settings_path = DataStorage:getSettingsDir() .. "/booklore.lua"
         local f = io.open(settings_path, "r")
         if not f then
-            logger.info("BookloreSync Database: Migration 10 hook: booklore.lua not found, skipping import")
+            self.plugin:logInfo("BookloreSync Database: Migration 10 hook: booklore.lua not found, skipping import")
             return true
         end
         f:close()
 
-        logger.info("BookloreSync Database: Migration 10 hook: importing settings from booklore.lua")
+        self.plugin:logInfo("BookloreSync Database: Migration 10 hook: importing settings from booklore.lua")
 
         local ok, lua_settings = pcall(function()
             return LuaSettings:open(settings_path)
         end)
         if not ok or not lua_settings then
-            logger.err("BookloreSync Database: Migration 10 hook: failed to open booklore.lua:", lua_settings)
+            self.plugin:logErr("BookloreSync Database: Migration 10 hook: failed to open booklore.lua:", lua_settings)
             return false
         end
 
@@ -629,7 +629,7 @@ Database.migration_hooks = {
         -- Booleans stored as "true"/"false" strings, numbers as decimal strings.
         local keys = {
             "server_url", "username", "password",
-            "is_enabled", "log_to_file", "silent_messages", "secure_logs",
+            "is_enabled", "log_to_file", "silent_messages",
             "min_duration", "min_pages", "session_detection_mode",
             "progress_decimal_places",
             "force_push_session_on_suspend", "connect_network_on_suspend",
@@ -647,7 +647,7 @@ Database.migration_hooks = {
             VALUES (?, ?, CAST(strftime('%s', 'now') AS INTEGER))
         ]])
         if not stmt then
-            logger.err("BookloreSync Database: Migration 10 hook: failed to prepare INSERT:", db.conn:errmsg())
+            self.plugin:logErr("BookloreSync Database: Migration 10 hook: failed to prepare INSERT:", db.conn:errmsg())
             return false
         end
 
@@ -664,7 +664,7 @@ Database.migration_hooks = {
                     value_str = raw
                 else
                     -- Skip unsupported types (tables, etc.)
-                    logger.warn("BookloreSync Database: Migration 10 hook: skipping key", key, "with unsupported type", t)
+                    self.plugin:logWarn("BookloreSync Database: Migration 10 hook: skipping key", key, "with unsupported type", t)
                     goto continue
                 end
 
@@ -677,34 +677,36 @@ Database.migration_hooks = {
                     if step_result == SQ3.DONE or step_result == SQ3.OK then
                         imported = imported + 1
                     else
-                        logger.warn("BookloreSync Database: Migration 10 hook: failed to insert key", key)
+                        self.plugin:logWarn("BookloreSync Database: Migration 10 hook: failed to insert key", key)
                     end
                 else
-                    logger.warn("BookloreSync Database: Migration 10 hook: bind failed for key", key, ":", bind_err)
+                    self.plugin:logWarn("BookloreSync Database: Migration 10 hook: bind failed for key", key, ":", bind_err)
                 end
                 ::continue::
             end
         end
         stmt:close()
 
-        logger.info("BookloreSync Database: Migration 10 hook: imported", imported, "settings")
+        self.plugin:logInfo("BookloreSync Database: Migration 10 hook: imported", imported, "settings")
 
         -- Delete the original LuaSettings file now that settings live in the DB
         local remove_ok, remove_err = os.remove(settings_path)
         if remove_ok then
-            logger.info("BookloreSync Database: Migration 10 hook: deleted booklore.lua")
+            self.plugin:logInfo("BookloreSync Database: Migration 10 hook: deleted booklore.lua")
         else
             -- Non-fatal: the file may have been removed already, or permissions
             -- may prevent deletion on some e-reader configurations.
-            logger.warn("BookloreSync Database: Migration 10 hook: could not delete booklore.lua:", remove_err)
+            self.plugin:logWarn("BookloreSync Database: Migration 10 hook: could not delete booklore.lua:", remove_err)
         end
 
         return true
     end,
 }
 
-function Database:new(o)
-    o = o or {}
+function Database:new(plugin)
+    local o = {
+        plugin = plugin
+    }
     setmetatable(o, self)
     self.__index = self
     return o
@@ -714,11 +716,11 @@ function Database:init(db_name)
     db_name = db_name or "booklore-sync.sqlite"
     self.db_path = DataStorage:getSettingsDir() .. "/" .. db_name
     
-    logger.info("BookloreSync Database: Initializing database at", self.db_path)
+    self.plugin:logInfo("BookloreSync Database: Initializing database at", self.db_path)
     
     local conn = SQ3.open(self.db_path)
     if not conn then
-        logger.err("BookloreSync Database: Failed to open database at", self.db_path)
+        self.plugin:logErr("BookloreSync Database: Failed to open database at", self.db_path)
         return false
     end
     
@@ -734,7 +736,7 @@ function Database:init(db_name)
     end)
     if not checkpoint_ok then
         -- Not fatal - there may be no WAL file, or db might be locked by another instance
-        logger.dbg("BookloreSync Database: WAL checkpoint skipped:", checkpoint_err)
+        self.plugin:logDbg("BookloreSync Database: WAL checkpoint skipped:", checkpoint_err)
     end
     
     -- Use TRUNCATE journal mode for reliability on e-readers
@@ -747,22 +749,22 @@ function Database:init(db_name)
     end)
     
     if not journal_ok then
-        logger.warn("BookloreSync Database: Could not set TRUNCATE mode:", journal_err)
-        logger.warn("This may happen if another KOReader instance is using the database.")
-        logger.warn("The database will continue using its current journal mode.")
+        self.plugin:logWarn("BookloreSync Database: Could not set TRUNCATE mode:", journal_err)
+        self.plugin:logWarn("This may happen if another KOReader instance is using the database.")
+        self.plugin:logWarn("The database will continue using its current journal mode.")
         -- Continue anyway - the database will use whatever mode it's already in
         -- This is non-fatal; TRUNCATE is preferred but not required for operation
     else
-        logger.dbg("BookloreSync Database: Successfully set TRUNCATE journal mode")
+        self.plugin:logDbg("BookloreSync Database: Successfully set TRUNCATE journal mode")
     end
     
     local success = self:runMigrations()
     if not success then
-        logger.err("BookloreSync Database: Migration failed")
+        self.plugin:logErr("BookloreSync Database: Migration failed")
         return false
     end
     
-    logger.info("BookloreSync Database: Initialization complete")
+    self.plugin:logInfo("BookloreSync Database: Initialization complete")
     return true
 end
 
@@ -770,7 +772,7 @@ function Database:close()
     if self.conn then
         self.conn:close()
         self.conn = nil
-        logger.info("BookloreSync Database: Connection closed")
+        self.plugin:logInfo("BookloreSync Database: Connection closed")
     end
 end
 
@@ -812,20 +814,20 @@ end
 
 function Database:runMigrations()
     local current_version = self:getCurrentVersion()
-    logger.info("BookloreSync Database: Current schema version:", current_version)
-    logger.info("BookloreSync Database: Target schema version:", self.VERSION)
+    self.plugin:logInfo("BookloreSync Database: Current schema version:", current_version)
+    self.plugin:logInfo("BookloreSync Database: Target schema version:", self.VERSION)
     
     if current_version >= self.VERSION then
-        logger.info("BookloreSync Database: Schema is up to date")
+        self.plugin:logInfo("BookloreSync Database: Schema is up to date")
         return true
     end
     
     for version = current_version + 1, self.VERSION do
-        logger.info("BookloreSync Database: Applying migration", version)
+        self.plugin:logInfo("BookloreSync Database: Applying migration", version)
         
         local migration = self.migrations[version]
         if not migration then
-            logger.err("BookloreSync Database: Migration", version, "not found")
+            self.plugin:logErr("BookloreSync Database: Migration", version, "not found")
             return false
         end
         
@@ -833,12 +835,12 @@ function Database:runMigrations()
         
         local success = true
         for i, sql in ipairs(migration) do
-            logger.dbg("BookloreSync Database: Executing SQL statement", i, "of", #migration)
+            self.plugin:logDbg("BookloreSync Database: Executing SQL statement", i, "of", #migration)
             local result = self.conn:exec(sql)
             if result ~= SQ3.OK then
-                logger.err("BookloreSync Database: Failed to execute migration", version, "statement", i)
-                logger.err("BookloreSync Database: SQL:", sql)
-                logger.err("BookloreSync Database: Error:", self.conn:errmsg())
+                self.plugin:logErr("BookloreSync Database: Failed to execute migration", version, "statement", i)
+                self.plugin:logErr("BookloreSync Database: SQL:", sql)
+                self.plugin:logErr("BookloreSync Database: Error:", self.conn:errmsg())
                 success = false
                 break
             end
@@ -847,63 +849,63 @@ function Database:runMigrations()
         if success then
             local stmt = self.conn:prepare("INSERT INTO schema_version (version) VALUES (?)")
             if not stmt then
-                logger.err("BookloreSync Database: Failed to prepare version insert:", self.conn:errmsg())
+                self.plugin:logErr("BookloreSync Database: Failed to prepare version insert:", self.conn:errmsg())
                 self.conn:exec("ROLLBACK")
                 return false
             end
             
             version = tonumber(version)
             if not version then
-                logger.err("BookloreSync Database: Version is not a number")
+                self.plugin:logErr("BookloreSync Database: Version is not a number")
                 stmt:close()
                 self.conn:exec("ROLLBACK")
                 return false
             end
             
-            logger.dbg("BookloreSync Database: Binding version:", version, "type:", type(version))
+            self.plugin:logDbg("BookloreSync Database: Binding version:", version, "type:", type(version))
             
             local bind_ok, bind_err = pcall(function()
                 stmt:bind(version)
             end)
             
             if not bind_ok then
-                logger.err("BookloreSync Database: Bind failed:", bind_err)
+                self.plugin:logErr("BookloreSync Database: Bind failed:", bind_err)
                 stmt:close()
                 self.conn:exec("ROLLBACK")
                 return false
             end
             
-            logger.dbg("BookloreSync Database: Bind successful")
+            self.plugin:logDbg("BookloreSync Database: Bind successful")
             
             local step_result = stmt:step()
-            logger.dbg("BookloreSync Database: Step result:", step_result)
+            self.plugin:logDbg("BookloreSync Database: Step result:", step_result)
             stmt:close()
             
             if step_result ~= SQ3.DONE and step_result ~= SQ3.OK then
-                logger.err("BookloreSync Database: Failed to insert version:", self.conn:errmsg())
+                self.plugin:logErr("BookloreSync Database: Failed to insert version:", self.conn:errmsg())
                 self.conn:exec("ROLLBACK")
                 return false
             end
             
             self.conn:exec("COMMIT")
-            logger.info("BookloreSync Database: Migration", version, "applied successfully")
+            self.plugin:logInfo("BookloreSync Database: Migration", version, "applied successfully")
 
             -- Run optional post-migration Lua hook (non-fatal on failure)
             local hook = self.migration_hooks and self.migration_hooks[version]
             if hook then
-                logger.info("BookloreSync Database: Running post-migration hook for version", version)
+                self.plugin:logInfo("BookloreSync Database: Running post-migration hook for version", version)
                 local hook_ok, hook_err = pcall(hook, self)
                 if not hook_ok then
-                    logger.err("BookloreSync Database: Post-migration hook", version, "threw an error:", hook_err)
+                    self.plugin:logErr("BookloreSync Database: Post-migration hook", version, "threw an error:", hook_err)
                 elseif hook_err == false then
-                    logger.warn("BookloreSync Database: Post-migration hook", version, "reported failure (non-fatal)")
+                    self.plugin:logWarn("BookloreSync Database: Post-migration hook", version, "reported failure (non-fatal)")
                 else
-                    logger.info("BookloreSync Database: Post-migration hook", version, "completed successfully")
+                    self.plugin:logInfo("BookloreSync Database: Post-migration hook", version, "completed successfully")
                 end
             end
         else
             self.conn:exec("ROLLBACK")
-            logger.err("BookloreSync Database: Migration", version, "failed, rolled back")
+            self.plugin:logErr("BookloreSync Database: Migration", version, "failed, rolled back")
             return false
         end
     end
@@ -912,8 +914,8 @@ function Database:runMigrations()
 end
 
 function Database:getBookByFilePath(file_path)
-    logger.dbg("BookloreSync Database: getBookByFilePath called")
-    logger.dbg("  file_path:", file_path, "type:", type(file_path))
+    self.plugin:logDbg("BookloreSync Database: getBookByFilePath called")
+    self.plugin:logDbg("  file_path:", file_path, "type:", type(file_path))
     
     file_path = tostring(file_path)
     
@@ -924,11 +926,11 @@ function Database:getBookByFilePath(file_path)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return nil
     end
     
-    logger.dbg("BookloreSync Database: About to bind file_path:", file_path, "type:", type(file_path))
+    self.plugin:logDbg("BookloreSync Database: About to bind file_path:", file_path, "type:", type(file_path))
     
     -- bind() takes values in order, not (index, value)
     local bind_ok, bind_err = pcall(function()
@@ -936,12 +938,12 @@ function Database:getBookByFilePath(file_path)
     end)
     
     if not bind_ok then
-        logger.err("BookloreSync Database: Failed to bind file_path:", bind_err)
+        self.plugin:logErr("BookloreSync Database: Failed to bind file_path:", bind_err)
         stmt:close()
         return nil
     end
     
-    logger.dbg("BookloreSync Database: Bind successful, executing query")
+    self.plugin:logDbg("BookloreSync Database: Bind successful, executing query")
     
     local book = nil
     for row in stmt:rows() do
@@ -973,7 +975,7 @@ function Database:getBookByHash(file_hash)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return nil
     end
     
@@ -1003,7 +1005,7 @@ end
 function Database:getBookByBookId(book_id)
     book_id = tonumber(book_id)
     if not book_id then
-        logger.err("BookloreSync Database: Invalid book_id provided to getBookByBookId")
+        self.plugin:logErr("BookloreSync Database: Invalid book_id provided to getBookByBookId")
         return nil
     end
     
@@ -1015,7 +1017,7 @@ function Database:getBookByBookId(book_id)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return nil
     end
     
@@ -1044,29 +1046,29 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
     file_hash = tostring(file_hash or "")
     
     if file_path == "" and file_hash == "" then
-        logger.warn("BookloreSync Database: Cannot save book cache with empty file_path and file_hash")
+        self.plugin:logWarn("BookloreSync Database: Cannot save book cache with empty file_path and file_hash")
         return false
     end
     
-    logger.dbg("BookloreSync Database: saveBookCache called with:")
-    logger.dbg("  file_path:", file_path, "type:", type(file_path))
-    logger.dbg("  file_hash:", file_hash, "type:", type(file_hash))
-    logger.dbg("  book_id:", book_id, "type:", type(book_id))
-    logger.dbg("  title:", title, "type:", type(title))
-    logger.dbg("  author:", author, "type:", type(author))
-    logger.dbg("  isbn10:", isbn10, "type:", type(isbn10))
-    logger.dbg("  isbn13:", isbn13, "type:", type(isbn13))
+    self.plugin:logDbg("BookloreSync Database: saveBookCache called with:")
+    self.plugin:logDbg("  file_path:", file_path, "type:", type(file_path))
+    self.plugin:logDbg("  file_hash:", file_hash, "type:", type(file_hash))
+    self.plugin:logDbg("  book_id:", book_id, "type:", type(book_id))
+    self.plugin:logDbg("  title:", title, "type:", type(title))
+    self.plugin:logDbg("  author:", author, "type:", type(author))
+    self.plugin:logDbg("  isbn10:", isbn10, "type:", type(isbn10))
+    self.plugin:logDbg("  isbn13:", isbn13, "type:", type(isbn13))
     
     if book_id ~= nil then
         local original_book_id = book_id
         book_id = tonumber(book_id)
         if not book_id then
-            logger.warn("BookloreSync Database: Invalid book_id, setting to NULL. Original value:", original_book_id, "type:", type(original_book_id))
+            self.plugin:logWarn("BookloreSync Database: Invalid book_id, setting to NULL. Original value:", original_book_id, "type:", type(original_book_id))
             book_id = nil
         end
     end
     
-    logger.dbg("BookloreSync Database: After conversion, book_id:", book_id, "type:", type(book_id))
+    self.plugin:logDbg("BookloreSync Database: After conversion, book_id:", book_id, "type:", type(book_id))
     
     local stmt = self.conn:prepare([[
         INSERT OR REPLACE INTO book_cache (file_path, file_hash, book_id, title, author, isbn10, isbn13, last_accessed)
@@ -1074,7 +1076,7 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -1084,11 +1086,11 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
     stmt:close()
     
     if result ~= SQ3.DONE and result ~= SQ3.OK then
-        logger.err("BookloreSync Database: Failed to save book cache:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to save book cache:", self.conn:errmsg())
         return false
     end
     
-    logger.dbg("BookloreSync Database: Book cache saved successfully")
+    self.plugin:logDbg("BookloreSync Database: Book cache saved successfully")
     return true
 end
 
@@ -1112,7 +1114,7 @@ function Database:updateFilePath(old_path, new_path)
     old_path = tostring(old_path or "")
     new_path = tostring(new_path or "")
     if old_path == "" or new_path == "" then
-        logger.warn("BookloreSync Database: updateFilePath called with empty path(s)")
+        self.plugin:logWarn("BookloreSync Database: updateFilePath called with empty path(s)")
         return false
     end
 
@@ -1122,7 +1124,7 @@ function Database:updateFilePath(old_path, new_path)
         WHERE file_path = ?
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare updateFilePath statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare updateFilePath statement:", self.conn:errmsg())
         return false
     end
 
@@ -1131,11 +1133,11 @@ function Database:updateFilePath(old_path, new_path)
     stmt:close()
 
     if result ~= SQ3.DONE and result ~= SQ3.OK then
-        logger.err("BookloreSync Database: updateFilePath failed:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: updateFilePath failed:", self.conn:errmsg())
         return false
     end
 
-    logger.dbg("BookloreSync Database: updateFilePath", old_path, "->", new_path)
+    self.plugin:logDbg("BookloreSync Database: updateFilePath", old_path, "->", new_path)
     return true
 end
 
@@ -1143,7 +1145,7 @@ function Database:updateBookId(file_hash, book_id)
     if book_id ~= nil then
         book_id = tonumber(book_id)
         if not book_id then
-            logger.warn("BookloreSync Database: Invalid book_id in updateBookId, aborting")
+            self.plugin:logWarn("BookloreSync Database: Invalid book_id in updateBookId, aborting")
             return false
         end
     end
@@ -1155,7 +1157,7 @@ function Database:updateBookId(file_hash, book_id)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -1182,7 +1184,7 @@ function Database:getAllMatchedBooks()
     ]])
 
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getAllMatchedBooks:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getAllMatchedBooks:", self.conn:errmsg())
         return {}
     end
 
@@ -1215,7 +1217,7 @@ function Database:updateHardcoverId(file_hash, hardcover_id)
     if hardcover_id ~= nil then
         hardcover_id = tonumber(hardcover_id)
         if not hardcover_id or hardcover_id <= 0 then
-            logger.warn("BookloreSync Database: Invalid hardcover_id in updateHardcoverId, aborting")
+            self.plugin:logWarn("BookloreSync Database: Invalid hardcover_id in updateHardcoverId, aborting")
             return false
         end
     end
@@ -1227,7 +1229,7 @@ function Database:updateHardcoverId(file_hash, hardcover_id)
     ]])
 
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare updateHardcoverId statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare updateHardcoverId statement:", self.conn:errmsg())
         return false
     end
 
@@ -1235,7 +1237,7 @@ function Database:updateHardcoverId(file_hash, hardcover_id)
     stmt:step()
     stmt:close()
 
-    logger.dbg("BookloreSync Database: hardcover_id updated to", hardcover_id, "for hash", file_hash)
+    self.plugin:logDbg("BookloreSync Database: hardcover_id updated to", hardcover_id, "for hash", file_hash)
     return true
 end
 
@@ -1248,7 +1250,7 @@ function Database:getAllUnmatchedBooks()
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return {}
     end
     
@@ -1277,7 +1279,7 @@ function Database:getBookCacheStats()
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return {total = 0, matched = 0, unmatched = 0}
     end
     
@@ -1295,7 +1297,7 @@ end
 
 function Database:clearBookCache()
     self.conn:exec("DELETE FROM book_cache")
-    logger.info("BookloreSync Database: Book cache cleared")
+    self.plugin:logInfo("BookloreSync Database: Book cache cleared")
     return true
 end
 
@@ -1304,7 +1306,7 @@ function Database:addPendingSession(session_data)
     if book_id ~= nil then
         book_id = tonumber(book_id)
         if not book_id then
-            logger.warn("BookloreSync Database: Invalid bookId in session_data, setting to NULL")
+            self.plugin:logWarn("BookloreSync Database: Invalid bookId in session_data, setting to NULL")
             book_id = nil
         end
     end
@@ -1320,7 +1322,7 @@ function Database:addPendingSession(session_data)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -1344,7 +1346,7 @@ function Database:addPendingSession(session_data)
     stmt:close()
     
     if result ~= SQ3.DONE and result ~= SQ3.OK then
-        logger.err("BookloreSync Database: Failed to insert pending session:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to insert pending session:", self.conn:errmsg())
         return false
     end
     
@@ -1364,7 +1366,7 @@ function Database:getPendingSessions(limit)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return {}
     end
     
@@ -1399,7 +1401,7 @@ function Database:deletePendingSession(session_id)
     local stmt = self.conn:prepare("DELETE FROM pending_sessions WHERE id = ?")
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -1422,7 +1424,7 @@ function Database:archivePendingSession(session_id)
     ]])
     
     if not get_stmt then
-        logger.err("BookloreSync Database: Failed to prepare select statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare select statement:", self.conn:errmsg())
         return false
     end
     
@@ -1451,7 +1453,7 @@ function Database:archivePendingSession(session_id)
     get_stmt:close()
     
     if not session_data then
-        logger.warn("BookloreSync Database: No pending session found with id:", session_id)
+        self.plugin:logWarn("BookloreSync Database: No pending session found with id:", session_id)
         return false
     end
     
@@ -1467,7 +1469,7 @@ function Database:archivePendingSession(session_id)
     ]])
     
     if not insert_stmt then
-        logger.err("BookloreSync Database: Failed to prepare insert statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare insert statement:", self.conn:errmsg())
         return false
     end
     
@@ -1491,17 +1493,17 @@ function Database:archivePendingSession(session_id)
     insert_stmt:close()
     
     if result == SQ3.DONE or result == SQ3.OK then
-        logger.info("BookloreSync Database: Archived pending session to historical_sessions")
+        self.plugin:logInfo("BookloreSync Database: Archived pending session to historical_sessions")
         return true
     else
-        logger.err("BookloreSync Database: Failed to archive pending session:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to archive pending session:", self.conn:errmsg())
         return false
     end
 end
 
 function Database:clearPendingSessions()
     self.conn:exec("DELETE FROM pending_sessions")
-    logger.info("BookloreSync Database: Pending sessions cleared")
+    self.plugin:logInfo("BookloreSync Database: Pending sessions cleared")
     return true
 end
 
@@ -1531,7 +1533,7 @@ function Database:incrementSessionRetryCount(session_id)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -1550,7 +1552,7 @@ function Database:updatePendingSessionBookId(session_id, book_id)
     ]])
 
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
 
@@ -1575,7 +1577,7 @@ function Database:getUnmatchedHistoricalBooks()
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return {}
     end
     
@@ -1607,7 +1609,7 @@ function Database:getMatchedUnsyncedBooks()
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return {}
     end
     
@@ -1637,7 +1639,7 @@ function Database:getHistoricalSessionsForBook(koreader_book_id)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return {}
     end
     
@@ -1677,7 +1679,7 @@ function Database:getHistoricalSessionsForBookUnsynced(koreader_book_id)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return {}
     end
     
@@ -1713,7 +1715,7 @@ function Database:markHistoricalSessionsMatched(koreader_book_id, book_id)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -1739,7 +1741,7 @@ function Database:addHistoricalSessions(sessions)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -1770,7 +1772,7 @@ function Database:addHistoricalSessions(sessions)
     end
     
     stmt:close()
-    logger.info("BookloreSync Database: Inserted", success_count, "of", #sessions, "historical sessions")
+    self.plugin:logInfo("BookloreSync Database: Inserted", success_count, "of", #sessions, "historical sessions")
     return success_count == #sessions
 end
 
@@ -1811,7 +1813,7 @@ function Database:markHistoricalSessionSynced(session_id)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -1830,7 +1832,7 @@ function Database:markHistoricalSessionUnmatched(session_id)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -1853,7 +1855,7 @@ function Database:getAllSyncedHistoricalSessions()
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return {}
     end
     
@@ -1892,7 +1894,7 @@ function Database:getMatchedUnsyncedHistoricalSessions()
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return {}
     end
     
@@ -1985,7 +1987,7 @@ function Database:findBookIdByIsbn(isbn10, isbn13)
         ]])
         
         if not stmt then
-            logger.err("BookloreSync Database: Failed to prepare isbn13 lookup:", self.conn:errmsg())
+            self.plugin:logErr("BookloreSync Database: Failed to prepare isbn13 lookup:", self.conn:errmsg())
             return nil
         end
         
@@ -2015,7 +2017,7 @@ function Database:findBookIdByIsbn(isbn10, isbn13)
         ]])
         
         if not stmt then
-            logger.err("BookloreSync Database: Failed to prepare isbn10 lookup:", self.conn:errmsg())
+            self.plugin:logErr("BookloreSync Database: Failed to prepare isbn10 lookup:", self.conn:errmsg())
             return nil
         end
         
@@ -2040,7 +2042,7 @@ function Database:findBookIdByIsbn(isbn10, isbn13)
 end
 
 function Database:migrateFromLuaSettings(local_db)
-    logger.info("BookloreSync Database: Starting migration from LuaSettings")
+    self.plugin:logInfo("BookloreSync Database: Starting migration from LuaSettings")
     
     local success = true
     
@@ -2052,7 +2054,7 @@ function Database:migrateFromLuaSettings(local_db)
         for file_path, file_hash in pairs(book_cache.file_hashes) do
             local book_id = book_cache.book_ids[file_hash]
             
-            logger.dbg("BookloreSync Database: Migrating book - path:", file_path, "hash:", file_hash, "id:", book_id, "type:", type(book_id))
+            self.plugin:logDbg("BookloreSync Database: Migrating book - path:", file_path, "hash:", file_hash, "id:", book_id, "type:", type(book_id))
             
             local ok, err = pcall(function()
                 local result = self:saveBookCache(file_path, file_hash, book_id, nil, nil)
@@ -2065,12 +2067,12 @@ function Database:migrateFromLuaSettings(local_db)
                 migrated_books = migrated_books + 1
             else
                 failed_books = failed_books + 1
-                logger.err("BookloreSync Database: Failed to migrate book cache entry:", file_path, "error:", err)
+                self.plugin:logErr("BookloreSync Database: Failed to migrate book cache entry:", file_path, "error:", err)
             end
         end
     end
     
-    logger.info("BookloreSync Database: Migrated", migrated_books, "book cache entries,", failed_books, "failed")
+    self.plugin:logInfo("BookloreSync Database: Migrated", migrated_books, "book cache entries,", failed_books, "failed")
     
     local pending_sessions = local_db:readSetting("pending_sessions") or {}
     local migrated_sessions = 0
@@ -2083,18 +2085,18 @@ function Database:migrateFromLuaSettings(local_db)
                 migrated_sessions = migrated_sessions + 1
             else
                 failed_sessions = failed_sessions + 1
-                logger.warn("BookloreSync Database: Failed to migrate session", i)
+                self.plugin:logWarn("BookloreSync Database: Failed to migrate session", i)
             end
         else
             failed_sessions = failed_sessions + 1
-            logger.warn("BookloreSync Database: Skipping invalid session", i, "- missing required fields")
+            self.plugin:logWarn("BookloreSync Database: Skipping invalid session", i, "- missing required fields")
         end
     end
     
-    logger.info("BookloreSync Database: Migrated", migrated_sessions, "pending sessions,", failed_sessions, "failed/invalid")
+    self.plugin:logInfo("BookloreSync Database: Migrated", migrated_sessions, "pending sessions,", failed_sessions, "failed/invalid")
     
     if failed_books > 0 or failed_sessions > 0 then
-        logger.warn("BookloreSync Database: Migration completed with errors")
+        self.plugin:logWarn("BookloreSync Database: Migration completed with errors")
         success = false
     end
     
@@ -2117,7 +2119,7 @@ function Database:saveBearerToken(username, token)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -2126,10 +2128,10 @@ function Database:saveBearerToken(username, token)
     stmt:close()
     
     if result == SQ3.DONE or result == SQ3.OK then
-        logger.info("BookloreSync Database: Saved Bearer token for user:", username)
+        self.plugin:logInfo("BookloreSync Database: Saved Bearer token for user:", username)
         return true
     else
-        logger.err("BookloreSync Database: Failed to save Bearer token:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to save Bearer token:", self.conn:errmsg())
         return false
     end
 end
@@ -2143,7 +2145,7 @@ function Database:getBearerToken(username)
     ]])
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return nil, nil
     end
     
@@ -2156,7 +2158,7 @@ function Database:getBearerToken(username)
         token = tostring(row[1])
         expires_at = tonumber(row[2])
         local time_remaining = expires_at - current_time
-        logger.info("BookloreSync Database: Found cached Bearer token for", username, 
+        self.plugin:logInfo("BookloreSync Database: Found cached Bearer token for", username, 
                    "- expires in", math.floor(time_remaining / 86400), "days")
         break
     end
@@ -2169,7 +2171,7 @@ function Database:deleteBearerToken(username)
     local stmt = self.conn:prepare("DELETE FROM bearer_tokens WHERE username = ?")
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -2177,7 +2179,7 @@ function Database:deleteBearerToken(username)
     stmt:step()
     stmt:close()
     
-    logger.info("BookloreSync Database: Deleted Bearer token for user:", username)
+    self.plugin:logInfo("BookloreSync Database: Deleted Bearer token for user:", username)
     return true
 end
 
@@ -2185,7 +2187,7 @@ function Database:cleanupExpiredTokens()
     local stmt = self.conn:prepare("DELETE FROM bearer_tokens WHERE expires_at <= ?")
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -2193,7 +2195,7 @@ function Database:cleanupExpiredTokens()
     stmt:step()
     stmt:close()
     
-    logger.info("BookloreSync Database: Cleaned up expired Bearer tokens")
+    self.plugin:logInfo("BookloreSync Database: Cleaned up expired Bearer tokens")
     return true
 end
 
@@ -2207,7 +2209,7 @@ function Database:getUpdaterCache(key)
     local stmt = self.conn:prepare("SELECT value, cached_at FROM updater_cache WHERE key = ?")
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return nil
     end
     
@@ -2224,11 +2226,11 @@ function Database:getUpdaterCache(key)
     local current_time = os.time()
     
     if current_time - cached_at > 3600 then
-        logger.info("BookloreSync Database: Cache expired for key:", key)
+        self.plugin:logInfo("BookloreSync Database: Cache expired for key:", key)
         return nil
     end
     
-    logger.info("BookloreSync Database: Retrieved cached value for key:", key)
+    self.plugin:logInfo("BookloreSync Database: Retrieved cached value for key:", key)
     return value
 end
 
@@ -2243,7 +2245,7 @@ function Database:setUpdaterCache(key, value)
     local stmt = self.conn:prepare("INSERT OR REPLACE INTO updater_cache (key, value, cached_at) VALUES (?, ?, ?)")
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
@@ -2251,7 +2253,7 @@ function Database:setUpdaterCache(key, value)
     stmt:step()
     stmt:close()
     
-    logger.info("BookloreSync Database: Cached value for key:", key)
+    self.plugin:logInfo("BookloreSync Database: Cached value for key:", key)
     return true
 end
 
@@ -2264,14 +2266,14 @@ function Database:clearUpdaterCache()
     local stmt = self.conn:prepare("DELETE FROM updater_cache")
     
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
         return false
     end
     
     stmt:step()
     stmt:close()
     
-    logger.info("BookloreSync Database: Cleared updater cache")
+    self.plugin:logInfo("BookloreSync Database: Cleared updater cache")
     return true
 end
 
@@ -2285,13 +2287,13 @@ function Database:getBookCacheById(id)
         FROM book_cache WHERE id = ? LIMIT 1
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getBookCacheById:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getBookCacheById:", self.conn:errmsg())
         return nil
     end
 
     local ok, err = pcall(function() stmt:bind(tonumber(id)) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in getBookCacheById:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in getBookCacheById:", err)
         stmt:close()
         return nil
     end
@@ -2329,13 +2331,13 @@ function Database:getBookCacheIdByFilePath(file_path)
         SELECT id FROM book_cache WHERE file_path = ? LIMIT 1
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getBookCacheIdByFilePath:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getBookCacheIdByFilePath:", self.conn:errmsg())
         return nil
     end
 
     local ok, err = pcall(function() stmt:bind(file_path) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in getBookCacheIdByFilePath:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in getBookCacheIdByFilePath:", err)
         stmt:close()
         return nil
     end
@@ -2358,12 +2360,12 @@ Upsert a row in book_metadata for the given book_cache_id.
 --]]
 function Database:upsertBookMetadata(book_cache_id, fields)
     if not book_cache_id then
-        logger.err("BookloreSync Database: upsertBookMetadata called without book_cache_id")
+        self.plugin:logErr("BookloreSync Database: upsertBookMetadata called without book_cache_id")
         return false
     end
     book_cache_id = tonumber(book_cache_id)
     if not book_cache_id then
-        logger.err("BookloreSync Database: Invalid book_cache_id in upsertBookMetadata")
+        self.plugin:logErr("BookloreSync Database: Invalid book_cache_id in upsertBookMetadata")
         return false
     end
 
@@ -2373,7 +2375,7 @@ function Database:upsertBookMetadata(book_cache_id, fields)
         SELECT id FROM book_metadata WHERE book_cache_id = ? LIMIT 1
     ]])
     if not check_stmt then
-        logger.err("BookloreSync Database: Failed to prepare check in upsertBookMetadata:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare check in upsertBookMetadata:", self.conn:errmsg())
         return false
     end
     check_stmt:bind(book_cache_id)
@@ -2408,12 +2410,12 @@ function Database:upsertBookMetadata(book_cache_id, fields)
         local sql = "UPDATE book_metadata SET " .. table.concat(sets, ", ") .. " WHERE book_cache_id = ?"
         local stmt = self.conn:prepare(sql)
         if not stmt then
-            logger.err("BookloreSync Database: Failed to prepare UPDATE in upsertBookMetadata:", self.conn:errmsg())
+            self.plugin:logErr("BookloreSync Database: Failed to prepare UPDATE in upsertBookMetadata:", self.conn:errmsg())
             return false
         end
         local ok, err = pcall(function() stmt:bind(table.unpack(binds)) end)
         if not ok then
-            logger.err("BookloreSync Database: Bind failed in upsertBookMetadata UPDATE:", err)
+            self.plugin:logErr("BookloreSync Database: Bind failed in upsertBookMetadata UPDATE:", err)
             stmt:close()
             return false
         end
@@ -2426,7 +2428,7 @@ function Database:upsertBookMetadata(book_cache_id, fields)
             VALUES (?, ?, ?, ?, ?)
         ]])
         if not stmt then
-            logger.err("BookloreSync Database: Failed to prepare INSERT in upsertBookMetadata:", self.conn:errmsg())
+            self.plugin:logErr("BookloreSync Database: Failed to prepare INSERT in upsertBookMetadata:", self.conn:errmsg())
             return false
         end
         local ok, err = pcall(function()
@@ -2439,7 +2441,7 @@ function Database:upsertBookMetadata(book_cache_id, fields)
             )
         end)
         if not ok then
-            logger.err("BookloreSync Database: Bind failed in upsertBookMetadata INSERT:", err)
+            self.plugin:logErr("BookloreSync Database: Bind failed in upsertBookMetadata INSERT:", err)
             stmt:close()
             return false
         end
@@ -2467,7 +2469,7 @@ function Database:getBookMetadata(book_cache_id)
         LIMIT 1
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getBookMetadata:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getBookMetadata:", self.conn:errmsg())
         return nil
     end
     stmt:bind(book_cache_id)
@@ -2539,7 +2541,7 @@ function Database:getBooksPendingRatingPrompt()
           AND bc.book_id IS NOT NULL
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getBooksPendingRatingPrompt:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getBooksPendingRatingPrompt:", self.conn:errmsg())
         return {}
     end
 
@@ -2558,14 +2560,14 @@ end
 function Database:addPendingRating(book_cache_id, book_id, rating)
     -- book_id may be nil when the server was offline at book-close time.
     if not book_cache_id or not rating then
-        logger.err("BookloreSync Database: addPendingRating called with missing args")
+        self.plugin:logErr("BookloreSync Database: addPendingRating called with missing args")
         return false
     end
     book_cache_id = tonumber(book_cache_id)
     if book_id ~= nil then book_id = tonumber(book_id) end
     rating        = tonumber(rating)
     if not book_cache_id or not rating then
-        logger.err("BookloreSync Database: addPendingRating: non-numeric argument")
+        self.plugin:logErr("BookloreSync Database: addPendingRating: non-numeric argument")
         return false
     end
 
@@ -2580,7 +2582,7 @@ function Database:addPendingRating(book_cache_id, book_id, rating)
             last_retry_at = NULL
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare addPendingRating:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare addPendingRating:", self.conn:errmsg())
         return false
     end
 
@@ -2588,7 +2590,7 @@ function Database:addPendingRating(book_cache_id, book_id, rating)
         stmt:bind(book_cache_id, book_id, rating)
     end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in addPendingRating:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in addPendingRating:", err)
         stmt:close()
         return false
     end
@@ -2596,7 +2598,7 @@ function Database:addPendingRating(book_cache_id, book_id, rating)
     local result = stmt:step()
     stmt:close()
     if result ~= SQ3.DONE and result ~= SQ3.OK then
-        logger.err("BookloreSync Database: addPendingRating step failed:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: addPendingRating step failed:", self.conn:errmsg())
         return false
     end
     return true
@@ -2614,7 +2616,7 @@ function Database:getPendingRatings()
         ORDER BY created_at ASC
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getPendingRatings:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getPendingRatings:", self.conn:errmsg())
         return {}
     end
 
@@ -2640,7 +2642,7 @@ Return the number of ratings currently in the pending queue.
 function Database:getPendingRatingCount()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_ratings")
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getPendingRatingCount:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getPendingRatingCount:", self.conn:errmsg())
         return 0
     end
     local count = 0
@@ -2660,7 +2662,7 @@ Remove a successfully-synced rating from the pending queue.
 --]]
 function Database:deletePendingRating(id)
     if not id then
-        logger.err("BookloreSync Database: deletePendingRating called without id")
+        self.plugin:logErr("BookloreSync Database: deletePendingRating called without id")
         return false
     end
     id = tonumber(id)
@@ -2668,13 +2670,13 @@ function Database:deletePendingRating(id)
 
     local stmt = self.conn:prepare("DELETE FROM pending_ratings WHERE id = ?")
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare deletePendingRating:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare deletePendingRating:", self.conn:errmsg())
         return false
     end
 
     local ok, err = pcall(function() stmt:bind(id) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in deletePendingRating:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in deletePendingRating:", err)
         stmt:close()
         return false
     end
@@ -2702,13 +2704,13 @@ function Database:incrementPendingRatingRetryCount(id)
         WHERE id = ?
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare incrementPendingRatingRetryCount:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare incrementPendingRatingRetryCount:", self.conn:errmsg())
         return false
     end
 
     local ok, err = pcall(function() stmt:bind(id) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in incrementPendingRatingRetryCount:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in incrementPendingRatingRetryCount:", err)
         stmt:close()
         return false
     end
@@ -2731,7 +2733,7 @@ function Database:isAnnotationSynced(book_cache_id, koreader_datetime, annotatio
         LIMIT 1
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare isAnnotationSynced:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare isAnnotationSynced:", self.conn:errmsg())
         return false
     end
 
@@ -2739,7 +2741,7 @@ function Database:isAnnotationSynced(book_cache_id, koreader_datetime, annotatio
         stmt:bind(book_cache_id, tostring(koreader_datetime), tostring(annotation_type))
     end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in isAnnotationSynced:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in isAnnotationSynced:", err)
         stmt:close()
         return false
     end
@@ -2764,7 +2766,7 @@ Record that a KOReader annotation has been synced to the server.
 --]]
 function Database:markAnnotationSynced(book_cache_id, koreader_datetime, annotation_type, server_id)
     if not book_cache_id or not koreader_datetime or not annotation_type then
-        logger.err("BookloreSync Database: markAnnotationSynced called with missing args")
+        self.plugin:logErr("BookloreSync Database: markAnnotationSynced called with missing args")
         return false
     end
     book_cache_id = tonumber(book_cache_id)
@@ -2776,7 +2778,7 @@ function Database:markAnnotationSynced(book_cache_id, koreader_datetime, annotat
         VALUES (?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare markAnnotationSynced:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare markAnnotationSynced:", self.conn:errmsg())
         return false
     end
 
@@ -2791,7 +2793,7 @@ function Database:markAnnotationSynced(book_cache_id, koreader_datetime, annotat
         )
     end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in markAnnotationSynced:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in markAnnotationSynced:", err)
         stmt:close()
         return false
     end
@@ -2803,14 +2805,14 @@ end
 
 function Database:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, payload)
     if not book_cache_id or not ann_type or not datetime or not payload then
-        logger.err("BookloreSync Database: addPendingAnnotation called with missing args")
+        self.plugin:logErr("BookloreSync Database: addPendingAnnotation called with missing args")
         return false
     end
     book_cache_id = tonumber(book_cache_id)
     -- book_id is nullable: nil means the Booklore ID is not yet known
     book_id = book_id and tonumber(book_id) or nil
     if not book_cache_id then
-        logger.err("BookloreSync Database: addPendingAnnotation: non-numeric book_cache_id")
+        self.plugin:logErr("BookloreSync Database: addPendingAnnotation: non-numeric book_cache_id")
         return false
     end
 
@@ -2825,7 +2827,7 @@ function Database:addPendingAnnotation(book_cache_id, book_id, ann_type, datetim
             last_retry_at = NULL
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare addPendingAnnotation:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare addPendingAnnotation:", self.conn:errmsg())
         return false
     end
 
@@ -2833,7 +2835,7 @@ function Database:addPendingAnnotation(book_cache_id, book_id, ann_type, datetim
         stmt:bind(book_cache_id, book_id, tostring(ann_type), tostring(datetime), tostring(payload))
     end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in addPendingAnnotation:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in addPendingAnnotation:", err)
         stmt:close()
         return false
     end
@@ -2841,7 +2843,7 @@ function Database:addPendingAnnotation(book_cache_id, book_id, ann_type, datetim
     local result = stmt:step()
     stmt:close()
     if result ~= SQ3.DONE and result ~= SQ3.OK then
-        logger.err("BookloreSync Database: addPendingAnnotation step failed:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: addPendingAnnotation step failed:", self.conn:errmsg())
         return false
     end
     return true
@@ -2859,7 +2861,7 @@ function Database:getPendingAnnotations()
         ORDER BY created_at ASC
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getPendingAnnotations:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getPendingAnnotations:", self.conn:errmsg())
         return {}
     end
 
@@ -2887,7 +2889,7 @@ Return the number of annotations currently in the pending queue.
 function Database:getPendingAnnotationCount()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_annotations")
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getPendingAnnotationCount:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getPendingAnnotationCount:", self.conn:errmsg())
         return 0
     end
     local count = 0
@@ -2907,7 +2909,7 @@ Remove a successfully-synced annotation from the pending queue.
 --]]
 function Database:deletePendingAnnotation(id)
     if not id then
-        logger.err("BookloreSync Database: deletePendingAnnotation called without id")
+        self.plugin:logErr("BookloreSync Database: deletePendingAnnotation called without id")
         return false
     end
     id = tonumber(id)
@@ -2915,13 +2917,13 @@ function Database:deletePendingAnnotation(id)
 
     local stmt = self.conn:prepare("DELETE FROM pending_annotations WHERE id = ?")
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare deletePendingAnnotation:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare deletePendingAnnotation:", self.conn:errmsg())
         return false
     end
 
     local ok, err = pcall(function() stmt:bind(id) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in deletePendingAnnotation:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in deletePendingAnnotation:", err)
         stmt:close()
         return false
     end
@@ -2949,13 +2951,13 @@ function Database:incrementPendingAnnotationRetryCount(id)
         WHERE id = ?
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare incrementPendingAnnotationRetryCount:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare incrementPendingAnnotationRetryCount:", self.conn:errmsg())
         return false
     end
 
     local ok, err = pcall(function() stmt:bind(id) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in incrementPendingAnnotationRetryCount:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in incrementPendingAnnotationRetryCount:", err)
         stmt:close()
         return false
     end
@@ -2988,7 +2990,7 @@ end
 function Database:getPendingBookmarkCount()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_bookmarks")
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getPendingBookmarkCount:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getPendingBookmarkCount:", self.conn:errmsg())
         return 0
     end
     local count = 0
@@ -3018,13 +3020,13 @@ function Database:getPluginSetting(key)
         SELECT value FROM plugin_settings WHERE key = ? LIMIT 1
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getPluginSetting:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getPluginSetting:", self.conn:errmsg())
         return nil
     end
 
     local ok, err = pcall(function() stmt:bind(key) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in getPluginSetting:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in getPluginSetting:", err)
         stmt:close()
         return nil
     end
@@ -3058,7 +3060,7 @@ representation.  nil values are stored as a SQL NULL.
 --]]
 function Database:savePluginSetting(key, value)
     if not key then
-        logger.err("BookloreSync Database: savePluginSetting called without key")
+        self.plugin:logErr("BookloreSync Database: savePluginSetting called without key")
         return false
     end
     key = tostring(key)
@@ -3075,7 +3077,7 @@ function Database:savePluginSetting(key, value)
         elseif t == "string" then
             value_str = value
         else
-            logger.err("BookloreSync Database: savePluginSetting: unsupported type", t, "for key", key)
+            self.plugin:logErr("BookloreSync Database: savePluginSetting: unsupported type", t, "for key", key)
             return false
         end
     end
@@ -3085,13 +3087,13 @@ function Database:savePluginSetting(key, value)
         VALUES (?, ?, CAST(strftime('%s', 'now') AS INTEGER))
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare savePluginSetting:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare savePluginSetting:", self.conn:errmsg())
         return false
     end
 
     local ok, err = pcall(function() stmt:bind(key, value_str) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in savePluginSetting:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in savePluginSetting:", err)
         stmt:close()
         return false
     end
@@ -3113,7 +3115,7 @@ function Database:getAllPluginSettings()
     local settings = {}
     local stmt = self.conn:prepare("SELECT key, value FROM plugin_settings")
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getAllPluginSettings:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getAllPluginSettings:", self.conn:errmsg())
         return settings
     end
 
@@ -3139,13 +3141,13 @@ end
 
 function Database:recordRatingSyncHistory(book_cache_id, rating, status, error_message)
     if not book_cache_id or not rating then
-        logger.err("BookloreSync Database: recordRatingSyncHistory called with missing args")
+        self.plugin:logErr("BookloreSync Database: recordRatingSyncHistory called with missing args")
         return false
     end
     book_cache_id = tonumber(book_cache_id)
     rating        = tonumber(rating)
     if not book_cache_id or not rating then
-        logger.err("BookloreSync Database: recordRatingSyncHistory: invalid book_cache_id or rating")
+        self.plugin:logErr("BookloreSync Database: recordRatingSyncHistory: invalid book_cache_id or rating")
         return false
     end
     status = status or "success"
@@ -3155,7 +3157,7 @@ function Database:recordRatingSyncHistory(book_cache_id, rating, status, error_m
         VALUES (?, ?, ?, ?)
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare recordRatingSyncHistory:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare recordRatingSyncHistory:", self.conn:errmsg())
         return false
     end
 
@@ -3168,7 +3170,7 @@ function Database:recordRatingSyncHistory(book_cache_id, rating, status, error_m
         )
     end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in recordRatingSyncHistory:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in recordRatingSyncHistory:", err)
         stmt:close()
         return false
     end
@@ -3197,13 +3199,13 @@ function Database:getRatingSyncHistory(book_cache_id)
         ORDER BY synced_at DESC
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getRatingSyncHistory:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getRatingSyncHistory:", self.conn:errmsg())
         return rows
     end
 
     local ok, err = pcall(function() stmt:bind(book_cache_id) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in getRatingSyncHistory:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in getRatingSyncHistory:", err)
         stmt:close()
         return rows
     end
@@ -3233,7 +3235,7 @@ Stored in plugin_settings under the key "hardcover_user_id".
 function Database:saveHardcoverUserId(user_id)
     user_id = tonumber(user_id)
     if not user_id then
-        logger.err("BookloreSync Database: saveHardcoverUserId: invalid user_id")
+        self.plugin:logErr("BookloreSync Database: saveHardcoverUserId: invalid user_id")
         return false
     end
     return self:savePluginSetting("hardcover_user_id", user_id)
@@ -3258,12 +3260,12 @@ function Database:isBookmarkSynced(book_cache_id, datetime)
         WHERE book_cache_id = ? AND datetime = ?
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare isBookmarkSynced:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare isBookmarkSynced:", self.conn:errmsg())
         return false
     end
     local ok, err = pcall(function() stmt:bind(book_cache_id, datetime) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in isBookmarkSynced:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in isBookmarkSynced:", err)
         stmt:close()
         return false
     end
@@ -3279,7 +3281,7 @@ end
 --[[-- Mark a bookmark as synced (insert into synced_bookmarks). --]]
 function Database:markBookmarkSynced(book_cache_id, datetime, server_id)
     if not book_cache_id or not datetime or datetime == "" then
-        logger.err("BookloreSync Database: markBookmarkSynced called with missing args")
+        self.plugin:logErr("BookloreSync Database: markBookmarkSynced called with missing args")
         return false
     end
     local stmt = self.conn:prepare([[
@@ -3287,12 +3289,12 @@ function Database:markBookmarkSynced(book_cache_id, datetime, server_id)
         VALUES (?, ?, ?)
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare markBookmarkSynced:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare markBookmarkSynced:", self.conn:errmsg())
         return false
     end
     local ok, err = pcall(function() stmt:bind(book_cache_id, datetime, server_id or 0) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in markBookmarkSynced:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in markBookmarkSynced:", err)
         stmt:close()
         return false
     end
@@ -3304,14 +3306,14 @@ end
 --[[-- Add a bookmark to the pending queue for retry. --]]
 function Database:addPendingBookmark(book_cache_id, book_id, datetime, payload)
     if not book_cache_id or not datetime or datetime == "" or not payload then
-        logger.err("BookloreSync Database: addPendingBookmark called with missing args")
+        self.plugin:logErr("BookloreSync Database: addPendingBookmark called with missing args")
         return false
     end
     book_cache_id = tonumber(book_cache_id)
     -- book_id is nullable: nil means the Booklore ID is not yet known
     book_id = book_id and tonumber(book_id) or nil
     if not book_cache_id then
-        logger.err("BookloreSync Database: addPendingBookmark: non-numeric book_cache_id")
+        self.plugin:logErr("BookloreSync Database: addPendingBookmark: non-numeric book_cache_id")
         return false
     end
 
@@ -3326,7 +3328,7 @@ function Database:addPendingBookmark(book_cache_id, book_id, datetime, payload)
             last_retry_at = NULL
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare addPendingBookmark:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare addPendingBookmark:", self.conn:errmsg())
         return false
     end
 
@@ -3334,7 +3336,7 @@ function Database:addPendingBookmark(book_cache_id, book_id, datetime, payload)
         stmt:bind(book_cache_id, book_id, tostring(datetime), tostring(payload))
     end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in addPendingBookmark:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in addPendingBookmark:", err)
         stmt:close()
         return false
     end
@@ -3342,7 +3344,7 @@ function Database:addPendingBookmark(book_cache_id, book_id, datetime, payload)
     local result = stmt:step()
     stmt:close()
     if result ~= SQ3.DONE and result ~= SQ3.OK then
-        logger.err("BookloreSync Database: addPendingBookmark step failed:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: addPendingBookmark step failed:", self.conn:errmsg())
         return false
     end
     return true
@@ -3357,7 +3359,7 @@ function Database:getPendingBookmarks()
         ORDER BY created_at ASC
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getPendingBookmarks:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getPendingBookmarks:", self.conn:errmsg())
         return rows
     end
     for row in stmt:rows() do
@@ -3379,12 +3381,12 @@ function Database:deletePendingBookmark(id)
     if not id then return false end
     local stmt = self.conn:prepare("DELETE FROM pending_bookmarks WHERE id = ?")
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare deletePendingBookmark:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare deletePendingBookmark:", self.conn:errmsg())
         return false
     end
     local ok, err = pcall(function() stmt:bind(id) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in deletePendingBookmark:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in deletePendingBookmark:", err)
         stmt:close()
         return false
     end
@@ -3403,12 +3405,12 @@ function Database:incrementBookmarkRetry(id)
         WHERE id = ?
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare incrementBookmarkRetry:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare incrementBookmarkRetry:", self.conn:errmsg())
         return false
     end
     local ok, err = pcall(function() stmt:bind(id) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in incrementBookmarkRetry:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in incrementBookmarkRetry:", err)
         stmt:close()
         return false
     end
@@ -3433,13 +3435,13 @@ function Database:savePendingDeletion(file_hash, stem, book_id)
     file_hash = tostring(file_hash or "")
     stem      = tostring(stem      or "")
     if file_hash == "" then
-        logger.warn("BookloreSync Database: Cannot save pending deletion with empty file_hash")
+        self.plugin:logWarn("BookloreSync Database: Cannot save pending deletion with empty file_hash")
         return false
     end
     if book_id ~= nil then
         book_id = tonumber(book_id)
         if not book_id then
-            logger.warn("BookloreSync Database: Invalid book_id in savePendingDeletion, setting NULL")
+            self.plugin:logWarn("BookloreSync Database: Invalid book_id in savePendingDeletion, setting NULL")
             book_id = nil
         end
     end
@@ -3448,22 +3450,22 @@ function Database:savePendingDeletion(file_hash, stem, book_id)
         VALUES (?, ?, ?)
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare savePendingDeletion:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare savePendingDeletion:", self.conn:errmsg())
         return false
     end
     local ok, err = pcall(function() stmt:bind(file_hash, stem, book_id) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in savePendingDeletion:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in savePendingDeletion:", err)
         stmt:close()
         return false
     end
     local res = stmt:step()
     stmt:close()
     if res ~= SQ3.DONE and res ~= SQ3.OK then
-        logger.err("BookloreSync Database: savePendingDeletion step failed:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: savePendingDeletion step failed:", self.conn:errmsg())
         return false
     end
-    logger.info("BookloreSync Database: Saved pending deletion for hash:", file_hash)
+    self.plugin:logInfo("BookloreSync Database: Saved pending deletion for hash:", file_hash)
     return true
 end
 
@@ -3476,7 +3478,7 @@ function Database:getPendingDeletions()
         ORDER BY created_at ASC
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare getPendingDeletions:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getPendingDeletions:", self.conn:errmsg())
         return rows
     end
     for row in stmt:rows() do
@@ -3497,12 +3499,12 @@ function Database:removePendingDeletion(deletion_id)
     if not deletion_id then return false end
     local stmt = self.conn:prepare("DELETE FROM pending_deletions WHERE id = ?")
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare removePendingDeletion:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare removePendingDeletion:", self.conn:errmsg())
         return false
     end
     local ok, err = pcall(function() stmt:bind(deletion_id) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in removePendingDeletion:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in removePendingDeletion:", err)
         stmt:close()
         return false
     end
@@ -3520,12 +3522,12 @@ function Database:incrementDeletionRetry(deletion_id)
         WHERE id = ?
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare incrementDeletionRetry:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare incrementDeletionRetry:", self.conn:errmsg())
         return false
     end
     local ok, err = pcall(function() stmt:bind(deletion_id) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in incrementDeletionRetry:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in incrementDeletionRetry:", err)
         stmt:close()
         return false
     end
@@ -3540,12 +3542,12 @@ Begins a SQLite transaction.
 --]]
 function Database:beginTransaction()
     if not self.conn then
-        logger.err("BookloreSync Database: beginTransaction called with no connection")
+        self.plugin:logErr("BookloreSync Database: beginTransaction called with no connection")
         return false
     end
     local ok, err = pcall(function() self.conn:exec("BEGIN") end)
     if not ok then
-        logger.err("BookloreSync Database: beginTransaction failed:", err)
+        self.plugin:logErr("BookloreSync Database: beginTransaction failed:", err)
         return false
     end
     return true
@@ -3557,12 +3559,12 @@ Commits the current SQLite transaction.
 --]]
 function Database:commit()
     if not self.conn then
-        logger.err("BookloreSync Database: commit called with no connection")
+        self.plugin:logErr("BookloreSync Database: commit called with no connection")
         return false
     end
     local ok, err = pcall(function() self.conn:exec("COMMIT") end)
     if not ok then
-        logger.err("BookloreSync Database: commit failed:", err)
+        self.plugin:logErr("BookloreSync Database: commit failed:", err)
         return false
     end
     return true
@@ -3574,12 +3576,12 @@ Rolls back the current SQLite transaction.
 --]]
 function Database:rollback()
     if not self.conn then
-        logger.err("BookloreSync Database: rollback called with no connection")
+        self.plugin:logErr("BookloreSync Database: rollback called with no connection")
         return false
     end
     local ok, err = pcall(function() self.conn:exec("ROLLBACK") end)
     if not ok then
-        logger.err("BookloreSync Database: rollback failed:", err)
+        self.plugin:logErr("BookloreSync Database: rollback failed:", err)
         return false
     end
     return true
@@ -3601,12 +3603,12 @@ function Database:setBookTracking(file_path, enabled)
         UPDATE book_cache SET tracking_enabled = ? WHERE file_path = ?
     ]])
     if not stmt then
-        logger.err("BookloreSync Database: Failed to prepare setBookTracking:", self.conn:errmsg())
+        self.plugin:logErr("BookloreSync Database: Failed to prepare setBookTracking:", self.conn:errmsg())
         return false
     end
     local ok, err = pcall(function() stmt:bind(val, file_path) end)
     if not ok then
-        logger.err("BookloreSync Database: Bind failed in setBookTracking:", err)
+        self.plugin:logErr("BookloreSync Database: Bind failed in setBookTracking:", err)
         stmt:close()
         return false
     end

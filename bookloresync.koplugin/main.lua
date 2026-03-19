@@ -54,19 +54,16 @@ local function redactUrls(message)
     if type(message) ~= "string" then
         message = tostring(message)
     end
-    -- Match http:// or https:// URLs and replace them with [URL REDACTED]
-    return message:gsub("https?://[^%s]+", "[URL REDACTED]")
+    -- Match http:// or https:// URLs and replace them with [REDACTED_URL]
+    return message:gsub("https?://[^%s]+", "[REDACTED_URL]")
 end
 
--- Secure logger wrappers
+-- Plugin logger wrappers - writes only to file logger
 function BookloreSync:logInfo(...)
     local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    for i = 1, #args do
+        args[i] = redactUrls(args[i])
     end
-    logger.info(table.unpack(args))
     
     if self.log_to_file and self.file_logger then
         self.file_logger:write("INFO", table.unpack(args))
@@ -75,12 +72,10 @@ end
 
 function BookloreSync:logWarn(...)
     local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    for i = 1, #args do
+        args[i] = redactUrls(args[i])
     end
-    logger.warn(table.unpack(args))
+    
     if self.log_to_file and self.file_logger then
         self.file_logger:write("WARN", table.unpack(args))
     end
@@ -88,12 +83,10 @@ end
 
 function BookloreSync:logErr(...)
     local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    for i = 1, #args do
+        args[i] = redactUrls(args[i])
     end
-    logger.err(table.unpack(args))
+    
     if self.log_to_file and self.file_logger then
         self.file_logger:write("ERROR", table.unpack(args))
     end
@@ -101,14 +94,15 @@ end
 
 function BookloreSync:logDbg(...)
     local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    for i = 1, #args do
+        args[i] = redactUrls(args[i])
     end
-    logger.dbg(table.unpack(args))
+    
     if self.log_to_file and self.file_logger then
         self.file_logger:write("DEBUG", table.unpack(args))
+    else
+        -- Silent fallback to native logger if file logger not initialized
+        logger.dbg(table.unpack(args))
     end
 end
 
@@ -178,36 +172,20 @@ function BookloreSync:init()
     end
 
     -- Bootstrap phase: open the legacy LuaSettings file so that settings needed
-    -- before the database is ready (log_to_file, secure_logs) can be read.
+    -- before the database is ready (log_to_file) can be read.
     -- Once the database has been initialised and migration 10 has run, self.settings
     -- is replaced with a DbSettings wrapper so all subsequent reads and writes go
     -- directly to SQLite.  The LuaSettings file is deleted by the migration hook.
     local bootstrap_settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/booklore.lua")
     self.settings = bootstrap_settings
 
-    -- Read the two settings required before the DB is ready
-    self.log_to_file  = self.settings:readSetting("log_to_file")  or false
-    self.secure_logs  = self.settings:readSetting("secure_logs")  or false
-
-    -- Initialize file logger if enabled (needs log_to_file / secure_logs)
-    if self.log_to_file then
-        self.file_logger = FileLogger:new()
-        local logger_ok = self.file_logger:init()
-        if logger_ok then
-            self:logInfo("BookloreSync: File logging initialized")
-        else
-            self:logErr("BookloreSync: Failed to initialize file logger")
-            self.file_logger = nil
-        end
-    end
-
     -- Initialize SQLite database (runs migrations, including migration 10 which
     -- copies booklore.lua → plugin_settings and deletes the source file)
-    self.db = Database:new()
+    self.db = Database:new(self)
     local db_initialized = self.db:init()
 
     if not db_initialized then
-        self:logErr("BookloreSync: Failed to initialize database")
+        logger.err("BookloreSync: Failed to initialize database")
         UIManager:show(InfoMessage:new{
             text = _("Failed to initialize Booklore database"),
             timeout = 3,
@@ -224,12 +202,12 @@ function BookloreSync:init()
 
         if old_db_file then
             old_db_file:close()
-            self:logInfo("BookloreSync: Found old database, checking if migration needed")
+            logger.info("BookloreSync: Found old database, checking if migration needed")
 
             -- Check if database is empty (needs migration)
             local stats = self.db:getBookCacheStats()
             if stats.total == 0 then
-                self:logInfo("BookloreSync: Database is empty, migrating from LuaSettings")
+                logger.info("BookloreSync: Database is empty, migrating from LuaSettings")
 
                 local ok, err = pcall(function()
                     local local_db = LuaSettings:open(old_db_path)
@@ -249,7 +227,7 @@ function BookloreSync:init()
                 end)
 
                 if not ok then
-                    self:logErr("BookloreSync: Migration failed:", err)
+                    logger.err("BookloreSync: Migration failed:", err)
                     UIManager:show(InfoMessage:new{
                         text = _("Failed to migrate old data. Check logs."),
                         timeout = 3,
@@ -266,7 +244,6 @@ function BookloreSync:init()
     self.is_enabled      = self.settings:readSetting("is_enabled")      or false
     self.log_to_file     = self.settings:readSetting("log_to_file")     or false
     self.silent_messages = self.settings:readSetting("silent_messages") or false
-    self.secure_logs     = self.settings:readSetting("secure_logs")     or false
 
     self.min_duration             = self.settings:readSetting("min_duration")             or 30
     self.min_pages                = self.settings:readSetting("min_pages")                or 5
@@ -337,16 +314,28 @@ function BookloreSync:init()
     if self.db then
         self.db:cleanupExpiredTokens()
     end
-    
-    self.api = APIClient:new()
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
 
-    self.hc_api = HardcoverClient:new({ db = self.db })
+    -- Initialize file logger if enabled (needs log_to_file / secure_logs)
+    if self.log_to_file then
+        self.file_logger = FileLogger:new()
+        local logger_ok = self.file_logger:init()
+        if logger_ok then
+            self:logInfo("BookloreSync: File logging initialized")
+        else
+            self:logErr("BookloreSync: Failed to initialize file logger")
+            self.file_logger = nil
+        end
+    end
+
+    self.api = APIClient:new(self)
+    self.api:init(self.server_url, self.username, self.password, self.db)
+
+    self.hc_api = HardcoverClient:new({ db = self.db, plugin = self })
     
-    self.metadata_extractor = MetadataExtractor:new({secure_logs = self.secure_logs})
+    self.metadata_extractor = MetadataExtractor:new({plugin = self})
     self:logInfo("BookloreSync: Metadata extractor initialized")
     
-    self.updater = Updater:new()
+    self.updater = Updater:new(self)
     
     local source = debug.getinfo(1, "S").source
     local plugin_dir = source:match("@(.*)/")
@@ -2017,7 +2006,7 @@ function BookloreSync:fileDialogSyncAnnotations(file_path)
         return
     end
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     UIManager:show(InfoMessage:new{
         text = _("Booklore: syncing annotations…"),
@@ -2085,7 +2074,7 @@ end
 Internal: run the interactive match dialog for a single book_cache row.
 --]]
 function BookloreSync:_matchSingleBook(book)
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     local search_term = book.title and book.title ~= "" and book.title
                         or book.file_path:match("([^/]+)$") or ""
@@ -2306,7 +2295,7 @@ function BookloreSync:fileDialogSyncRating(file_path)
         return
     end
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     local mode = self.rating_sync_mode or "koreader_scaled"
 
@@ -2410,7 +2399,7 @@ function BookloreSync:_fileDialogSyncBoth(file_path)
         return
     end
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     local book_cache_id = book.id
 
@@ -3264,7 +3253,7 @@ function BookloreSync:testConnection()
     local koreader_message = ""
     
     if self.username and self.username ~= "" and self.password and self.password ~= "" then
-        self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+        self.api:init(self.server_url, self.username, self.password, self.db)
         koreader_success, koreader_message = self.api:testAuth()
     else
         koreader_message = _("KOReader credentials not configured")
@@ -5005,7 +4994,6 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     -- Database:init(db_name) always prepends DataStorage:getSettingsDir() + "/",
     -- so pass the bare filename rather than the already-absolute db_path.
     local db_name         = self.db.db_path:match("([^/]+)$") or "booklore-sync.sqlite"
-    local secure_logs     = self.secure_logs
     local download_dir    = self.download_dir
     local delete_removed  = self.delete_removed_shelf_books
     local use_original_filename = self.shelf_use_original_filename
@@ -5161,7 +5149,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             local child_db = ChildDB:new()
             child_db:init(db_name)
             local child_api = ChildAPI:new()
-            child_api:init(server_url, username, password, child_db, secure_logs)
+            child_api:init(server_url, username, password, child_db)
 
             local shelf_ok, shelf_id = child_api:getOrCreateShelf(shelf_name, username, password)
             if not shelf_ok then
@@ -5381,7 +5369,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                 local child_db3 = ChildDB3:new()
                 child_db3:init(db_name)
                 local child_api3 = ChildAPI3:new()
-                child_api3:init(server_url, username, password, child_db3, secure_logs)
+                child_api3:init(server_url, username, password, child_db3)
 
                 local dl_ok, dl_err = child_api3:downloadBook(cap_book_id, cap_filepath, username, password)
                 child_db3:close()
@@ -5924,7 +5912,7 @@ function BookloreSync:syncPendingRatings(silent)
 
     self:logInfo("BookloreSync: Retrying", #pending, "pending rating(s)")
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     local synced_count = 0
     local failed_count = 0
@@ -6041,7 +6029,7 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
 
     self:logInfo("BookloreSync: Retrying", #pending, "pending annotation(s)")
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     local synced_count = 0
     local failed_count = 0
@@ -6327,7 +6315,7 @@ function BookloreSync:syncPendingSessions(silent)
         return
     end
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     -- ── Phase 0: Resolve all book_ids ─────────────────────────────────────
     -- Iterate every pending session that is missing a book_id and attempt to
@@ -6770,7 +6758,7 @@ function BookloreSync:resolveUnmatchedBooks(silent)
     
     self:logInfo("BookloreSync: Resolving", #unmatched_books, "unmatched books")
     
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
     
     local resolved_count = 0
     
@@ -8168,7 +8156,7 @@ function BookloreSync:manualMatching()
         return
     end
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
     self.bk_matching_index  = 1
     self.bk_unmatched_books = unmatched
     self:_showManualMatchDialog(unmatched[1])

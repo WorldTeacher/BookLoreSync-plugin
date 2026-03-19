@@ -13,6 +13,7 @@ local FileLogger = {
     log_dir = nil,
     current_log_file = nil,
     current_date = nil,
+    last_check_time = nil,
     max_files = 3,
 }
 
@@ -38,6 +39,7 @@ function FileLogger:init(plugin_dir)
     end
 
     self.log_dir = plugin_dir .. "/logs"
+    self.last_check_time = os.time()
 
     local lfs_ok, lfs = pcall(require, "libs/libkoreader-lfs")
     if lfs_ok and lfs then
@@ -159,14 +161,18 @@ function FileLogger:write(level, ...)
     end
     
     local current_date = self:getCurrentDate()
+    local current_time = os.time()
+    local time_elapsed = current_time - (self.last_check_time or 0)
     
-    if current_date ~= self.current_date then
+    -- Check for date change: either date string changed OR 1 hour elapsed
+    if current_date ~= self.current_date or time_elapsed >= 3600 then
         if self.current_log_file then
             self.current_log_file:close()
             self.current_log_file = nil
         end
         
         self.current_date = current_date
+        self.last_check_time = current_time
         
         self:rotateLogs()
     end

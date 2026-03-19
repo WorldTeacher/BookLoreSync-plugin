@@ -32,8 +32,10 @@ local Updater = {
     db = nil,
 }
 
-function Updater:new(o)
-    o = o or {}
+function Updater:new(plugin)
+    local o = {
+        plugin = plugin
+    }
     setmetatable(o, self)
     self.__index = self
     return o
@@ -54,10 +56,10 @@ function Updater:init(plugin_dir, db)
     -- Set up temp directory inside KOReader data dir (writable on all platforms including Android)
     self.temp_dir = DataStorage:getDataDir() .. "/booklore-temp-" .. tostring(os.time())
     
-    logger.info("BookloreSync Updater: Initialized")
-    logger.info("BookloreSync Updater: Plugin dir:", self.plugin_dir)
-    logger.info("BookloreSync Updater: Backup dir:", self.backup_dir)
-    logger.info("BookloreSync Updater: Temp dir:", self.temp_dir)
+    self.plugin:logInfo("BookloreSync Updater: Initialized")
+    self.plugin:logInfo("BookloreSync Updater: Plugin dir:", self.plugin_dir)
+    self.plugin:logInfo("BookloreSync Updater: Backup dir:", self.backup_dir)
+    self.plugin:logInfo("BookloreSync Updater: Temp dir:", self.temp_dir)
     
     os.execute("mkdir -p " .. self.backup_dir)
 end
@@ -72,7 +74,7 @@ function Updater:getCurrentVersion()
     
     local ok, version_info = pcall(dofile, version_file)
     if not ok then
-        logger.err("BookloreSync Updater: Failed to read version file:", version_info)
+        self.plugin:logErr("BookloreSync Updater: Failed to read version file:", version_info)
         return {
             version = "0.0.0-dev",
             version_type = "development",
@@ -104,7 +106,7 @@ function Updater:parseVersion(version_string)
     local major, minor, patch = version_string:match("^(%d+)%.(%d+)%.(%d+)")
     
     if not major then
-        logger.warn("BookloreSync Updater: Invalid version format:", version_string)
+        self.plugin:logWarn("BookloreSync Updater: Invalid version format:", version_string)
         return nil
     end
     
@@ -168,7 +170,7 @@ function Updater:_makeHttpRequest(url, headers, max_redirects)
     local current_url = url
     
     while redirect_count <= max_redirects do
-        logger.info("BookloreSync Updater: HTTP GET", current_url)
+        self.plugin:logInfo("BookloreSync Updater: HTTP GET", current_url)
         
         local response_body = {}
         local request_headers = headers or {}
@@ -190,7 +192,7 @@ function Updater:_makeHttpRequest(url, headers, max_redirects)
         
         if type(code) ~= "number" then
             local error_msg = tostring(code)
-            logger.err("BookloreSync Updater: HTTP request failed:", error_msg)
+            self.plugin:logErr("BookloreSync Updater: HTTP request failed:", error_msg)
             return false, "Connection error: " .. error_msg, nil, nil
         end
         
@@ -199,7 +201,7 @@ function Updater:_makeHttpRequest(url, headers, max_redirects)
         if code >= 300 and code < 400 then
             local location = response_headers and response_headers["location"]
             if not location then
-                logger.err("BookloreSync Updater: Redirect without Location header")
+                self.plugin:logErr("BookloreSync Updater: Redirect without Location header")
                 return false, "Redirect without location", code, response_headers
             end
             
@@ -210,16 +212,16 @@ function Updater:_makeHttpRequest(url, headers, max_redirects)
             
             redirect_count = redirect_count + 1
             if redirect_count > max_redirects then
-                logger.err("BookloreSync Updater: Too many redirects")
+                self.plugin:logErr("BookloreSync Updater: Too many redirects")
                 return false, "Too many redirects", code, response_headers
             end
             
-            logger.info("BookloreSync Updater: Following redirect to", location)
+            self.plugin:logInfo("BookloreSync Updater: Following redirect to", location)
             current_url = location
         elseif code >= 200 and code < 300 then
             return true, response_text, code, response_headers
         else
-            logger.err("BookloreSync Updater: HTTP", code, "response")
+            self.plugin:logErr("BookloreSync Updater: HTTP", code, "response")
             return false, response_text, code, response_headers
         end
     end
@@ -246,7 +248,7 @@ function Updater:getLatestRelease()
     
     local ok, release_data = pcall(json.decode, response)
     if not ok then
-        logger.err("BookloreSync Updater: Failed to parse JSON:", release_data)
+        self.plugin:logErr("BookloreSync Updater: Failed to parse JSON:", release_data)
         return nil, "Invalid response from GitHub API"
     end
     
@@ -266,7 +268,7 @@ function Updater:getLatestRelease()
                 asset_size = asset.size or 0
             elseif asset.name == "CHANGELOG.md" then
                 changelog_url = asset.browser_download_url
-                logger.info("BookloreSync Updater: Found CHANGELOG.md in release assets")
+                self.plugin:logInfo("BookloreSync Updater: Found CHANGELOG.md in release assets")
             end
         end
     end
@@ -297,12 +299,12 @@ function Updater:fetchChangelog(changelog_url)
         return nil, "No changelog URL provided"
     end
     
-    logger.info("BookloreSync Updater: Fetching changelog from", changelog_url)
+    self.plugin:logInfo("BookloreSync Updater: Fetching changelog from", changelog_url)
     
     local success, response, code = self:_makeHttpRequest(changelog_url)
     
     if not success then
-        logger.err("BookloreSync Updater: Failed to fetch changelog:", response)
+        self.plugin:logErr("BookloreSync Updater: Failed to fetch changelog:", response)
         return nil, "Failed to fetch changelog: " .. tostring(response)
     end
     
@@ -346,7 +348,7 @@ function Updater:parseChangelogForVersion(changelog_content, version)
     end
     
     if #section_lines == 0 then
-        logger.warn("BookloreSync Updater: No changelog found for version", version_clean)
+        self.plugin:logWarn("BookloreSync Updater: No changelog found for version", version_clean)
         return nil
     end
     
@@ -354,7 +356,7 @@ function Updater:parseChangelogForVersion(changelog_content, version)
     
     changelog_section = changelog_section:match("^%s*(.-)%s*$")
     
-    logger.info("BookloreSync Updater: Extracted", #changelog_section, "bytes for version", version_clean)
+    self.plugin:logInfo("BookloreSync Updater: Extracted", #changelog_section, "bytes for version", version_clean)
     return changelog_section
 end
 
@@ -414,11 +416,11 @@ function Updater:getCachedReleaseInfo()
     
     local ok, release_info = pcall(json.decode, cached_json)
     if not ok then
-        logger.warn("BookloreSync Updater: Failed to parse cached release info")
+        self.plugin:logWarn("BookloreSync Updater: Failed to parse cached release info")
         return nil
     end
     
-    logger.info("BookloreSync Updater: Using cached release info")
+    self.plugin:logInfo("BookloreSync Updater: Using cached release info")
     return release_info
 end
 
@@ -457,7 +459,7 @@ Check for available updates
 @return table|nil {available, current_version, latest_version, release_info}
 --]]
 function Updater:checkForUpdates(use_cache)
-    logger.info("BookloreSync Updater: Checking for updates (use_cache=" .. tostring(use_cache) .. ")")
+    self.plugin:logInfo("BookloreSync Updater: Checking for updates (use_cache=" .. tostring(use_cache) .. ")")
     
     local current_info = self:getCurrentVersion()
     local current_version = current_info.version
@@ -471,7 +473,7 @@ function Updater:checkForUpdates(use_cache)
     if not release_info then
         release_info, error_msg = self:getLatestRelease()
         if not release_info then
-            logger.err("BookloreSync Updater: Failed to get latest release:", error_msg)
+            self.plugin:logErr("BookloreSync Updater: Failed to get latest release:", error_msg)
             return nil
         end
         
@@ -482,16 +484,16 @@ function Updater:checkForUpdates(use_cache)
     local latest_parsed = self:parseVersion(release_info.version)
     
     if not current_parsed or not latest_parsed then
-        logger.err("BookloreSync Updater: Failed to parse versions")
+        self.plugin:logErr("BookloreSync Updater: Failed to parse versions")
         return nil
     end
     
     local comparison = self:compareVersions(current_parsed, latest_parsed)
     local update_available = comparison < 0
     
-    logger.info("BookloreSync Updater: Current version:", current_version)
-    logger.info("BookloreSync Updater: Latest version:", release_info.version)
-    logger.info("BookloreSync Updater: Update available:", update_available)
+    self.plugin:logInfo("BookloreSync Updater: Current version:", current_version)
+    self.plugin:logInfo("BookloreSync Updater: Latest version:", release_info.version)
+    self.plugin:logInfo("BookloreSync Updater: Update available:", update_available)
     
     return {
         available = update_available,
@@ -530,7 +532,7 @@ Download update file with progress callback and redirect support
 @return string zip_path or error message
 --]]
 function Updater:downloadUpdate(url, progress_callback)
-    logger.info("BookloreSync Updater: Downloading from", url)
+    self.plugin:logInfo("BookloreSync Updater: Downloading from", url)
     
     os.execute("mkdir -p " .. self.temp_dir)
     
@@ -542,7 +544,7 @@ function Updater:downloadUpdate(url, progress_callback)
     local redirect_count = 0
     
     while redirect_count <= max_redirects do
-        logger.info("BookloreSync Updater: Checking URL", final_url)
+        self.plugin:logInfo("BookloreSync Updater: Checking URL", final_url)
         
         local protocol = final_url:match("^https") and https or http
         protocol.TIMEOUT = 60  -- Longer timeout for downloads
@@ -577,7 +579,7 @@ function Updater:downloadUpdate(url, progress_callback)
                 return false, "Too many redirects"
             end
             
-            logger.info("BookloreSync Updater: Following redirect to", location)
+            self.plugin:logInfo("BookloreSync Updater: Following redirect to", location)
             final_url = location
         elseif code >= 200 and code < 300 then
             break
@@ -587,7 +589,7 @@ function Updater:downloadUpdate(url, progress_callback)
     end
     
     -- Now download from final URL
-    logger.info("BookloreSync Updater: Downloading from final URL", final_url)
+    self.plugin:logInfo("BookloreSync Updater: Downloading from final URL", final_url)
     
     local file = io.open(zip_path, "wb")
     if not file then
@@ -638,10 +640,10 @@ function Updater:downloadUpdate(url, progress_callback)
     if ok and lfs then
         local attr = lfs.attributes(zip_path)
         if attr and attr.size then
-            logger.info("BookloreSync Updater: Downloaded", attr.size, "bytes")
+            self.plugin:logInfo("BookloreSync Updater: Downloaded", attr.size, "bytes")
         end
     else
-        logger.dbg("BookloreSync Updater: Download complete (file size unavailable)")
+        self.plugin:logDbg("BookloreSync Updater: Download complete (file size unavailable)")
     end
     
     return true, zip_path
@@ -655,7 +657,7 @@ Validate ZIP file structure
 @return string|nil error message
 --]]
 function Updater:_validateZipStructure(zip_path)
-    logger.info("BookloreSync Updater: Validating ZIP structure")
+    self.plugin:logInfo("BookloreSync Updater: Validating ZIP structure")
     
     local list_cmd = string.format("unzip -l '%s' 2>&1", zip_path)
     local handle = io.popen(list_cmd)
@@ -673,7 +675,7 @@ function Updater:_validateZipStructure(zip_path)
         return false, "Invalid ZIP: missing _meta.lua"
     end
     
-    logger.info("BookloreSync Updater: ZIP structure is valid")
+    self.plugin:logInfo("BookloreSync Updater: ZIP structure is valid")
     return true, nil
 end
 
@@ -686,7 +688,7 @@ Extract ZIP file to destination directory
 @return string|nil error message
 --]]
 function Updater:_extractZip(zip_path, dest_dir)
-    logger.info("BookloreSync Updater: Extracting to", dest_dir)
+    self.plugin:logInfo("BookloreSync Updater: Extracting to", dest_dir)
     
     os.execute("mkdir -p " .. dest_dir)
     
@@ -696,7 +698,7 @@ function Updater:_extractZip(zip_path, dest_dir)
     local success = handle:close()
     
     if not success then
-        logger.err("BookloreSync Updater: Extraction failed:", output)
+        self.plugin:logErr("BookloreSync Updater: Extraction failed:", output)
         return false, "Failed to extract ZIP: " .. output
     end
     
@@ -715,7 +717,7 @@ function Updater:backupCurrentVersion()
     local backup_name = string.format("bookloresync-%s-%s", current_info.version, timestamp)
     local backup_path = self.backup_dir .. "/" .. backup_name
     
-    logger.info("BookloreSync Updater: Backing up to", backup_path)
+    self.plugin:logInfo("BookloreSync Updater: Backing up to", backup_path)
     
     local backup_cmd = string.format("cp -r '%s' '%s' 2>&1", self.plugin_dir, backup_path)
     local handle = io.popen(backup_cmd)
@@ -723,11 +725,11 @@ function Updater:backupCurrentVersion()
     local success = handle:close()
     
     if not success then
-        logger.err("BookloreSync Updater: Backup failed:", output)
+        self.plugin:logErr("BookloreSync Updater: Backup failed:", output)
         return false, "Backup failed: " .. output
     end
     
-    logger.info("BookloreSync Updater: Backup created successfully")
+    self.plugin:logInfo("BookloreSync Updater: Backup created successfully")
     
     self:cleanupOldBackups(self.BACKUP_KEEP_COUNT)
     
@@ -742,7 +744,7 @@ Install update from ZIP file (atomic operation)
 @return string|nil error message
 --]]
 function Updater:installUpdate(zip_path)
-    logger.info("BookloreSync Updater: Installing update from", zip_path)
+    self.plugin:logInfo("BookloreSync Updater: Installing update from", zip_path)
     
     -- Step 1: Validate ZIP structure
     local valid, error_msg = self:_validateZipStructure(zip_path)
@@ -772,33 +774,33 @@ function Updater:installUpdate(zip_path)
     end
     
     -- Step 5: Remove old plugin directory
-    logger.info("BookloreSync Updater: Removing old plugin directory")
+    self.plugin:logInfo("BookloreSync Updater: Removing old plugin directory")
     local remove_cmd = string.format("rm -rf '%s' 2>&1", self.plugin_dir)
     local handle = io.popen(remove_cmd)
     local output = handle:read("*a")
     success = handle:close()
     
     if not success then
-        logger.err("BookloreSync Updater: Failed to remove old plugin:", output)
+        self.plugin:logErr("BookloreSync Updater: Failed to remove old plugin:", output)
         return false, "Failed to remove old plugin: " .. output
     end
     
     -- Step 6: Move new version to plugin location
-    logger.info("BookloreSync Updater: Installing new version")
+    self.plugin:logInfo("BookloreSync Updater: Installing new version")
     local install_cmd = string.format("mv '%s' '%s' 2>&1", new_plugin_dir, self.plugin_dir)
     handle = io.popen(install_cmd)
     output = handle:read("*a")
     success = handle:close()
     
     if not success then
-        logger.err("BookloreSync Updater: Failed to install new version:", output)
+        self.plugin:logErr("BookloreSync Updater: Failed to install new version:", output)
         return false, "Failed to install new version: " .. output
     end
     
     -- Step 7: Cleanup temp files
     self:cleanupTempFiles()
     
-    logger.info("BookloreSync Updater: Installation completed successfully")
+    self.plugin:logInfo("BookloreSync Updater: Installation completed successfully")
     return true, nil
 end
 
@@ -809,7 +811,7 @@ Rollback to most recent backup
 @return string|nil error message
 --]]
 function Updater:rollback()
-    logger.info("BookloreSync Updater: Rolling back to previous version")
+    self.plugin:logInfo("BookloreSync Updater: Rolling back to previous version")
     
     local list_cmd = string.format("ls -t '%s' 2>&1", self.backup_dir)
     local handle = io.popen(list_cmd)
@@ -830,7 +832,7 @@ function Updater:rollback()
     local latest_backup = backups[1]
     local backup_path = self.backup_dir .. "/" .. latest_backup
     
-    logger.info("BookloreSync Updater: Restoring from", backup_path)
+    self.plugin:logInfo("BookloreSync Updater: Restoring from", backup_path)
     
     os.execute(string.format("rm -rf '%s'", self.plugin_dir))
     
@@ -840,11 +842,11 @@ function Updater:rollback()
     local success = handle:close()
     
     if not success then
-        logger.err("BookloreSync Updater: Rollback failed:", output)
+        self.plugin:logErr("BookloreSync Updater: Rollback failed:", output)
         return false, "Rollback failed: " .. output
     end
     
-    logger.info("BookloreSync Updater: Rollback completed successfully")
+    self.plugin:logInfo("BookloreSync Updater: Rollback completed successfully")
     return true, nil
 end
 
@@ -854,7 +856,7 @@ Cleanup temporary download files
 @return boolean success
 --]]
 function Updater:cleanupTempFiles()
-    logger.info("BookloreSync Updater: Cleaning up temp files")
+    self.plugin:logInfo("BookloreSync Updater: Cleaning up temp files")
     os.execute(string.format("rm -rf '%s'", self.temp_dir))
     return true
 end
@@ -868,7 +870,7 @@ Cleanup old backups, keeping only the most recent N
 function Updater:cleanupOldBackups(keep_count)
     keep_count = keep_count or self.BACKUP_KEEP_COUNT
     
-    logger.info("BookloreSync Updater: Cleaning up old backups (keeping", keep_count, ")")
+    self.plugin:logInfo("BookloreSync Updater: Cleaning up old backups (keeping", keep_count, ")")
     
     local list_cmd = string.format("ls -t '%s' 2>&1", self.backup_dir)
     local handle = io.popen(list_cmd)
@@ -885,7 +887,7 @@ function Updater:cleanupOldBackups(keep_count)
     local deleted_count = 0
     for i = keep_count + 1, #backups do
         local backup_path = self.backup_dir .. "/" .. backups[i]
-        logger.info("BookloreSync Updater: Deleting old backup:", backups[i])
+        self.plugin:logInfo("BookloreSync Updater: Deleting old backup:", backups[i])
         os.execute(string.format("rm -rf '%s'", backup_path))
         deleted_count = deleted_count + 1
     end

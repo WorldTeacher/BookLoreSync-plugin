@@ -21,35 +21,22 @@ local APIClient = {
     password = nil,
     timeout = 10,
     db = nil,  -- Database reference for token caching
-    secure_logs = false,  -- Secure logging flag
 }
 
---[[--
-Redact URLs from log message for secure logging
-
-@param message The log message that may contain URLs
-@return string Message with URLs redacted
---]]
-local function redactUrls(message)
-    if type(message) ~= "string" then
-        message = tostring(message)
-    end
-    return message:gsub("https?://[^%s]+", "[URL REDACTED]")
-end
-
-function APIClient:new(o)
-    o = o or {}
+function APIClient:new(plugin)
+    local o = {
+        plugin = plugin
+    }
     setmetatable(o, self)
     self.__index = self
     return o
 end
 
-function APIClient:init(server_url, username, password, db, secure_logs)
+function APIClient:init(server_url, username, password, db)
     self.server_url = server_url
     self.username = username
     self.password = password
     self.db = db  -- Store database reference for token caching
-    self.secure_logs = secure_logs or false
     
     if self.server_url and self.server_url:sub(-1) == "/" then
         self.server_url = self.server_url:sub(1, -2)
@@ -59,43 +46,35 @@ function APIClient:init(server_url, username, password, db, secure_logs)
 end
 
 function APIClient:logInfo(...)
-    local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    if self.plugin then
+        self.plugin:logInfo(...)
+    else
+        logger.info(...)
     end
-    logger.info(table.unpack(args))
 end
 
 function APIClient:logWarn(...)
-    local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    if self.plugin then
+        self.plugin:logWarn(...)
+    else
+        logger.warn(...)
     end
-    logger.warn(table.unpack(args))
 end
 
 function APIClient:logErr(...)
-    local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    if self.plugin then
+        self.plugin:logErr(...)
+    else
+        logger.err(...)
     end
-    logger.err(table.unpack(args))
 end
 
 function APIClient:logDbg(...)
-    local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    if self.plugin then
+        self.plugin:logDbg(...)
+    else
+        logger.dbg(...)
     end
-    logger.dbg(table.unpack(args))
 end
 
 --[[--

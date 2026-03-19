@@ -22,16 +22,25 @@ HardcoverClient.__index = HardcoverClient
 function HardcoverClient:new(o)
     o = o or {}
     setmetatable(o, self)
+    self.__index = self
     return o
 end
 
 -- Minimal log helpers so callers don't need to pass a logger in.
 function HardcoverClient:logInfo(...)
-    logger.info(...)
+    if self.plugin then
+        self.plugin:logInfo(...)
+    else
+        logger.info(...)
+    end
 end
 
 function HardcoverClient:logWarn(...)
-    logger.warn(...)
+    if self.plugin then
+        self.plugin:logWarn(...)
+    else
+        logger.warn(...)
+    end
 end
 
 --[[--

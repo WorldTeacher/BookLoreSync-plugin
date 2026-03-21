@@ -3425,7 +3425,36 @@ function BookloreSync:addToMainMenu(menu_items)
     })
 
     table.insert(base_menu, Settings:buildPreferencesMenu(self))
-    
+
+    table.insert(base_menu, {
+        text = _("Advanced"),
+        help_text = _("Advanced data management options. Use with care."),
+        sub_item_table = {
+            {
+                text = _("Re-match All Books in Cache"),
+                help_text = _("Run this when you re-created the library and all IDs have changed. Resets all stored book IDs and re-resolves them from the server."),
+                callback = function()
+                    self:rematchAllBooksInCache()
+                end,
+            },
+            {
+                text_func = function()
+                    if not self.db then return _("Clear...") end
+                    local hs = tonumber(self.db:getHistoricalSessionCount())  or 0
+                    local sa = tonumber(self.db:getSyncedAnnotationCount())   or 0
+                    local sb = tonumber(self.db:getSyncedBookmarkCount())     or 0
+                    local rh = tonumber(self.db:getRatingSyncHistoryCount())  or 0
+                    if (hs + sa + sb + rh) == 0 then return _("Clear...") end
+                    return T(_("Clear... (%1)"), hs + sa + sb + rh)
+                end,
+                help_text = _("Clear historical sessions, synced annotation records, synced bookmark records, and/or rating sync history."),
+                callback = function()
+                    self:showClearAdvancedDialog()
+                end,
+            },
+        },
+    })
+
     table.insert(base_menu, {
         text = self.update_available and _("About & Updates ⚠") or _("About & Updates"),
         sub_item_table = {
@@ -6682,6 +6711,175 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
 
     self:logInfo("BookloreSync: Pending annotations sync complete - synced:", synced_count, "failed:", failed_count, "skipped:", skipped_count)
     return synced_count, failed_count, skipped_count
+end
+
+--[[--
+Re-match all books in the cache after a library re-creation.
+
+Resets the Booklore book_id on every book in book_cache (and all linked
+pending items) to NULL, then immediately calls resolveUnmatchedBooks() to
+re-resolve them from the server.  This is the correct recovery action when
+the user has wiped and re-created their Booklore library so that all book IDs
+have changed.
+--]]
+function BookloreSync:rematchAllBooksInCache()
+    if not self.db then return end
+    UIManager:show(ConfirmBox:new{
+        text = _("This will reset all stored book IDs and re-resolve them from the server.\n\nRun this when you re-created the library and all IDs have changed.\n\nContinue?"),
+        ok_text = _("Reset & Re-match"),
+        cancel_text = _("Cancel"),
+        ok_callback = function()
+            local ok = self.db:resetAllBookIds()
+            if not ok then
+                UIManager:show(InfoMessage:new{
+                    text = _("Failed to reset book IDs. Check logs."),
+                    timeout = 3,
+                })
+                return
+            end
+            UIManager:show(InfoMessage:new{
+                text = _("All book IDs reset. Resolving from server..."),
+                timeout = 2,
+            })
+            UIManager:scheduleIn(0.5, function()
+                if not NetworkMgr:isConnected() then
+                    UIManager:show(InfoMessage:new{
+                        text = _("No network connection. Books will be re-matched on next sync."),
+                        timeout = 3,
+                    })
+                    return
+                end
+                self:resolveUnmatchedBooks(false)
+            end)
+        end,
+    })
+end
+
+--[[--
+Show a toggle-selection dialog for clearing synced history records.
+
+Presents toggleable rows for Historical Sessions, Synced Annotations,
+Synced Bookmarks, and Rating Sync History.  Only rows whose table is
+non-empty are shown.  When the user confirms, the selected data types
+are deleted from the database and a summary InfoMessage is shown.
+--]]
+function BookloreSync:showClearAdvancedDialog()
+    if not self.db then return end
+
+    local hs_count = tonumber(self.db:getHistoricalSessionCount())  or 0
+    local sa_count = tonumber(self.db:getSyncedAnnotationCount())   or 0
+    local sb_count = tonumber(self.db:getSyncedBookmarkCount())     or 0
+    local rh_count = tonumber(self.db:getRatingSyncHistoryCount())  or 0
+
+    if (hs_count + sa_count + sb_count + rh_count) == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("Nothing to clear"),
+            timeout = 2,
+        })
+        return
+    end
+
+    local sel = {
+        historical  = hs_count > 0,
+        annotations = sa_count > 0,
+        bookmarks   = sb_count > 0,
+        ratings     = rh_count > 0,
+    }
+
+    local dialog
+    local function buildDialog()
+        local function toggle_label(active, label, count)
+            local check = active and "[x]" or "[ ]"
+            return T(_("%1 %2 (%3)"), check, label, count)
+        end
+
+        local any_selected = sel.historical or sel.annotations or sel.bookmarks or sel.ratings
+
+        local buttons = {}
+
+        if hs_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.historical, _("Historical Sessions"), hs_count),
+                callback = function()
+                    sel.historical = not sel.historical
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if sa_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.annotations, _("Synced Annotations"), sa_count),
+                callback = function()
+                    sel.annotations = not sel.annotations
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if sb_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.bookmarks, _("Synced Bookmarks"), sb_count),
+                callback = function()
+                    sel.bookmarks = not sel.bookmarks
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if rh_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.ratings, _("Rating Sync History"), rh_count),
+                callback = function()
+                    sel.ratings = not sel.ratings
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        table.insert(buttons, {
+            {
+                text = _("Clear Selected"),
+                enabled = any_selected,
+                callback = function()
+                    UIManager:close(dialog)
+                    local cleared = {}
+                    if sel.historical  then self.db:clearHistoricalSessions(); table.insert(cleared, _("Historical Sessions"))  end
+                    if sel.annotations then self.db:clearSyncedAnnotations();  table.insert(cleared, _("Synced Annotations"))   end
+                    if sel.bookmarks   then self.db:clearSyncedBookmarks();    table.insert(cleared, _("Synced Bookmarks"))     end
+                    if sel.ratings     then self.db:clearRatingSyncHistory();  table.insert(cleared, _("Rating Sync History"))  end
+                    if #cleared > 0 then
+                        UIManager:show(InfoMessage:new{
+                            text = T(_("Cleared: %1"), table.concat(cleared, ", ")),
+                            timeout = 2,
+                        })
+                    end
+                end,
+            },
+            {
+                text = _("Cancel"),
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+        })
+
+        return ButtonDialog:new{
+            title = _("Clear Synced History"),
+            buttons = buttons,
+        }
+    end
+
+    dialog = buildDialog()
+    UIManager:show(dialog)
 end
 
 --[[--

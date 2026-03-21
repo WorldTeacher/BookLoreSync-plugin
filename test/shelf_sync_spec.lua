@@ -42,7 +42,52 @@ package.preload["hardcover_api_client"]         = function() return { new = func
 package.preload["booklore_updater"]             = function() return { new = function() return {} end } end
 package.preload["booklore_file_logger"]         = function() return { new = function() return {} end } end
 package.preload["booklore_metadata_extractor"]  = function() return { new = function() return {} end } end
-package.preload["json"]                         = function() return { encode = function() return "{}" end, decode = function() return {} end } end
+package.preload["json"]                         = function()
+  -- Real-ish encode/decode: serialise tables to JSON strings and back.
+  -- Only handles the subset of JSON used by shelf_state (arrays of
+  -- objects with string/number values).
+  local function encode_val(v)
+    local t = type(v)
+    if t == "nil"     then return "null"
+    elseif t == "boolean" then return tostring(v)
+    elseif t == "number"  then return tostring(v)
+    elseif t == "string"  then return '"' .. v:gsub('"', '\\"') .. '"'
+    elseif t == "table" then
+      -- detect array vs object
+      local is_arr = (#v > 0)
+      if is_arr then
+        local parts = {}
+        for _, item in ipairs(v) do parts[#parts+1] = encode_val(item) end
+        return "[" .. table.concat(parts, ",") .. "]"
+      else
+        local parts = {}
+        for k, val in pairs(v) do
+          parts[#parts+1] = '"' .. tostring(k) .. '":' .. encode_val(val)
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
+      end
+    end
+    return "null"
+  end
+  local function decode_str(s)
+    -- Very minimal JSON decoder using load() with a JSON→Lua transform.
+    -- Handles only the subset produced by encode_val above.
+    local lua_src = s
+      :gsub("null",  "nil")
+      :gsub('"([^"]+)"%s*:', '["%1"]=')
+    local fn, err = load("return " .. lua_src)
+    if fn then
+      local ok, val = pcall(fn)
+      if ok then return val end
+    end
+    return nil
+  end
+  return {
+    encode = encode_val,
+    decode = decode_str,
+    util   = { InitArray = function(t) return t end },
+  }
+end
 package.preload["ffi/util"] = function()
   -- Synchronous subprocess stub: runInSubProcess calls fn inline.
   -- writeToFD stores data into fake_result; readAllFromFD returns it.
@@ -129,7 +174,17 @@ if not _G.bit then
   _G.bit = {
     lshift = function(n, s) return math.floor(n * (2 ^ s)) end,
     rshift = function(n, s) return math.floor(n / (2 ^ s)) end,
-    band   = function(a, b) return a & b end,
+    band   = function(a, b)
+      -- Pure-math bitwise AND compatible with LuaJIT 2.1 (no & operator).
+      local result, bit_val = 0, 1
+      while a > 0 and b > 0 do
+        local ra, rb = a % 2, b % 2
+        if ra == 1 and rb == 1 then result = result + bit_val end
+        a, b = math.floor(a / 2), math.floor(b / 2)
+        bit_val = bit_val * 2
+      end
+      return result
+    end,
   }
 end
 
@@ -153,6 +208,10 @@ package.preload["booklore_database"] = function()
   return { new = function() return {
     init = function() end, close = function() end,
     getBookByFilePath = function() return nil end,
+    getShelfState     = function() return nil end,
+    saveShelfState    = function() end,
+    clearShelfState   = function() end,
+    getBookByBookId   = function() return nil end,
   } end }
 end
 
@@ -193,7 +252,11 @@ local function make_plugin(overrides)
       rollback         = function() end,
       saveBookCache    = function() end,
       getBookByFilePath = function() return nil end,
+      getBookByBookId  = function() return nil end,
       updateFilePath   = function() end,
+      getShelfState    = function() return nil end,
+      saveShelfState   = function() end,
+      clearShelfState  = function() end,
     },
     settings = {
       saveSetting = function() end,
@@ -275,7 +338,10 @@ end
 
 local function make_db_stub(opts)
   opts = opts or {}
-  -- opts.cached: filepath -> record | nil
+  -- opts.cached:       filepath -> record | nil  (for getBookByFilePath)
+  -- opts.cached_by_id: book_id  -> record | nil  (for getBookByBookId)
+  -- opts.shelf_state:  { books_json, synced_at } | nil  (for getShelfState)
+  -- opts.save_shelf_state_fn: function called when saveShelfState is invoked
   return {
     new = function()
       return {
@@ -284,6 +350,18 @@ local function make_db_stub(opts)
         getBookByFilePath = function(_, fp)
           return opts.cached and opts.cached[fp] or nil
         end,
+        getBookByBookId = function(_, bid)
+          return opts.cached_by_id and opts.cached_by_id[tonumber(bid)] or nil
+        end,
+        getShelfState = function(_, _shelf_id)
+          return opts.shelf_state or nil
+        end,
+        saveShelfState = function(_, shelf_id, books_json)
+          if opts.save_shelf_state_fn then
+            opts.save_shelf_state_fn(shelf_id, books_json)
+          end
+        end,
+        clearShelfState = function() end,
       }
     end,
   }
@@ -306,7 +384,14 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       return { new = function() return { init = function() end, getOrCreateShelf = function() return true, 1 end, getBooksInShelf = function() return true, {} end, downloadBook = function() return true end } end }
     end
     package.preload["booklore_database"] = function()
-      return { new = function() return { init = function() end, close = function() end, getBookByFilePath = function() return nil end } end }
+      return { new = function() return {
+        init = function() end, close = function() end,
+        getBookByFilePath = function() return nil end,
+        getShelfState     = function() return nil end,
+        saveShelfState    = function() end,
+        clearShelfState   = function() end,
+        getBookByBookId   = function() return nil end,
+      } end }
     end
   end)
 
@@ -678,6 +763,266 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     assert.are.equal(new_file, renamed_to)
     assert.are.equal(old_file, db_updated_from)
     assert.are.equal(new_file, db_updated_to)
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  -- ── Delta sync tests ──────────────────────────────────────────────────────
+
+  it("skips all downloads when shelf state is unchanged", function()
+    -- Cached state matches the API response exactly: book id=1.
+    -- No download subprocesses should run; saveShelfState should still be called.
+    local filepath = "/tmp/test-dl/StableBook_1.epub"
+    local json = require("json")
+    local cached_books = { { id = 1, title = "StableBook", extension = "epub" } }
+    local cached_json  = json.encode(cached_books)
+
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({ files = { [filepath] = true } })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({ books = cached_books })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub({
+        shelf_state = { books_json = cached_json, synced_at = 1000 },
+        cached = { [filepath] = { book_id = 1 } },
+      })
+    end
+
+    local p = make_plugin({ shelf_id = 42 })
+    local saved_count = 0
+    p.db.saveBookCache = function() saved_count = saved_count + 1 end
+    local shelf_state_saved = false
+    p.db.saveShelfState = function() shelf_state_saved = true end
+
+    local callback_ok = nil
+    p:syncFromBookloreShelf(true, function(ok) callback_ok = ok end)
+
+    -- Nothing should have been downloaded or cached
+    assert.are.equal(0, saved_count)
+    -- Shelf state should be persisted after a successful sync
+    assert.is_true(shelf_state_saved)
+    assert.is_true(callback_ok)
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  it("downloads only the newly added book when one book is added", function()
+    -- Cached: book id=1. Current API: books id=1 and id=2.
+    -- Only book id=2 should be downloaded.
+    local json = require("json")
+    local prev_books = { { id = 1, title = "OldBook", extension = "epub" } }
+    local curr_books = {
+      { id = 1, title = "OldBook", extension = "epub" },
+      { id = 2, title = "NewBook", extension = "epub" },
+    }
+
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({ files = {} })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({ books = curr_books, download_ok = true })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub({
+        shelf_state = { books_json = json.encode(prev_books), synced_at = 1000 },
+      })
+    end
+
+    local p = make_plugin()
+    local saved = {}
+    p.db.saveBookCache = function(_, fp, hash, bid, title)
+      table.insert(saved, { bid = bid, title = title })
+    end
+    local shelf_state_saved = false
+    p.db.saveShelfState = function() shelf_state_saved = true end
+
+    local callback_ok = nil
+    p:syncFromBookloreShelf(true, function(ok) callback_ok = ok end)
+
+    -- Only the new book (id=2) should have been downloaded and cached
+    assert.are.equal(1, #saved)
+    assert.are.equal(2, saved[1].bid)
+    assert.are.equal("NewBook", saved[1].title)
+    assert.is_true(shelf_state_saved)
+    assert.is_true(callback_ok)
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  it("deletes only the removed book when delete_removed is enabled (delta path)", function()
+    -- Cached: books id=1 and id=2. Current API: book id=1 only.
+    -- id=2 was removed from the shelf -> its local file should be deleted.
+    local json = require("json")
+    local prev_books = {
+      { id = 1, title = "KeepBook", extension = "epub" },
+      { id = 2, title = "GoneBook", extension = "epub" },
+    }
+    local curr_books = { { id = 1, title = "KeepBook", extension = "epub" } }
+    local gone_file = "/tmp/test-dl/GoneBook_2.epub"
+
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({ files = { [gone_file] = true } })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({ books = curr_books })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub({
+        shelf_state = { books_json = json.encode(prev_books), synced_at = 1000 },
+        cached_by_id = { [2] = { book_id = 2, file_path = gone_file } },
+      })
+    end
+
+    local p = make_plugin({ delete_removed_shelf_books = true })
+    local removed = {}
+    local real_remove = os.remove
+    os.remove = function(path) table.insert(removed, path); return true end
+
+    p:syncFromBookloreShelf(true)
+
+    os.remove = real_remove
+    assert.are.equal(1, #removed)
+    assert.are.equal(gone_file, removed[1])
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  it("saves shelf state after a fully successful sync", function()
+    -- Verify saveShelfState is called with the shelf_id and a non-empty JSON string.
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({ files = {} })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({
+        shelf_id = 7,
+        books    = { { id = 5, title = "ABook", extension = "epub" } },
+        download_ok = true,
+      })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub()
+    end
+
+    local p = make_plugin()
+    local saved_shelf_id, saved_json
+    p.db.saveShelfState = function(_, shelf_id, books_json)
+      saved_shelf_id = shelf_id
+      saved_json     = books_json
+    end
+
+    p:syncFromBookloreShelf(true)
+
+    assert.are.equal(7, saved_shelf_id)
+    assert.is_not_nil(saved_json)
+    assert.is_true(#saved_json > 2)  -- at least "{}" but should be a book array
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  it("does not save shelf state when sync is cancelled by user", function()
+    -- Cancel is requested before any book is processed.
+    -- saveShelfState must NOT be called.
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({ files = {} })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({
+        books = { { id = 1, title = "Book1", extension = "epub" } },
+        download_ok = true,
+      })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub()
+    end
+
+    local p = make_plugin()
+    -- Inject cancel by patching the ButtonDialog to set cancel_requested via the
+    -- UIManager show hook.  We intercept the show() call for the ButtonDialog and
+    -- call its Cancel button callback immediately.
+    local UIManager = require("ui/uimanager")
+    local real_show = UIManager.show
+    UIManager.show = function(_, widget)
+      -- The status dialog has a buttons table; trigger Cancel on first show.
+      if widget and widget.buttons then
+        local cancel_cb = widget.buttons[1] and widget.buttons[1][1] and widget.buttons[1][1].callback
+        if cancel_cb then cancel_cb() end
+      end
+    end
+
+    local shelf_state_saved = false
+    p.db.saveShelfState = function() shelf_state_saved = true end
+
+    local callback_ok = nil
+    p:syncFromBookloreShelf(true, function(ok) callback_ok = ok end)
+
+    UIManager.show = real_show
+
+    assert.is_false(shelf_state_saved)
+    -- Cancelled sync reports false
+    assert.is_false(callback_ok or false)
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  it("does not save shelf state when the DB commit fails", function()
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({ files = {} })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({
+        books = { { id = 3, title = "Book3", extension = "epub" } },
+        download_ok = true,
+      })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub()
+    end
+
+    local p = make_plugin()
+    p.db.commit = function() error("disk full") end
+
+    local shelf_state_saved = false
+    p.db.saveShelfState = function() shelf_state_saved = true end
+
+    local callback_ok = nil
+    p:syncFromBookloreShelf(true, function(ok) callback_ok = ok end)
+
+    assert.is_false(shelf_state_saved)
+    assert.is_false(callback_ok)
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  it("treats all books as new on first sync (no cached state) and saves state afterwards", function()
+    -- No shelf_state in DB: first_sync=true, every book is in books_to_download.
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({ files = {} })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({
+        books = {
+          { id = 10, title = "Alpha", extension = "epub" },
+          { id = 11, title = "Beta",  extension = "epub" },
+        },
+        download_ok = true,
+      })
+    end
+    package.preload["booklore_database"] = function()
+      -- shelf_state = nil  → no cached state
+      return make_db_stub({ shelf_state = nil })
+    end
+
+    local p = make_plugin()
+    local saved = {}
+    p.db.saveBookCache = function(_, fp, hash, bid)
+      table.insert(saved, bid)
+    end
+    local shelf_state_saved = false
+    p.db.saveShelfState = function() shelf_state_saved = true end
+
+    local callback_ok = nil
+    p:syncFromBookloreShelf(true, function(ok) callback_ok = ok end)
+
+    -- Both books should have been processed as new additions
+    assert.are.equal(2, #saved)
+    -- State should be persisted for the next sync
+    assert.is_true(shelf_state_saved)
+    assert.is_true(callback_ok)
     assert.is_false(p.sync_in_progress)
   end)
 

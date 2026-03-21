@@ -31,6 +31,7 @@ local logger = require("logger")
 
 local _ = require("gettext")
 local T = require("ffi/util").template
+local ffi = require("ffi")
 local ffiutil = require("ffi/util")
 local strbuf  = require("string.buffer")
 local Trapper = require("ui/trapper")
@@ -276,6 +277,10 @@ function BookloreSync:init()
     self.delete_sdr_on_book_delete   = self.settings:readSetting("delete_sdr_on_book_delete")
     if self.delete_sdr_on_book_delete == nil then
         self.delete_sdr_on_book_delete = false  -- Default disabled for safety
+    end
+    self.min_free_space_mb = self.settings:readSetting("min_free_space_mb")
+    if self.min_free_space_mb == nil then
+        self.min_free_space_mb = 500  -- Default: 500MB minimum free space
     end
 
     -- Resume/wake-sync state (not persisted - reset each session)
@@ -713,6 +718,66 @@ function BookloreSync:_deleteDirRecursive(path)
     end
     local ok, err = lfs.rmdir(path)
     return ok, err
+end
+
+--[[--
+Get available disk space for a given path.
+
+Uses POSIX statvfs to check filesystem statistics.
+
+@param path  Absolute path to check (file or directory)
+@return number  Available bytes on success
+@return nil, string  nil + error message on failure
+--]]
+function BookloreSync:getAvailableSpace(path)
+    if not path or path == "" then
+        return nil, "Invalid path"
+    end
+
+    -- Define statvfs structure and function if not already defined
+    local ok, _ = pcall(function()
+        ffi.cdef[[
+            struct statvfs {
+                unsigned long f_bsize;    /* Filesystem block size */
+                unsigned long f_frsize;   /* Fragment size */
+                uint64_t      f_blocks;   /* Size of fs in f_frsize units */
+                uint64_t      f_bfree;    /* Number of free blocks */
+                uint64_t      f_bavail;   /* Number of free blocks for unprivileged users */
+                uint64_t      f_files;    /* Number of inodes */
+                uint64_t      f_ffree;    /* Number of free inodes */
+                uint64_t      f_favail;   /* Number of free inodes for unprivileged users */
+                unsigned long f_fsid;     /* Filesystem ID */
+                unsigned long f_flag;     /* Mount flags */
+                unsigned long f_namemax;  /* Maximum filename length */
+            };
+            int statvfs(const char *path, struct statvfs *buf);
+        ]]
+    end)
+    
+    if not ok then
+        -- statvfs already defined, this is fine
+    end
+
+    -- Create buffer for statvfs structure
+    local buf = ffi.new("struct statvfs")
+    
+    -- Call statvfs
+    local result = ffi.C.statvfs(path, buf)
+    
+    if result ~= 0 then
+        local err_msg = "statvfs failed for path: " .. path
+        self:logErr("BookloreSync: getAvailableSpace -", err_msg)
+        return nil, err_msg
+    end
+
+    -- Calculate available bytes: f_bavail * f_frsize
+    -- f_bavail is the number of blocks available to non-root users
+    -- f_frsize is the fragment size (fundamental block size)
+    local available_bytes = tonumber(buf.f_bavail) * tonumber(buf.f_frsize)
+    
+    self:logDbg("BookloreSync: getAvailableSpace - path:", path, "available:", available_bytes, "bytes")
+    
+    return available_bytes
 end
 
 --[[--
@@ -2918,6 +2983,16 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Force full re-sync"),
+                help_text = _("Clear the cached shelf state and perform a full sync pass. Useful after manually deleting downloaded books so the plugin re-downloads them."),
+                callback = function()
+                    if self.db and self.shelf_id then
+                        self.db:clearShelfState(self.shelf_id)
+                    end
+                    self:onSyncBookloreShelf()
+                end,
+            },
+            {
                 text = _("Auto-sync shelf on wake"),
                 help_text = _("Automatically pull the Booklore shelf 15 seconds after the device wakes from suspend, once WiFi is connected."),
                 checked_func = function()
@@ -3068,6 +3143,46 @@ function BookloreSync:addToMainMenu(menu_items)
                                         self.download_dir = val
                                         self.settings:saveSetting("download_dir", val)
                                         self.settings:flush()
+                                    end
+                                    UIManager:close(dialog)
+                                end,
+                            },
+                        }},
+                    }
+                    UIManager:show(dialog)
+                    dialog:onShowKeyboard()
+                end,
+            },
+            {
+                text_func = function()
+                    return T(_("Minimum free space: %1 MB"), self.min_free_space_mb)
+                end,
+                help_text = _("Minimum free disk space (in MB) required before downloading books. Sync will stop if available space drops below this threshold. Default: 500 MB"),
+                keep_menu_open = true,
+                callback = function()
+                    local dialog
+                    dialog = InputDialog:new{
+                        title   = _("Minimum free space (MB)"),
+                        input   = tostring(self.min_free_space_mb),
+                        input_type = "number",
+                        buttons = {{
+                            {
+                                text     = _("Cancel"),
+                                callback = function() UIManager:close(dialog) end,
+                            },
+                            {
+                                text     = _("Save"),
+                                is_enter_default = true,
+                                callback = function()
+                                    local val = tonumber(dialog:getInputText())
+                                    if val and val >= 0 then
+                                        self.min_free_space_mb = val
+                                        self.settings:saveSetting("min_free_space_mb", val)
+                                        self.settings:flush()
+                                        UIManager:show(InfoMessage:new{
+                                            text = T(_("Minimum free space set to %1 MB"), val),
+                                            timeout = 2,
+                                        })
                                     end
                                     UIManager:close(dialog)
                                 end,
@@ -3310,7 +3425,36 @@ function BookloreSync:addToMainMenu(menu_items)
     })
 
     table.insert(base_menu, Settings:buildPreferencesMenu(self))
-    
+
+    table.insert(base_menu, {
+        text = _("Advanced"),
+        help_text = _("Advanced data management options. Use with care."),
+        sub_item_table = {
+            {
+                text = _("Re-match All Books in Cache"),
+                help_text = _("Run this when you re-created the library and all IDs have changed. Resets all stored book IDs and re-resolves them from the server."),
+                callback = function()
+                    self:rematchAllBooksInCache()
+                end,
+            },
+            {
+                text_func = function()
+                    if not self.db then return _("Clear...") end
+                    local hs = tonumber(self.db:getHistoricalSessionCount())  or 0
+                    local sa = tonumber(self.db:getSyncedAnnotationCount())   or 0
+                    local sb = tonumber(self.db:getSyncedBookmarkCount())     or 0
+                    local rh = tonumber(self.db:getRatingSyncHistoryCount())  or 0
+                    if (hs + sa + sb + rh) == 0 then return _("Clear...") end
+                    return T(_("Clear... (%1)"), hs + sa + sb + rh)
+                end,
+                help_text = _("Clear historical sessions, synced annotation records, synced bookmark records, and/or rating sync history."),
+                callback = function()
+                    self:showClearAdvancedDialog()
+                end,
+            },
+        },
+    })
+
     table.insert(base_menu, {
         text = self.update_available and _("About & Updates ⚠") or _("About & Updates"),
         sub_item_table = {
@@ -5184,6 +5328,9 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     local delete_removed  = self.delete_removed_shelf_books
     local use_original_filename = self.shelf_use_original_filename
     local delete_sdr      = self.delete_sdr_on_book_delete
+    -- Logging config: captured so subprocesses can write to the same log file.
+    local sub_log_to_file = self.log_to_file and self.file_logger ~= nil
+    local sub_log_dir     = sub_log_to_file and self.file_logger.log_dir or nil
 
     -- Helper: inline hash calculation for subprocess use.
     -- Mirrors BookloreSync:calculateBookHash but with no self dependency.
@@ -5254,6 +5401,39 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
         end
         -- Fallback: "BookID_" already embeds the id; no extra tag needed.
         return "BookID_" .. tostring(book.id) .. ext_suffix
+    end
+
+    -- Build a lightweight plugin stub for use inside subprocesses.
+    -- Subprocesses are forked copies of the Lua VM - they cannot use the parent's
+    -- self.file_logger (different fd, different state), but they CAN open the same
+    -- log file in append mode and write to it directly.  The log directory already
+    -- exists (created by the parent's FileLogger:init), so no setup is needed.
+    -- The filename pattern matches FileLogger:getLogFilePath() exactly so that
+    -- subprocess entries land in the same rotating file as parent entries.
+    -- Method signatures use (_, ...) because Database/API call these via colon
+    -- syntax (self.plugin:logInfo(...)), which passes self as the first argument.
+    local function makeSubprocessPlugin()
+        if not sub_log_to_file or not sub_log_dir then
+            local noop = function() end
+            return { logInfo = noop, logWarn = noop, logErr = noop, logDbg = noop }
+        end
+        local log_path = sub_log_dir .. "/" .. os.date("booklore-%Y-%m-%d.log")
+        local log_file = io.open(log_path, "a")
+        local function write(level, ...)
+            if not log_file then return end
+            local args = {...}
+            local parts = {}
+            for i = 1, #args do parts[i] = tostring(args[i]) end
+            log_file:write(string.format("[%s] [%s] %s\n",
+                os.date("%Y-%m-%d %H:%M:%S"), level, table.concat(parts, " ")))
+            log_file:flush()
+        end
+        return {
+            logInfo = function(_, ...) write("INFO",  ...) end,
+            logWarn = function(_, ...) write("WARN",  ...) end,
+            logErr  = function(_, ...) write("ERROR", ...) end,
+            logDbg  = function(_, ...) write("DEBUG", ...) end,
+        }
     end
 
     -- Trapper:wrap() hands control to a coroutine on the UI thread.
@@ -5332,9 +5512,10 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             -- Child process: no UIManager calls allowed here.
             local ChildDB  = require("booklore_database")
             local ChildAPI = require("booklore_api_client")
-            local child_db = ChildDB:new()
+            local child_plugin = makeSubprocessPlugin()
+            local child_db = ChildDB:new(child_plugin)
             child_db:init(db_name)
-            local child_api = ChildAPI:new()
+            local child_api = ChildAPI:new(child_plugin)
             child_api:init(server_url, username, password, child_db)
 
             local shelf_ok, shelf_id = child_api:getOrCreateShelf(shelf_name, username, password)
@@ -5344,12 +5525,16 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             end
 
             local books_ok, books = child_api:getBooksInShelf(shelf_id, username, password)
-            child_db:close()
             if not books_ok then
+                child_db:close()
                 return { success = false, error = tostring(books or "Failed to retrieve books from shelf") }
             end
 
-            return { success = true, shelf_id = shelf_id, books = books or {} }
+            -- Read the cached shelf state so the parent can compute the delta.
+            local cached_state = child_db:getShelfState(shelf_id)
+            child_db:close()
+
+            return { success = true, shelf_id = shelf_id, books = books or {}, cached_state = cached_state }
         end)
 
         -- completed=false means subprocess fork failed
@@ -5401,6 +5586,9 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             UIManager:close(status_dialog)
             self.sync_in_progress = false
             local msg = _("Shelf is empty - no books to sync")
+            -- Shelf is now confirmed empty - save that state so the next sync
+            -- also exits fast (no books to add; everything already removed).
+            self.db:saveShelfState(new_shelf_id, "[]")
             if not silent and not self.silent_messages then
                 UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
             end
@@ -5408,16 +5596,68 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             return
         end
 
-        -- ── Phase 2: per-book download loop ────────────────────────────────
-        local total        = #books
+        -- ── Delta computation: diff current shelf against cached state ──────
+        -- Build a lookup of the previously known shelf contents (by book ID).
+        -- An absent cache means this is the first sync: treat every book as new.
+        local prev_books = {}  -- book_id (number) → book object from last sync
+        local cached_state = fetch_result.cached_state
+        if cached_state and type(cached_state.books_json) == "string" then
+            local ok_dec, decoded = pcall(json.decode, cached_state.books_json)
+            if ok_dec and type(decoded) == "table" then
+                for _, b in ipairs(decoded) do
+                    local bid = tonumber(b.id)
+                    if bid then prev_books[bid] = b end
+                end
+                self:logInfo("BookloreSync: delta - previous shelf state has", #decoded, "books, synced_at:", cached_state.synced_at)
+            else
+                self:logWarn("BookloreSync: delta - could not decode cached shelf JSON, forcing full sync")
+            end
+        else
+            self:logInfo("BookloreSync: delta - no cached shelf state, performing full sync")
+        end
+
+        local curr_books = {}  -- book_id (number) → book object from current API response
+        for _, b in ipairs(books) do
+            local bid = tonumber(b.id)
+            if bid then curr_books[bid] = b end
+        end
+
+        local books_to_download = {}   -- new additions: in current but not in previous
+        local books_to_delete   = {}   -- removals: in previous but not in current (IDs only)
+
+        for bid, b in pairs(curr_books) do
+            if not prev_books[bid] then
+                table.insert(books_to_download, b)
+            end
+        end
+        for bid in pairs(prev_books) do
+            if not curr_books[bid] then
+                table.insert(books_to_delete, bid)
+            end
+        end
+
+        local first_sync = (next(prev_books) == nil)  -- no cached state at all
+        local total_new  = #books_to_download
+        local total_del  = #books_to_delete
+
+        self:logInfo(string.format(
+            "BookloreSync: delta - total=%d new=%d removed=%d first_sync=%s",
+            #books, total_new, total_del, tostring(first_sync)
+        ))
+
+        -- ── Phase 2: per-book download loop (only new additions) ───────────
         local downloaded   = 0
         local skipped      = 0
         local errors       = 0
         local new_books    = {}   -- accumulate DB writes for Phase 3
-        local shelf_book_ids = {}
+        local space_error_info = nil  -- Track space error details for final notification
 
-        -- Update dialog title now that we know the total book count.
-        status_dialog:setTitle(T(_("Syncing shelf: %1 books"), total))
+        -- Update dialog title to show what we actually need to do.
+        if total_new == 0 and total_del == 0 then
+            status_dialog:setTitle(_("Shelf up to date - nothing to do"))
+        else
+            status_dialog:setTitle(T(_("Syncing shelf: %1 new, %2 removed"), total_new, total_del))
+        end
 
         -- Helper: flush accumulated DB writes and report cancellation.
         local function cancelSync(books_done)
@@ -5435,18 +5675,17 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             end
             if not silent and not self.silent_messages then
                 UIManager:show(InfoMessage:new{
-                    text = T(_("Sync cancelled after %1 of %2 books"), books_done, total),
+                    text = T(_("Sync cancelled after %1 of %2 books"), books_done, total_new),
                     timeout = 3,
                 })
             end
+            -- Do NOT save shelf state: sync is incomplete.
             if on_complete then on_complete(false, _("Sync cancelled")) end
         end
 
-        for i, book in ipairs(books) do
+        for i, book in ipairs(books_to_download) do
             local book_id = tonumber(book.id)
             if not book_id then goto book_continue end
-
-            shelf_book_ids[book_id] = true
 
             if not book.extension or book.extension == "" then
                 self:logWarn("BookloreSync: skipping book", book_id,
@@ -5459,25 +5698,19 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             local filepath = download_dir .. "/" .. filename
 
             -- ── Migration: rename old-scheme files to the new ID-tagged name ───
-            -- Before checking whether the target file exists, look for any file
-            -- that was downloaded under an older naming scheme (no "_id" suffix).
-            -- If found, rename it in place so we don't re-download unnecessarily.
             if lfs.attributes(filepath, "mode") ~= "file" then
                 local extension = book.extension:lower()
                 local ext_suffix = "." .. extension
                 local id_tag     = "_" .. tostring(book_id)
-                -- Candidate 1: sanitized title without id tag
                 local old_safe_title = book.title and book.title
                     :gsub('[/\\:*?"<>|]', "")
                     :gsub("%s+", " ")
                     :gsub("^%s+", "")
                     :gsub("%s+$", "") or ""
-                -- Apply the same 150-char limit the old scheme used (no id_tag, just ext_suffix)
                 local old_max_stem = 150 - #ext_suffix
                 if #old_safe_title > old_max_stem then
                     old_safe_title = old_safe_title:sub(1, old_max_stem):gsub("%s+$", "")
                 end
-                -- Candidate 2: sanitized original_filename stem without id tag
                 local orig_stem = (book.original_filename or ""):match("^(.+)%.[^.]+$")
                                or book.original_filename or ""
                 local old_safe_orig = orig_stem
@@ -5495,9 +5728,6 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                 if old_safe_orig ~= "" and old_safe_orig ~= old_safe_title then
                     table.insert(candidates, download_dir .. "/" .. old_safe_orig .. ext_suffix)
                 end
-                -- Candidate 3: BookID_ fallback from old scheme (no change needed if
-                -- it already matches the current fallback, but try just in case title
-                -- was added later to a book that previously had none)
                 table.insert(candidates, download_dir .. "/BookID_" .. tostring(book_id) .. ext_suffix)
                 for _, old_path in ipairs(candidates) do
                     if old_path ~= filepath and lfs.attributes(old_path, "mode") == "file" then
@@ -5517,11 +5747,47 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 
             local already_exists = lfs.attributes(filepath, "mode") == "file"
 
+            -- ── Check disk space before downloading ─────────────────────────────
+            if not already_exists then
+                local file_size, size_err = self.api:getBookFileSize(book_id, self.username, self.password)
+                if not file_size then
+                    self:logWarn("BookloreSync: could not get file size for book", book_id, ":", size_err or "unknown error")
+                else
+                    local available_bytes, space_err = self:getAvailableSpace(download_dir)
+                    if not available_bytes then
+                        self:logErr("BookloreSync: could not check available space:", space_err or "unknown error")
+                    else
+                        local min_free_bytes = self.min_free_space_mb * 1024 * 1024
+                        local required_bytes = file_size + min_free_bytes
+
+                        if available_bytes < required_bytes then
+                            local available_mb = math.floor(available_bytes / (1024 * 1024))
+                            local file_size_mb = math.floor(file_size / (1024 * 1024) * 100) / 100
+                            local required_mb = math.floor(required_bytes / (1024 * 1024))
+
+                            space_error_info = {
+                                book_title = book.title or "Unknown",
+                                available_mb = available_mb,
+                                file_size_mb = file_size_mb,
+                                min_free_mb = self.min_free_space_mb,
+                                required_mb = required_mb,
+                                books_downloaded = downloaded,
+                                books_total = total_new,
+                            }
+
+                            self:logWarn("BookloreSync: insufficient disk space for book", book_id,
+                                "- available:", available_mb, "MB, required:", required_mb, "MB")
+                            break
+                        end
+                    end
+                end
+            end
+
             -- Update the dialog title to show current book progress.
             if already_exists then
-                status_dialog:setTitle(T(_("Skipping: %1 (%2/%3)"), book.title or "Unknown", i, total))
+                status_dialog:setTitle(T(_("Skipping: %1 (%2/%3)"), book.title or "Unknown", i, total_new))
             else
-                status_dialog:setTitle(T(_("Downloading: %1 (%2/%3)"), book.title or "Unknown", i, total))
+                status_dialog:setTitle(T(_("Downloading: %1 (%2/%3)"), book.title or "Unknown", i, total_new))
             end
 
             -- Capture loop-local values for the closure (Lua upvalue semantics)
@@ -5537,7 +5803,8 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                 if lfs.attributes(cap_filepath, "mode") == "file" then
                     -- File already on disk; check if it needs a cache entry
                     local ChildDB2 = require("booklore_database")
-                    local child_db2 = ChildDB2:new()
+                    local child_plugin2 = makeSubprocessPlugin()
+                    local child_db2 = ChildDB2:new(child_plugin2)
                     child_db2:init(db_name)
                     local cached = child_db2:getBookByFilePath(cap_filepath)
                     child_db2:close()
@@ -5552,9 +5819,10 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                 -- Download the file
                 local ChildDB3  = require("booklore_database")
                 local ChildAPI3 = require("booklore_api_client")
-                local child_db3 = ChildDB3:new()
+                local child_plugin3 = makeSubprocessPlugin()
+                local child_db3 = ChildDB3:new(child_plugin3)
                 child_db3:init(db_name)
-                local child_api3 = ChildAPI3:new()
+                local child_api3 = ChildAPI3:new(child_plugin3)
                 child_api3:init(server_url, username, password, child_db3)
 
                 local dl_ok, dl_err = child_api3:downloadBook(cap_book_id, cap_filepath, username, password)
@@ -5569,7 +5837,6 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             end)
 
             -- completed=false means the subprocess fork failed
-            -- (should not happen in normal use; defensive).
             if not book_completed then
                 UIManager:close(status_dialog)
                 cancelSync(i - 1)
@@ -5578,7 +5845,6 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 
             -- Cancel button was pressed: current book just finished cleanly, stop now.
             if cancel_requested then
-                -- Process this book's result before stopping so it is not lost.
                 if type(book_result) == "table" then
                     if book_result.status == "downloaded" then
                         downloaded = downloaded + 1
@@ -5646,21 +5912,17 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             end
 
             if delete_removed then
-                for entry in lfs.dir(download_dir) do
-                    if entry ~= "." and entry ~= ".." then
-                        local fp = download_dir .. "/" .. entry
-                        if lfs.attributes(fp, "mode") == "file" then
-                            -- Use the DB as the authoritative source of whether
-                            -- this file was placed here by the plugin.  This
-                            -- prevents accidental deletion of user-placed files
-                            -- whose names happen to end with _<number>.<ext>.
-                            local cached = self.db and self.db:getBookByFilePath(fp)
-                            local lid = cached and cached.book_id
-                            if lid and not shelf_book_ids[lid] then
+                if not first_sync then
+                    -- Delta path: we know exactly which book IDs were removed.
+                    -- Look up their file paths from the DB and delete directly,
+                    -- avoiding a full directory walk.
+                    for _, removed_id in ipairs(books_to_delete) do
+                        local cached = self.db:getBookByBookId(removed_id)
+                        if cached and cached.file_path then
+                            local fp = cached.file_path
+                            if lfs.attributes(fp, "mode") == "file" then
                                 if os.remove(fp) then
                                     deleted = deleted + 1
-                                    -- Also remove any .sdr sidecar directories if
-                                    -- the user has enabled that option.
                                     if delete_sdr then
                                         local sdr_dirs = self:getSdrPaths(fp)
                                         for _, sdr_dir in ipairs(sdr_dirs) do
@@ -5673,6 +5935,38 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                                     end
                                 else
                                     errors = errors + 1
+                                end
+                            end
+                        end
+                    end
+                else
+                    -- First sync (no previous state): fall back to the directory
+                    -- walk so any orphan files from before the plugin managed this
+                    -- folder are still cleaned up.
+                    local shelf_book_ids = {}
+                    for bid in pairs(curr_books) do shelf_book_ids[bid] = true end
+                    for entry in lfs.dir(download_dir) do
+                        if entry ~= "." and entry ~= ".." then
+                            local fp = download_dir .. "/" .. entry
+                            if lfs.attributes(fp, "mode") == "file" then
+                                local cached = self.db and self.db:getBookByFilePath(fp)
+                                local lid = cached and cached.book_id
+                                if lid and not shelf_book_ids[lid] then
+                                    if os.remove(fp) then
+                                        deleted = deleted + 1
+                                        if delete_sdr then
+                                            local sdr_dirs = self:getSdrPaths(fp)
+                                            for _, sdr_dir in ipairs(sdr_dirs) do
+                                                self:logInfo("BookloreSync: Deleting sidecar:", sdr_dir)
+                                                local ok_rm, err_rm = self:_deleteDirRecursive(sdr_dir)
+                                                if not ok_rm then
+                                                    self:logErr("BookloreSync: Failed to delete sidecar:", sdr_dir, err_rm)
+                                                end
+                                            end
+                                        end
+                                    else
+                                        errors = errors + 1
+                                    end
                                 end
                             end
                         end
@@ -5697,11 +5991,61 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             if not silent and not self.silent_messages then
                 UIManager:show(InfoMessage:new{ text = msg, timeout = 4 })
             end
+            -- Do NOT save shelf state: sync failed.
             if on_complete then on_complete(false, msg) end
             return
         end
 
+        -- Persist the current shelf contents as the new baseline for the next
+        -- delta sync.  Only saved after a fully successful commit so that a
+        -- partial/cancelled sync does not corrupt the cached state.
+        -- json.encode the full current book list (not just the delta).
+        if not space_error_info then
+            local ok_enc, books_json = pcall(json.encode, books)
+            if ok_enc and books_json then
+                self.db:saveShelfState(new_shelf_id, books_json)
+                self:logInfo("BookloreSync: shelf state saved for shelf_id", new_shelf_id)
+            else
+                self:logWarn("BookloreSync: could not encode shelf state for caching")
+            end
+        end
+
         self.sync_in_progress = false
+
+        -- ── Show space error notification if sync stopped due to insufficient space ───
+        if space_error_info then
+            local ConfirmBox = require("ui/widget/confirmbox")
+            local space_msg = T(
+                _("No space left on device\n\n" ..
+                  "Book: %1\n" ..
+                  "File size: %2 MB\n" ..
+                  "Available space: %3 MB\n" ..
+                  "Required space: %4 MB (file + %5 MB buffer)\n\n" ..
+                  "Downloaded %6 of %7 books before stopping."),
+                space_error_info.book_title,
+                space_error_info.file_size_mb,
+                space_error_info.available_mb,
+                space_error_info.required_mb,
+                space_error_info.min_free_mb,
+                space_error_info.books_downloaded,
+                space_error_info.books_total
+            )
+
+            if not silent and not self.silent_messages then
+                UIManager:show(ConfirmBox:new{
+                    text = space_msg,
+                    ok_text = _("Close"),
+                    ok_callback = function()
+                        -- Just close the dialog
+                    end,
+                })
+            end
+
+            if on_complete then
+                on_complete(false, _("Sync stopped: insufficient disk space"))
+            end
+            return
+        end
 
         local final_msg = T(
             _("Sync complete!\n\nDownloaded: %1\nSkipped: %2\nDeleted: %3\nErrors: %4"),
@@ -6367,6 +6711,175 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
 
     self:logInfo("BookloreSync: Pending annotations sync complete - synced:", synced_count, "failed:", failed_count, "skipped:", skipped_count)
     return synced_count, failed_count, skipped_count
+end
+
+--[[--
+Re-match all books in the cache after a library re-creation.
+
+Resets the Booklore book_id on every book in book_cache (and all linked
+pending items) to NULL, then immediately calls resolveUnmatchedBooks() to
+re-resolve them from the server.  This is the correct recovery action when
+the user has wiped and re-created their Booklore library so that all book IDs
+have changed.
+--]]
+function BookloreSync:rematchAllBooksInCache()
+    if not self.db then return end
+    UIManager:show(ConfirmBox:new{
+        text = _("This will reset all stored book IDs and re-resolve them from the server.\n\nRun this when you re-created the library and all IDs have changed.\n\nContinue?"),
+        ok_text = _("Reset & Re-match"),
+        cancel_text = _("Cancel"),
+        ok_callback = function()
+            local ok = self.db:resetAllBookIds()
+            if not ok then
+                UIManager:show(InfoMessage:new{
+                    text = _("Failed to reset book IDs. Check logs."),
+                    timeout = 3,
+                })
+                return
+            end
+            UIManager:show(InfoMessage:new{
+                text = _("All book IDs reset. Resolving from server..."),
+                timeout = 2,
+            })
+            UIManager:scheduleIn(0.5, function()
+                if not NetworkMgr:isConnected() then
+                    UIManager:show(InfoMessage:new{
+                        text = _("No network connection. Books will be re-matched on next sync."),
+                        timeout = 3,
+                    })
+                    return
+                end
+                self:resolveUnmatchedBooks(false)
+            end)
+        end,
+    })
+end
+
+--[[--
+Show a toggle-selection dialog for clearing synced history records.
+
+Presents toggleable rows for Historical Sessions, Synced Annotations,
+Synced Bookmarks, and Rating Sync History.  Only rows whose table is
+non-empty are shown.  When the user confirms, the selected data types
+are deleted from the database and a summary InfoMessage is shown.
+--]]
+function BookloreSync:showClearAdvancedDialog()
+    if not self.db then return end
+
+    local hs_count = tonumber(self.db:getHistoricalSessionCount())  or 0
+    local sa_count = tonumber(self.db:getSyncedAnnotationCount())   or 0
+    local sb_count = tonumber(self.db:getSyncedBookmarkCount())     or 0
+    local rh_count = tonumber(self.db:getRatingSyncHistoryCount())  or 0
+
+    if (hs_count + sa_count + sb_count + rh_count) == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("Nothing to clear"),
+            timeout = 2,
+        })
+        return
+    end
+
+    local sel = {
+        historical  = hs_count > 0,
+        annotations = sa_count > 0,
+        bookmarks   = sb_count > 0,
+        ratings     = rh_count > 0,
+    }
+
+    local dialog
+    local function buildDialog()
+        local function toggle_label(active, label, count)
+            local check = active and "[x]" or "[ ]"
+            return T(_("%1 %2 (%3)"), check, label, count)
+        end
+
+        local any_selected = sel.historical or sel.annotations or sel.bookmarks or sel.ratings
+
+        local buttons = {}
+
+        if hs_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.historical, _("Historical Sessions"), hs_count),
+                callback = function()
+                    sel.historical = not sel.historical
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if sa_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.annotations, _("Synced Annotations"), sa_count),
+                callback = function()
+                    sel.annotations = not sel.annotations
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if sb_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.bookmarks, _("Synced Bookmarks"), sb_count),
+                callback = function()
+                    sel.bookmarks = not sel.bookmarks
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if rh_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.ratings, _("Rating Sync History"), rh_count),
+                callback = function()
+                    sel.ratings = not sel.ratings
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        table.insert(buttons, {
+            {
+                text = _("Clear Selected"),
+                enabled = any_selected,
+                callback = function()
+                    UIManager:close(dialog)
+                    local cleared = {}
+                    if sel.historical  then self.db:clearHistoricalSessions(); table.insert(cleared, _("Historical Sessions"))  end
+                    if sel.annotations then self.db:clearSyncedAnnotations();  table.insert(cleared, _("Synced Annotations"))   end
+                    if sel.bookmarks   then self.db:clearSyncedBookmarks();    table.insert(cleared, _("Synced Bookmarks"))     end
+                    if sel.ratings     then self.db:clearRatingSyncHistory();  table.insert(cleared, _("Rating Sync History"))  end
+                    if #cleared > 0 then
+                        UIManager:show(InfoMessage:new{
+                            text = T(_("Cleared: %1"), table.concat(cleared, ", ")),
+                            timeout = 2,
+                        })
+                    end
+                end,
+            },
+            {
+                text = _("Cancel"),
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+        })
+
+        return ButtonDialog:new{
+            title = _("Clear Synced History"),
+            buttons = buttons,
+        }
+    end
+
+    dialog = buildDialog()
+    UIManager:show(dialog)
 end
 
 --[[--

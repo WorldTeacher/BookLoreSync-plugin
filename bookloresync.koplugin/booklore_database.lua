@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 21,  -- Current database schema version
+    VERSION = 22,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -546,6 +546,21 @@ Database.migrations = {
     -- Add tracking_enabled column to book_cache to allow skipping specific
     -- books from session/annotation/rating uploads. Defaults to 1 (enabled).
     [21] = {},
+
+    -- Migration 22: Shelf state cache for delta-based sync.
+    -- Stores the last known API response for each shelf as JSON plus a
+    -- timestamp.  On subsequent syncs only added/removed books are acted on,
+    -- making large-shelf syncs complete in near-constant time when nothing
+    -- has changed.
+    [22] = {
+        [[
+            CREATE TABLE IF NOT EXISTS shelf_state (
+                shelf_id   INTEGER PRIMARY KEY,
+                books_json TEXT    NOT NULL,
+                synced_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+            )
+        ]],
+    },
 }
 
 -- Post-migration hooks: Lua functions run after the SQL transaction commits.
@@ -3112,6 +3127,140 @@ function Database:clearPendingBookmarks()
     return result == SQ3.OK
 end
 
+-- ── Advanced / data-management helpers ────────────────────────────────────
+
+--[[--
+Count rows in historical_sessions.
+@return integer count
+--]]
+function Database:getHistoricalSessionCount()
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM historical_sessions")
+    if not stmt then return 0 end
+    local count = 0
+    for row in stmt:rows() do count = tonumber(row[1]) or 0; break end
+    stmt:close()
+    return count
+end
+
+--[[--
+Delete all rows from historical_sessions.
+@return boolean success
+--]]
+function Database:clearHistoricalSessions()
+    local result = self.conn:exec("DELETE FROM historical_sessions")
+    self.plugin:logInfo("BookloreSync Database: Historical sessions cleared")
+    return result == SQ3.OK
+end
+
+--[[--
+Count rows in synced_annotations.
+@return integer count
+--]]
+function Database:getSyncedAnnotationCount()
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM synced_annotations")
+    if not stmt then return 0 end
+    local count = 0
+    for row in stmt:rows() do count = tonumber(row[1]) or 0; break end
+    stmt:close()
+    return count
+end
+
+--[[--
+Delete all rows from synced_annotations.
+Clearing this allows annotations to be re-synced to the server.
+@return boolean success
+--]]
+function Database:clearSyncedAnnotations()
+    local result = self.conn:exec("DELETE FROM synced_annotations")
+    self.plugin:logInfo("BookloreSync Database: Synced annotations cleared")
+    return result == SQ3.OK
+end
+
+--[[--
+Count rows in synced_bookmarks.
+@return integer count
+--]]
+function Database:getSyncedBookmarkCount()
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM synced_bookmarks")
+    if not stmt then return 0 end
+    local count = 0
+    for row in stmt:rows() do count = tonumber(row[1]) or 0; break end
+    stmt:close()
+    return count
+end
+
+--[[--
+Delete all rows from synced_bookmarks.
+Clearing this allows bookmarks to be re-synced to the server.
+@return boolean success
+--]]
+function Database:clearSyncedBookmarks()
+    local result = self.conn:exec("DELETE FROM synced_bookmarks")
+    self.plugin:logInfo("BookloreSync Database: Synced bookmarks cleared")
+    return result == SQ3.OK
+end
+
+--[[--
+Count rows in rating_sync_history.
+@return integer count
+--]]
+function Database:getRatingSyncHistoryCount()
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM rating_sync_history")
+    if not stmt then return 0 end
+    local count = 0
+    for row in stmt:rows() do count = tonumber(row[1]) or 0; break end
+    stmt:close()
+    return count
+end
+
+--[[--
+Delete all rows from rating_sync_history.
+@return boolean success
+--]]
+function Database:clearRatingSyncHistory()
+    local result = self.conn:exec("DELETE FROM rating_sync_history")
+    self.plugin:logInfo("BookloreSync Database: Rating sync history cleared")
+    return result == SQ3.OK
+end
+
+--[[--
+Reset all stored Booklore book IDs across every table that references them.
+
+Called when the user re-creates their Booklore library and all book IDs have
+changed.  After this call every book in book_cache will appear unmatched and
+the next resolveUnmatchedBooks() pass will re-resolve them from the server.
+
+Tables updated:
+  book_cache          - book_id set to NULL
+  pending_sessions    - book_id set to NULL
+  pending_ratings     - book_id set to NULL
+  pending_annotations - book_id set to NULL
+  pending_bookmarks   - book_id set to NULL
+
+@return boolean success
+--]]
+function Database:resetAllBookIds()
+    local stmts = {
+        "UPDATE book_cache          SET book_id = NULL",
+        "UPDATE pending_sessions    SET book_id = NULL",
+        "UPDATE pending_ratings     SET book_id = NULL",
+        "UPDATE pending_annotations SET book_id = NULL",
+        "UPDATE pending_bookmarks   SET book_id = NULL",
+    }
+    self.conn:exec("BEGIN")
+    for _, sql in ipairs(stmts) do
+        local res = self.conn:exec(sql)
+        if res ~= SQ3.OK then
+            self.plugin:logErr("BookloreSync Database: resetAllBookIds failed on:", sql, self.conn:errmsg())
+            self.conn:exec("ROLLBACK")
+            return false
+        end
+    end
+    self.conn:exec("COMMIT")
+    self.plugin:logInfo("BookloreSync Database: All book IDs reset")
+    return true
+end
+
 function Database:getPluginSetting(key)
     if not key then return nil end
     key = tostring(key)
@@ -3742,6 +3891,94 @@ function Database:isBookTrackingEnabled(file_path)
     end
     stmt:close()
     return result  -- not in cache yet → track by default
+end
+
+-- ── Shelf state cache (delta sync) ──────────────────────────────────────────
+
+--[[--
+Retrieve the cached shelf state for a shelf.
+
+@param shelf_id  number  Shelf ID
+@return table|nil  { books_json=string, synced_at=number } or nil if not cached
+--]]
+function Database:getShelfState(shelf_id)
+    shelf_id = tonumber(shelf_id)
+    if not shelf_id then return nil end
+    local stmt = self.conn:prepare([[
+        SELECT books_json, synced_at FROM shelf_state WHERE shelf_id = ?
+    ]])
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: getShelfState - failed to prepare:", self.conn:errmsg())
+        return nil
+    end
+    stmt:bind(shelf_id)
+    local result = nil
+    for row in stmt:rows() do
+        result = {
+            books_json = tostring(row[1]),
+            synced_at  = tonumber(row[2]),
+        }
+        break
+    end
+    stmt:close()
+    return result
+end
+
+--[[--
+Persist the current shelf state as a JSON string.
+Uses INSERT OR REPLACE so repeated calls simply overwrite the previous row.
+
+@param shelf_id    number  Shelf ID
+@param books_json  string  JSON-encoded array of book objects from the API
+--]]
+function Database:saveShelfState(shelf_id, books_json)
+    shelf_id = tonumber(shelf_id)
+    if not shelf_id or type(books_json) ~= "string" then
+        self.plugin:logErr("BookloreSync Database: saveShelfState - invalid arguments")
+        return false
+    end
+    local stmt = self.conn:prepare([[
+        INSERT OR REPLACE INTO shelf_state (shelf_id, books_json, synced_at)
+        VALUES (?, ?, strftime('%s', 'now'))
+    ]])
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: saveShelfState - failed to prepare:", self.conn:errmsg())
+        return false
+    end
+    local ok, err = pcall(function()
+        stmt:bind(shelf_id, books_json)
+        stmt:step()
+    end)
+    stmt:close()
+    if not ok then
+        self.plugin:logErr("BookloreSync Database: saveShelfState - exec error:", err)
+        return false
+    end
+    return true
+end
+
+--[[--
+Remove the cached shelf state for a shelf, forcing the next sync to perform
+a full pass.
+
+@param shelf_id  number  Shelf ID
+--]]
+function Database:clearShelfState(shelf_id)
+    shelf_id = tonumber(shelf_id)
+    if not shelf_id then return end
+    local stmt = self.conn:prepare("DELETE FROM shelf_state WHERE shelf_id = ?")
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: clearShelfState - failed to prepare:", self.conn:errmsg())
+        return
+    end
+    local ok, err = pcall(function()
+        stmt:bind(shelf_id)
+        stmt:step()
+    end)
+    stmt:close()
+    if not ok then
+        self.plugin:logErr("BookloreSync Database: clearShelfState - exec error:", err)
+    end
 end
 
 return Database

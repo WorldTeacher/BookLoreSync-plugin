@@ -1089,54 +1089,99 @@ function BookloreSync:showRatingDialog(doc_path, book_id)
                             self.db:storeRating(bcid, value)
                         end
 
+                        -- Always queue into pending_ratings so the rating
+                        -- survives a failed or deferred network call and is
+                        -- visible to the "Sync Pending Now" path.  The queue
+                        -- entry is removed by syncPendingRatings on success.
+                        if bcid then
+                            self.db:addPendingRating(bcid, book_id, value)
+                        end
+
                         if not book_id then
-                            -- book_id not yet known - store rating locally and queue
-                            -- it in pending_ratings (with nil book_id) so it is
-                            -- uploaded once the book is matched on the next sync.
-                            if bcid then
-                                self.db:addPendingRating(bcid, nil, value)
-                            end
+                            -- book_id not yet known - queued above with nil
+                            -- book_id; uploaded once the book is matched.
                             UIManager:show(InfoMessage:new{
                                 text = T(_("Rating %1/10 saved (will sync once book is matched)"), value),
                                 timeout = 2,
                             })
-                        -- Attempt to submit immediately if credentials are available
-                        elseif self.booklore_username ~= "" and self.booklore_password ~= "" then
-                            local ok, err = self.api:submitRating(
-                                book_id, value,
-                                self.booklore_username, self.booklore_password
-                            )
-                            if ok then
-                                if bcid then
-                                    self.db:markRatingSynced(bcid)
-                                    self.db:recordRatingSyncHistory(bcid, value, "success")
-                                end
-                                UIManager:show(InfoMessage:new{
-                                    text = T(_("Rating %1/10 saved and synced"), value),
-                                    timeout = 2,
-                                })
-                            else
-                                self:logWarn("BookloreSync: Rating submit failed:", err)
-                                -- Queue for retry on the next upload trigger
-                                if bcid then
-                                    self.db:addPendingRating(bcid, book_id, value)
-                                    self.db:recordRatingSyncHistory(bcid, value, "error", err)
-                                end
-                                UIManager:show(InfoMessage:new{
-                                    text = T(_("Rating %1/10 saved (will retry on next sync)"), value),
-                                    timeout = 2,
-                                })
-                            end
-                        else
-                            -- No credentials yet - the rating is stored locally;
-                            -- queue it so it is sent once credentials are configured.
-                            if bcid then
-                                self.db:addPendingRating(bcid, book_id, value)
-                            end
+                        elseif self.manual_sync_only then
+                            -- User chose "manual only" sync trigger - do not
+                            -- attempt any network call automatically.
+                            self:logInfo("BookloreSync: manual_sync_only - rating queued, skipping auto-upload")
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Rating %1/10 saved (use 'Sync Pending Now' to upload)"), value),
+                                timeout = 2,
+                            })
+                        elseif self.booklore_username == "" or self.booklore_password == "" then
+                            -- No credentials yet - rating stays in the queue.
                             UIManager:show(InfoMessage:new{
                                 text = T(_("Rating %1/10 saved (will retry on next sync)"), value),
                                 timeout = 2,
                             })
+                        else
+                            -- book_id known, not manual-only, credentials
+                            -- present - attempt an immediate upload, honouring
+                            -- the "ask to enable WiFi" setting via _requestWifi.
+                            local snap_bcid  = bcid
+                            local snap_value = value
+                            self:_requestWifi(_("upload rating"), function()
+                                local ok, err = self.api:submitRating(
+                                    book_id, snap_value,
+                                    self.booklore_username, self.booklore_password
+                                )
+                                if ok then
+                                    if snap_bcid then
+                                        self.db:markRatingSynced(snap_bcid)
+                                        self.db:recordRatingSyncHistory(snap_bcid, snap_value, "success")
+                                        -- Remove from pending queue now that it is synced.
+                                        self.db:deletePendingRatingByBookCacheId(snap_bcid)
+                                    end
+                                    UIManager:show(InfoMessage:new{
+                                        text = T(_("Rating %1/10 saved and synced"), snap_value),
+                                        timeout = 2,
+                                    })
+                                    -- Hardcover rating sync (in addition to Booklore).
+                                    if self.hardcover_rating_sync_enabled then
+                                        if not self.hardcover_token or self.hardcover_token == "" then
+                                            self:logWarn("BookloreSync: Hardcover rating sync enabled but no token configured - skipping")
+                                        else
+                                            local hc_id
+                                            if snap_bcid then
+                                                local cache_row = self.db:getBookCacheById(snap_bcid)
+                                                hc_id = cache_row and cache_row.hardcover_id
+                                            end
+                                            if hc_id then
+                                                self:logInfo("BookloreSync: Syncing rating to Hardcover - hardcover_id:", hc_id, "rating:", snap_value)
+                                                local hc_ok, hc_err = self.hc_api:submitRating(hc_id, snap_value, self.hardcover_token)
+                                                if hc_ok then
+                                                    self:logInfo("BookloreSync: Hardcover rating synced successfully")
+                                                else
+                                                    self:logWarn("BookloreSync: Hardcover rating sync failed:", tostring(hc_err))
+                                                end
+                                            else
+                                                self:logInfo("BookloreSync: Hardcover rating sync enabled but no hardcover_id found - skipping")
+                                            end
+                                        end
+                                    end
+                                else
+                                    self:logWarn("BookloreSync: Rating submit failed:", err)
+                                    -- Rating stays in pending_ratings (queued above); record failure.
+                                    if snap_bcid then
+                                        self.db:recordRatingSyncHistory(snap_bcid, snap_value, "error", err)
+                                    end
+                                    UIManager:show(InfoMessage:new{
+                                        text = T(_("Rating %1/10 saved (will retry on next sync)"), snap_value),
+                                        timeout = 2,
+                                    })
+                                end
+                            end, function()
+                                -- User declined WiFi prompt - rating stays queued.
+                                self:logInfo("BookloreSync: WiFi request declined - rating queued for later upload")
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Rating %1/10 saved (will sync when WiFi is available)"), value),
+                                    timeout = 2,
+                                })
+                            end)
                         end
                     end,
                 },

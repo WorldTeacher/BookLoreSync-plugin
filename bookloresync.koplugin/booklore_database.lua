@@ -2670,6 +2670,41 @@ function Database:getPendingRatingCount()
 end
 
 --[[--
+Remove a successfully-synced rating from the pending queue by book_cache_id.
+Since the table enforces at most one pending rating per book, this is the
+natural key to use when the row id is not at hand (e.g. after an inline
+upload in showRatingDialog).
+
+@param book_cache_id integer  pending_ratings.book_cache_id
+@return boolean success
+--]]
+function Database:deletePendingRatingByBookCacheId(book_cache_id)
+    if not book_cache_id then
+        self.plugin:logErr("BookloreSync Database: deletePendingRatingByBookCacheId called without book_cache_id")
+        return false
+    end
+    book_cache_id = tonumber(book_cache_id)
+    if not book_cache_id then return false end
+
+    local stmt = self.conn:prepare("DELETE FROM pending_ratings WHERE book_cache_id = ?")
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare deletePendingRatingByBookCacheId:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function() stmt:bind(book_cache_id) end)
+    if not ok then
+        self.plugin:logErr("BookloreSync Database: Bind failed in deletePendingRatingByBookCacheId:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
+--[[--
 Remove a successfully-synced rating from the pending queue.
 
 @param id integer  pending_ratings.id

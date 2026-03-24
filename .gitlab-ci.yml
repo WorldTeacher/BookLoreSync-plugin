@@ -71,20 +71,20 @@ build-koplugin-artifact:
     - ls -lah "$CI_PROJECT_DIR/bookloresync.koplugin.zip"
 
     # Upload to package registry as debug-assets/develop for automated testing
+    - echo "Uploading build to package registry as debug-assets"
     - |
-      if [ "$CI_COMMIT_BRANCH" = "develop" ]; then
-        echo "Uploading develop build to package registry as debug-assets"
-        PACKAGE_NAME="debug-assets"
-        PACKAGE_VERSION="develop"
-        PACKAGE_FILE="latest-develop.zip"
-        UPLOAD_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${PACKAGE_VERSION}/${PACKAGE_FILE}"
-        
-        curl --fail --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
-             --upload-file "$CI_PROJECT_DIR/bookloresync.koplugin.zip" \
-             "$UPLOAD_URL"
-        
-        echo "Package available at: ${UPLOAD_URL/JOB-TOKEN*/[MASKED]}"
-      fi
+      PACKAGE_NAME="debug-assets"
+      PACKAGE_VERSION="develop"
+      PACKAGE_FILE="latest-develop.zip"
+      UPLOAD_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${PACKAGE_VERSION}/${PACKAGE_FILE}"
+
+      echo "Upload URL: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${PACKAGE_VERSION}/${PACKAGE_FILE}"
+
+      curl --fail-with-body -L --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+           --upload-file "$CI_PROJECT_DIR/bookloresync.koplugin.zip" \
+           "$UPLOAD_URL"
+
+      echo "Package uploaded successfully"
 
   artifacts:
     name: "bookloresync-$CI_COMMIT_SHORT_SHA"

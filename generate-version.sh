@@ -68,7 +68,7 @@ META_FILE="bookloresync.koplugin/_meta.lua"
 cat > "$META_FILE" <<EOF
 local _ = require("gettext")
 return {
-    name = "booklore",
+    name = "bookloresync",
     fullname = _("Booklore Sync"),
     description = _([[Sync your reading sessions to Booklore server.]]),
     version = "$VERSION",

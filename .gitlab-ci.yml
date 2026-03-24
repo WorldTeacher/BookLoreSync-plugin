@@ -5,26 +5,49 @@ include:
     inputs:
       changelog-enabled: true
       auto-release-enabled: true
-    rules:
-      - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
-        when: always
-      - when: never
   - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola@1.0"
     inputs:
       lint-disabled: true
       lychee-enabled: false
       workspace-dir: "docs"
-    rules:
-      - changes:
-          - docs/**/*
   # Zola template (GitLab Pages variant)
   - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola-pages@1.0"
-    rules:
-      - changes:
-          - docs/**/*
   - component: "$CI_SERVER_FQDN/to-be-continuous/gitlab-butler/gitlab-ci-butler@1.4"
     inputs:
       pipelines-delete-older-than: "30"
+
+# Workflow rules to control when pipelines run
+workflow:
+  rules:
+    # Run on main branch pushes (for semantic-release)
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
+    # Run on merge requests to main (for build artifacts)
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    # Run on develop branch
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    # Run on tags (for releases)
+    - if: '$CI_COMMIT_TAG'
+    # Run when docs change
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - docs/**/*
+
+# Override jobs from included components to control when they run
+release:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
+
+zola-build:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - docs/**/*
+
+zola-pages:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - docs/**/*
 
 # The Butler image ships with a binary entrypoint. Clear it so GitLab Runner
 # can execute the generated shell wrapper instead of appending it as CLI args

@@ -37,7 +37,7 @@ local strbuf  = require("string.buffer")
 local Trapper = require("ui/trapper")
 
 local BookloreSync = WidgetContainer:extend{
-    name = "booklore",
+    name = "bookloresync",
     is_doc_only = false,
 }
 
@@ -9820,7 +9820,6 @@ function BookloreSync:fetchAndStoreHardcoverIds()
 end
 
 return BookloreSync
-
 
 
 

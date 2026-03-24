@@ -33,9 +33,6 @@ workflow:
         - docs/**/*
 
 # Override jobs from included components to control when they run
-release:
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
 
 zola-build:
   rules:

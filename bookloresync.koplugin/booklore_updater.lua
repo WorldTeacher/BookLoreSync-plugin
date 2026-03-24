@@ -504,6 +504,56 @@ function Updater:checkForUpdates(use_cache)
 end
 
 --[[--
+Build an update result for a direct download endpoint.
+
+This mode is intended for development build feeds where a stable semantic
+version comparison is not meaningful. The endpoint URL is treated as an
+installable update source whenever it is reachable.
+
+@param download_url string URL that returns a ZIP when downloaded
+@return table|nil {available, current_version, latest_version, release_info}
+--]]
+function Updater:checkForDirectDownload(download_url)
+    self.plugin:logInfo("BookloreSync Updater: Checking direct download URL")
+
+    local current_info = self:getCurrentVersion()
+    local current_version = current_info.version
+
+    if not download_url or download_url == "" then
+        self.plugin:logErr("BookloreSync Updater: Direct download URL is empty")
+        return nil
+    end
+
+    -- Validate that the endpoint is reachable before presenting install UI.
+    -- We intentionally do not parse a remote version for dev-channel endpoints.
+    local success, response, code = self:_makeHttpRequest(download_url, nil, 5)
+    if not success then
+        self.plugin:logErr("BookloreSync Updater: Direct download endpoint check failed:", response)
+        return nil
+    end
+
+    local response_size = type(response) == "string" and #response or 0
+    self.plugin:logInfo("BookloreSync Updater: Direct endpoint reachable, status:", code, "bytes:", response_size)
+
+    local release_info = {
+        version = "dev-build",
+        download_url = download_url,
+        changelog = "",
+        changelog_url = nil,
+        published_at = "",
+        size = response_size,
+        channel = "dev",
+    }
+
+    return {
+        available = true,
+        current_version = current_version,
+        latest_version = "dev-build",
+        release_info = release_info,
+    }
+end
+
+--[[--
 Format bytes as human-readable size
 
 @param bytes Number of bytes

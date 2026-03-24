@@ -144,6 +144,49 @@ end
 function DbSettings:flush()
 end
 
+--[[--
+Read the configured development-build download URL.
+
+The URL is sourced from a plain text file in the plugin root:
+  dev-build.location
+
+The first non-empty line is used. The value must start with http:// or https://.
+
+@return string|nil url
+@return string|nil error_message
+--]]
+function BookloreSync:getDevBuildDownloadURL()
+    if not self.plugin_dir or self.plugin_dir == "" then
+        return nil, _("Plugin directory is not available")
+    end
+
+    local location_path = self.plugin_dir .. "/dev-build.location"
+    local fh = io.open(location_path, "r")
+    if not fh then
+        return nil, T(_("Missing dev-build.location file:\n%1"), location_path)
+    end
+
+    local url = nil
+    for line in fh:lines() do
+        local trimmed = line:match("^%s*(.-)%s*$")
+        if trimmed and trimmed ~= "" then
+            url = trimmed
+            break
+        end
+    end
+    fh:close()
+
+    if not url then
+        return nil, _("dev-build.location is empty")
+    end
+
+    if not url:match("^https?://") then
+        return nil, _("dev-build.location must contain an http(s) URL")
+    end
+
+    return url, nil
+end
+
 function BookloreSync:init()
     -- Load plugin-specific translations into KOReader's global gettext singleton.
     -- KOReader uses a single shared gettext instance (textdomain "koreader"), so
@@ -355,6 +398,11 @@ function BookloreSync:init()
     self.auto_update_check = self.settings:readSetting("auto_update_check")
     if self.auto_update_check == nil then
         self.auto_update_check = true  -- Default enabled
+    end
+
+    self.use_dev_builds = self.settings:readSetting("use_dev_builds")
+    if self.use_dev_builds == nil then
+        self.use_dev_builds = false
     end
     
     self.last_update_check = self.settings:readSetting("last_update_check") or 0
@@ -3524,6 +3572,16 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
                 callback = function()
                     self:toggleAutoUpdateCheck()
+                end,
+            },
+            {
+                text = _("Use Dev Builds"),
+                help_text = _("Install development builds from dev-build.location in the plugin folder."),
+                checked_func = function()
+                    return self.use_dev_builds
+                end,
+                callback = function()
+                    self:toggleUseDevBuilds()
                 end,
             },
             {
@@ -9177,6 +9235,13 @@ end
 Auto-check for updates (runs once per day, silent mode)
 --]]
 function BookloreSync:autoCheckForUpdates()
+    -- Dev-build channel is intentionally manual-only to avoid noisy startup
+    -- prompts for frequently changing development artifacts.
+    if self.use_dev_builds then
+        logger.info("BookloreSync Updater: Auto-check skipped (Use Dev Builds is enabled)")
+        return
+    end
+
     -- Check if 24 hours passed since last check
     local now = os.time()
     if now - self.last_update_check < 86400 then
@@ -9252,8 +9317,26 @@ function BookloreSync:checkForUpdates(silent)
         })
     end
     
-    -- Check for updates (use cache if silent, fresh if manual)
-    local result = self.updater:checkForUpdates(silent)
+    -- Check for updates (stable channel via GitHub release API, or direct dev
+    -- channel download URL from dev-build.location)
+    local result = nil
+    if self.use_dev_builds then
+        local dev_url, dev_err = self:getDevBuildDownloadURL()
+        if not dev_url then
+            if not silent then
+                UIManager:show(InfoMessage:new{
+                    text = T(_("Dev builds are enabled, but no valid download URL is configured.\n\n%1"), dev_err or _("Unknown error")),
+                    timeout = 4,
+                })
+            end
+            return
+        end
+
+        result = self.updater:checkForDirectDownload(dev_url)
+    else
+        -- Stable releases (use cache if silent, fresh if manual)
+        result = self.updater:checkForUpdates(silent)
+    end
     
     if not result then
         if not silent then
@@ -9267,7 +9350,7 @@ function BookloreSync:checkForUpdates(silent)
     
     if result.available then
         -- Update available
-        self.update_available = true
+        self.update_available = not self.use_dev_builds
         
         local size_text = self.updater:formatBytes(result.release_info.size)
         
@@ -9514,6 +9597,40 @@ function BookloreSync:toggleAutoUpdateCheck()
             _("Auto-update check enabled.\n\nWill check once per day on startup.") or
             _("Auto-update check disabled."),
         timeout = 2,
+    })
+end
+
+--[[--
+Toggle development-build update channel.
+
+Requires a valid dev-build.location file in the plugin directory.
+--]]
+function BookloreSync:toggleUseDevBuilds()
+    -- Enabling requires a valid dev-build.location file.
+    if not self.use_dev_builds then
+        local dev_url, dev_err = self:getDevBuildDownloadURL()
+        if not dev_url then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Cannot enable dev builds.\n\n%1"), dev_err or _("Unknown error")),
+                timeout = 4,
+            })
+            return
+        end
+    end
+
+    self.use_dev_builds = not self.use_dev_builds
+    self.settings:saveSetting("use_dev_builds", self.use_dev_builds)
+    self.settings:flush()
+
+    -- Channel changed: clear cached stable release info and reset badge state.
+    self.updater:clearCache()
+    self.update_available = false
+
+    UIManager:show(InfoMessage:new{
+        text = self.use_dev_builds and
+            _("Dev builds enabled.\n\nCheck for Updates will use dev-build.location.") or
+            _("Dev builds disabled.\n\nCheck for Updates will use stable releases."),
+        timeout = 3,
     })
 end
 
@@ -9820,6 +9937,5 @@ function BookloreSync:fetchAndStoreHardcoverIds()
 end
 
 return BookloreSync
-
 
 

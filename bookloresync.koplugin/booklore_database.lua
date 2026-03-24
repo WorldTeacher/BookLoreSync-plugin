@@ -649,6 +649,7 @@ Database.migration_hooks = {
             "progress_decimal_places",
             "force_push_session_on_suspend", "connect_network_on_suspend",
             "manual_sync_only", "sync_mode",
+            "use_dev_builds",
             "historical_sync_ack",
             "booklore_username", "booklore_password",
             "rating_sync_enabled", "rating_sync_mode",
@@ -4017,4 +4018,3 @@ function Database:clearShelfState(shelf_id)
 end
 
 return Database
-

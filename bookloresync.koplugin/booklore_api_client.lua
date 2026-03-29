@@ -23,6 +23,7 @@ local APIClient = {
     db = nil,  -- Database reference for token caching
 }
 
+---APIClient:new.
 function APIClient:new(plugin)
     local o = {
         plugin = plugin
@@ -32,6 +33,7 @@ function APIClient:new(plugin)
     return o
 end
 
+---APIClient:init.
 function APIClient:init(server_url, username, password, db)
     self.server_url = server_url
     self.username = username
@@ -45,6 +47,7 @@ function APIClient:init(server_url, username, password, db)
     self:logInfo("BookloreSync API: Initialized with server:", self.server_url)
 end
 
+---APIClient:logInfo.
 function APIClient:logInfo(...)
     if self.plugin then
         self.plugin:logInfo(...)
@@ -53,6 +56,7 @@ function APIClient:logInfo(...)
     end
 end
 
+---APIClient:logWarn.
 function APIClient:logWarn(...)
     if self.plugin then
         self.plugin:logWarn(...)
@@ -61,6 +65,7 @@ function APIClient:logWarn(...)
     end
 end
 
+---APIClient:logErr.
 function APIClient:logErr(...)
     if self.plugin then
         self.plugin:logErr(...)
@@ -69,6 +74,7 @@ function APIClient:logErr(...)
     end
 end
 
+---APIClient:logDbg.
 function APIClient:logDbg(...)
     if self.plugin then
         self.plugin:logDbg(...)
@@ -84,6 +90,7 @@ Parse JSON response with error handling
 @return table|nil Parsed JSON object or nil
 @return string|nil Error message if parsing failed
 --]]
+---APIClient:parseJSON.
 function APIClient:parseJSON(response_text)
     if not response_text or response_text == "" then
         return nil, "Empty response"
@@ -111,6 +118,7 @@ Tries to get error message from various possible formats:
 @param code HTTP status code
 @return string User-friendly error message
 --]]
+---APIClient:extractErrorMessage.
 function APIClient:extractErrorMessage(response_text, code)
     local json_data, parse_err = self:parseJSON(response_text)
     
@@ -157,6 +165,7 @@ Make HTTP request with improved error handling
 @return number|nil HTTP status code
 @return table|string|nil Response data or error message
 --]]
+---APIClient:request.
 function APIClient:request(method, path, body, headers)
     if not self.server_url or self.server_url == "" then
         self:logErr("BookloreSync API: Server URL not configured")
@@ -261,6 +270,7 @@ Test authentication with the server
 @return boolean success
 @return string message (success message or detailed error)
 --]]
+---APIClient:testAuth.
 function APIClient:testAuth()
     self:logInfo("BookloreSync API: Testing authentication")
     
@@ -298,6 +308,7 @@ endpoint exists and is reachable.  Any non-404 HTTP failure (e.g. 401,
 @return boolean endpoint_ok   true if the endpoint is reachable
 @return string  message       human-readable result or error detail
 --]]
+---APIClient:testByHashEndpoint.
 function APIClient:testByHashEndpoint()
     -- Generate a pseudo-random 32-char hex hash that will never match a real book.
     -- We use os.time() mixed with a fixed salt so it varies per call without
@@ -341,6 +352,7 @@ Get book by hash
 @return boolean success
 @return table|string book_data or error_message
 --]]
+---APIClient:getBookByHash.
 function APIClient:getBookByHash(book_hash)
     self:logInfo("BookloreSync API: Looking up book by hash:", book_hash)
     
@@ -372,6 +384,7 @@ Submit reading session
 @return boolean success
 @return string message (success or error message)
 --]]
+---APIClient:submitSession.
 function APIClient:submitSession(session_data)
     self:logInfo("BookloreSync API: Submitting reading session for book:", session_data.bookId or session_data.bookHash)
     
@@ -391,6 +404,96 @@ function APIClient:submitSession(session_data)
 end
 
 --[[--
+Fetch KOReader progress for a document hash.
+
+Endpoint: GET /api/koreader/syncs/progress/:book_hash
+
+@param book_hash string  Document hash used by KOReader sync protocol
+@return boolean success
+@return table|string|nil response table on success, error message otherwise
+@return number|nil code HTTP status code
+--]]
+---APIClient:getKoReaderProgress.
+function APIClient:getKoReaderProgress(book_hash)
+    if not book_hash or book_hash == "" then
+        return false, "Missing book_hash", nil
+    end
+
+    self:logInfo("BookloreSync API: Getting KOReader progress for hash:", book_hash)
+
+    local success, code, response = self:request("GET", "/api/koreader/syncs/progress/" .. tostring(book_hash))
+
+    if success then
+        return true, response, code
+    end
+
+    if code == 404 then
+        -- Not found is a valid state: no progress stored yet.
+        return true, nil, code
+    end
+
+    local err = response or "Failed to fetch KOReader progress"
+    if code then
+        err = "HTTP " .. tostring(code) .. ": " .. tostring(err)
+    end
+    self:logWarn("BookloreSync API: getKoReaderProgress failed:", err)
+    return false, err, code
+end
+
+--[[--
+Update KOReader progress for a document hash.
+
+Endpoint: PUT /api/koreader/syncs/progress
+
+Payload fields:
+  timestamp, document, percentage, progress, device, device_id
+
+@param payload table  Progress payload
+@return boolean success
+@return string|table|nil response_message_or_body
+@return number|nil code HTTP status code
+--]]
+---APIClient:updateKoReaderProgress.
+function APIClient:updateKoReaderProgress(payload)
+    if type(payload) ~= "table" then
+        return false, "Invalid payload", nil
+    end
+
+    local required = {
+        "timestamp", "document", "percentage", "progress", "device", "device_id",
+    }
+    for _, key in ipairs(required) do
+        if payload[key] == nil or payload[key] == "" then
+            return false, "Missing required progress field: " .. key, nil
+        end
+    end
+
+    self:logInfo("BookloreSync API: Updating KOReader progress for hash:", tostring(payload.document))
+
+    local body = {
+        timestamp = tonumber(payload.timestamp),
+        document = tostring(payload.document),
+        percentage = tonumber(payload.percentage),
+        progress = tostring(payload.progress),
+        device = tostring(payload.device),
+        device_id = tostring(payload.device_id),
+    }
+
+    local success, code, response = self:request("PUT", "/api/koreader/syncs/progress", body)
+
+    if success then
+        return true, response, code
+    end
+
+    local err = response or "Failed to update KOReader progress"
+    if code then
+        err = "HTTP " .. tostring(code) .. ": " .. tostring(err)
+    end
+    self:logWarn("BookloreSync API: updateKoReaderProgress failed:", err)
+    return false, err, code
+end
+
+--[[--
 Submit batch of reading sessions for a single book
 
 Submits multiple sessions in a single request for improved performance.
@@ -406,6 +509,7 @@ single-session endpoint.
 @return string message (success or error message)
 @return number|nil code HTTP status code
 --]]
+---APIClient:submitSessionBatch.
 function APIClient:submitSessionBatch(book_id, book_type, sessions)
     -- Validation
     if not book_id or type(book_id) ~= "number" then
@@ -449,6 +553,7 @@ Check server health/connectivity
 @return boolean success
 @return string message
 --]]
+---APIClient:checkHealth.
 function APIClient:checkHealth()
     self:logInfo("BookloreSync API: Checking server health")
     
@@ -472,6 +577,7 @@ Search books by title (fuzzy match)
 @return boolean success
 @return table|string matches or error message
 --]]
+---APIClient:searchBooks.
 function APIClient:searchBooks(title)
     self:logInfo("BookloreSync API: Searching books with title:", title)
     
@@ -498,6 +604,7 @@ Login to Booklore API and get Bearer token
 @return boolean success
 @return string|nil token or error message
 --]]
+---APIClient:loginBooklore.
 function APIClient:loginBooklore(username, password)
     self:logInfo("BookloreSync API: Logging in to Booklore with username:", username)
     
@@ -542,6 +649,7 @@ token expiration.
 @return boolean success
 @return string|nil token or error message
 --]]
+---APIClient:getOrRefreshBearerToken.
 function APIClient:getOrRefreshBearerToken(username, password, force_refresh)
     force_refresh = force_refresh or false
     
@@ -578,6 +686,7 @@ Validate Bearer token by making a test request
 @param token Bearer token to validate
 @return boolean valid (true if token works)
 --]]
+---APIClient:validateBearerToken.
 function APIClient:validateBearerToken(token)
     local headers = {
         ["Authorization"] = "Bearer " .. token
@@ -604,6 +713,7 @@ Search books by title with custom authentication credentials
 @return boolean success
 @return table|string matches or error message
 --]]
+---APIClient:searchBooksWithAuth.
 function APIClient:searchBooksWithAuth(title, username, password)
     self:logInfo("BookloreSync API: Searching books with Booklore auth, title:", title)
     
@@ -664,6 +774,7 @@ Search books by ISBN with custom authentication credentials
 @return boolean success
 @return table|string matches or error message
 --]]
+---APIClient:searchBooksByIsbn.
 function APIClient:searchBooksByIsbn(isbn, username, password)
     self:logInfo("BookloreSync API: Searching books by ISBN:", isbn)
     
@@ -724,6 +835,7 @@ Get book by hash with Bearer token authentication
 @return boolean success
 @return table|string book data or error message
 --]]
+---APIClient:getBookByHashWithAuth.
 function APIClient:getBookByHashWithAuth(book_hash, username, password)
     self:logInfo("BookloreSync API: Looking up book by hash with Booklore auth:", book_hash)
     
@@ -780,6 +892,7 @@ URL encode a string
 @param str String to encode
 @return string URL encoded string
 --]]
+---APIClient:_urlEncode.
 function APIClient:_urlEncode(str)
     if not str then return "" end
     
@@ -803,6 +916,7 @@ them uniformly as book.title, book.authors, book.isbn10, book.isbn13.
 @param book Book object from API
 @return table Normalized book object with metadata fields at top level
 --]]
+---APIClient:_normalizeBookObject.
 function APIClient:_normalizeBookObject(book)
     if not book or type(book) ~= "table" then
         return book
@@ -856,6 +970,7 @@ Body: { "ids": [book_id], "rating": rating }
 @return boolean success
 @return string|nil error message on failure
 --]]
+---APIClient:submitRating.
 function APIClient:submitRating(book_id, rating, username, password)
     book_id = tonumber(book_id)
     rating  = tonumber(rating)
@@ -930,6 +1045,7 @@ Optional: color (hex), style, note, chapterTitle
 @return boolean success
 @return number|string  server annotation id on success, error message on failure
 --]]
+---APIClient:submitHighlight.
 function APIClient:submitHighlight(book_id, cfi, text, opts, username, password)
     opts = opts or {}
 
@@ -998,6 +1114,7 @@ Optional: selectedText, color (hex), chapterTitle
 @return boolean success
 @return number|string  server note id on success, error message on failure
 --]]
+---APIClient:submitInBookNote.
 function APIClient:submitInBookNote(book_id, cfi, note_content, opts, username, password)
     opts = opts or {}
 
@@ -1064,6 +1181,7 @@ Optional: title
 @return boolean success
 @return number|string  server note id on success, error message on failure
 --]]
+---APIClient:submitBookloreNote.
 function APIClient:submitBookloreNote(book_id, content, title, username, password)
     if not book_id or not content or content == "" then
         return false, "Missing required Booklore note fields"
@@ -1123,6 +1241,7 @@ Endpoint: GET /api/v1/books/<book_id>
 @return boolean success
 @return table|string  normalised book object on success, error message on failure
 --]]
+---APIClient:getBookById.
 function APIClient:getBookById(book_id, username, password)
     book_id = tonumber(book_id)
     if not book_id then
@@ -1176,6 +1295,7 @@ Endpoint: POST /api/v1/bookmarks
 @param password    string
 @return boolean, number|string  success flag + server id or error message
 --]]
+---APIClient:submitBookmark.
 function APIClient:submitBookmark(book_id, cfi, opts, username, password)
     opts = opts or {}
 
@@ -1242,6 +1362,7 @@ plugin can use them uniformly.
 @param book table  Raw book object from the shelf API
 @return table  Normalised book object (same table, mutated in-place)
 --]]
+---APIClient:_normalizeShelfBookObject.
 function APIClient:_normalizeShelfBookObject(book)
     if not book or type(book) ~= "table" then return book end
 
@@ -1294,6 +1415,7 @@ Fetch all books in a given shelf.
 @return boolean success
 @return table|string  Array of normalised book objects, or error message
 --]]
+---APIClient:getBooksInShelf.
 function APIClient:getBooksInShelf(shelf_id, username, password)
     self:logInfo("BookloreSync API: getBooksInShelf - shelf_id:", shelf_id)
 
@@ -1338,6 +1460,7 @@ Find an existing shelf by name (case-insensitive), or create it if absent.
 @return boolean success
 @return number|string  shelf_id on success, error message on failure
 --]]
+---APIClient:getOrCreateShelf.
 function APIClient:getOrCreateShelf(name, username, password)
     self:logInfo("BookloreSync API: getOrCreateShelf - name:", name)
 
@@ -1406,6 +1529,7 @@ file into memory.
 @return boolean success
 @return string|nil  Error message on failure, nil on success
 --]]
+---APIClient:downloadBook.
 function APIClient:downloadBook(book_id, save_path, username, password)
     self:logInfo("BookloreSync API: downloadBook - id:", book_id, "->", save_path)
 
@@ -1481,6 +1605,7 @@ the Content-Length header without downloading the full file.
 @return number|nil       File size in bytes on success, nil on failure
 @return string|nil       Error message on failure, nil on success
 --]]
+---APIClient:getBookFileSize.
 function APIClient:getBookFileSize(book_id, username, password)
     self:logInfo("BookloreSync API: getBookFileSize - id:", book_id)
 

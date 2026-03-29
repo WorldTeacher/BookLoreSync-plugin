@@ -16,6 +16,7 @@ local _ = require("gettext")
 
 local Settings = {}
 
+---Settings:configureServerUrl.
 function Settings:configureServerUrl(parent)
     local input_dialog
     input_dialog = InputDialog:new{
@@ -57,6 +58,7 @@ function Settings:configureServerUrl(parent)
 end
 
 -- Chained dialog: Username → Next → Password → Save
+---Settings:configureConnection.
 function Settings:configureConnection(parent)
     local username_input
     username_input = InputDialog:new{
@@ -128,6 +130,7 @@ function Settings:configureConnection(parent)
 end
 
 -- Chained dialog: Booklore Username → Next → Password → Save
+---Settings:configureBookloreAccount.
 function Settings:configureBookloreAccount(parent)
     local username_input
     username_input = InputDialog:new{
@@ -194,6 +197,7 @@ function Settings:configureBookloreAccount(parent)
     username_input:onShowKeyboard()
 end
 
+---Settings:configureMinDuration.
 function Settings:configureMinDuration(parent)
     local input_dialog
     input_dialog = InputDialog:new{
@@ -245,6 +249,7 @@ function Settings:configureMinDuration(parent)
     input_dialog:onShowKeyboard()
 end
 
+---Settings:configureMinPages.
 function Settings:configureMinPages(parent)
     local input_dialog
     input_dialog = InputDialog:new{
@@ -296,6 +301,7 @@ function Settings:configureMinPages(parent)
     input_dialog:onShowKeyboard()
 end
 
+---Settings:configureProgressDecimalPlaces.
 function Settings:configureProgressDecimalPlaces(parent)
     local input_dialog
     input_dialog = InputDialog:new{
@@ -340,6 +346,7 @@ function Settings:configureProgressDecimalPlaces(parent)
     input_dialog:onShowKeyboard()
 end
 
+---Settings:showVersion.
 function Settings:showVersion(parent)
     local version_info = require("plugin_version")
     local meta_info = require("_meta")
@@ -357,6 +364,7 @@ function Settings:showVersion(parent)
     })
 end
 
+---Settings:configureHardcoverToken.
 function Settings:configureHardcoverToken(parent)
     local token_file = (parent.plugin_dir or "") .. "/hardcover.token"
 
@@ -399,6 +407,7 @@ function Settings:configureHardcoverToken(parent)
     })
 end
 
+---Settings:buildAuthMenu.
 function Settings:buildAuthMenu(parent)
     return {
         text = _("Authentication"),
@@ -441,6 +450,7 @@ function Settings:buildAuthMenu(parent)
     }
 end
 
+---Settings:buildRatingMenu.
 function Settings:buildRatingMenu(parent)
     return {
         text = _("Rating"),
@@ -530,6 +540,7 @@ function Settings:buildRatingMenu(parent)
     }
 end
 
+---Settings:buildAnnotationsMenu.
 function Settings:buildAnnotationsMenu(parent)
     return {
         text = _("Annotations"),
@@ -661,6 +672,7 @@ function Settings:buildAnnotationsMenu(parent)
     }
 end
 
+---Settings:buildBookmarksMenu.
 function Settings:buildBookmarksMenu(parent)
     return {
         text = _("Bookmarks"),
@@ -688,6 +700,7 @@ function Settings:buildBookmarksMenu(parent)
     }
 end
 
+---Settings:exportSettings.
 function Settings:exportSettings(parent)
     local export_data = {
         is_enabled                    = parent.is_enabled,
@@ -737,6 +750,7 @@ function Settings:exportSettings(parent)
     })
 end
 
+---Settings:buildPreferencesMenu.
 function Settings:buildPreferencesMenu(parent)
     return {
         text = _("Preferences"),

@@ -17,6 +17,7 @@ local FileLogger = {
     max_files = 3,
 }
 
+---FileLogger:new.
 function FileLogger:new(o)
     o = o or {}
     setmetatable(o, self)
@@ -31,6 +32,7 @@ Creates the log directory if it doesn't exist and sets up daily rotation.
 
 @return boolean success
 --]]
+---FileLogger:init.
 function FileLogger:init(plugin_dir)
     if not plugin_dir then
         local source = debug.getinfo(1, "S").source
@@ -67,6 +69,7 @@ Get the current date string for log filenames
 
 @return string Date in YYYY-MM-DD format
 --]]
+---FileLogger:getCurrentDate.
 function FileLogger:getCurrentDate()
     return os.date("%Y-%m-%d")
 end
@@ -77,6 +80,7 @@ Get the log filename for a specific date
 @param date string Date in YYYY-MM-DD format (optional, defaults to today)
 @return string Full path to log file
 --]]
+---FileLogger:getLogFilePath.
 function FileLogger:getLogFilePath(date)
     date = date or self:getCurrentDate()
     return self.log_dir .. "/booklore-" .. date .. ".log"
@@ -90,6 +94,7 @@ io.popen("find ...") on platforms where lfs is unavailable.
 
 @return table Array of full log file paths sorted descending by name
 --]]
+---FileLogger:_listLogFiles.
 function FileLogger:_listLogFiles()
     local log_files = {}
 
@@ -122,6 +127,7 @@ Rotate old log files, keeping only the last N files
 
 @return boolean success
 --]]
+---FileLogger:rotateLogs.
 function FileLogger:rotateLogs()
     local log_files = self:_listLogFiles()
     if not log_files then
@@ -154,6 +160,7 @@ Creates a new log file if the date has changed, and rotates old files.
 @param ... Additional arguments to log
 @return boolean success
 --]]
+---FileLogger:write.
 function FileLogger:write(level, ...)
     if not self.log_dir then
         logger.warn("BookloreSync FileLogger: Logger not initialized, call init() first")
@@ -213,6 +220,7 @@ Close the current log file
 
 Should be called when the plugin is exiting.
 --]]
+---FileLogger:close.
 function FileLogger:close()
     if self.current_log_file then
         self.current_log_file:close()
@@ -226,6 +234,7 @@ Get the list of existing log files
 
 @return table Array of log file paths (sorted newest first)
 --]]
+---FileLogger:getLogFiles.
 function FileLogger:getLogFiles()
     return self:_listLogFiles()
 end
@@ -235,6 +244,7 @@ Get the size of the current log file
 
 @return number Size in bytes, or 0 if file doesn't exist
 --]]
+---FileLogger:getCurrentLogSize.
 function FileLogger:getCurrentLogSize()
     if not self.log_dir then
         return 0
@@ -258,6 +268,7 @@ Clear all log files
 
 @return boolean success
 --]]
+---FileLogger:clearAllLogs.
 function FileLogger:clearAllLogs()
     if not self.log_dir then
         return false

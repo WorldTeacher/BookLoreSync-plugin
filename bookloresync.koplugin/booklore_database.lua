@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 22,  -- Current database schema version
+    VERSION = 24,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -561,6 +561,100 @@ Database.migrations = {
             )
         ]],
     },
+
+    -- Migration 23: KOReader progress sync queues.
+    -- pending_koreader_progress: queued KOReader progress events.
+    -- synced_koreader_progress: last successfully-synced server state per book.
+    [23] = {
+        [[
+            CREATE TABLE IF NOT EXISTS pending_koreader_progress (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER,
+                book_hash     TEXT    NOT NULL,
+                progress      TEXT    NOT NULL,
+                percentage    REAL    NOT NULL,
+                location      TEXT,
+                device        TEXT,
+                device_id     TEXT,
+                timestamp     INTEGER NOT NULL,
+                retry_count   INTEGER DEFAULT 0,
+                last_retry_at INTEGER,
+                created_at    INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(book_hash)
+            )
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_koreader_progress_book_hash
+            ON pending_koreader_progress(book_hash)
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_koreader_progress_created_at
+            ON pending_koreader_progress(created_at)
+        ]],
+        [[
+            CREATE TABLE IF NOT EXISTS synced_koreader_progress (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id  INTEGER,
+                book_hash      TEXT    NOT NULL,
+                progress       TEXT    NOT NULL,
+                percentage     REAL    NOT NULL,
+                location       TEXT,
+                remote_device  TEXT,
+                remote_device_id TEXT,
+                remote_timestamp INTEGER,
+                synced_at      INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(book_hash)
+            )
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_synced_koreader_progress_book_hash
+            ON synced_koreader_progress(book_hash)
+        ]],
+    },
+
+    -- Migration 24: Allow multiple pending KOReader progress chunks per book.
+    -- Previous schema had UNIQUE(book_hash), which forced one mutable row and
+    -- caused new progress events to overwrite older unsynced events.
+    [24] = {
+        [[
+            CREATE TABLE IF NOT EXISTS pending_koreader_progress_new (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER,
+                book_hash     TEXT    NOT NULL,
+                progress      TEXT    NOT NULL,
+                percentage    REAL    NOT NULL,
+                location      TEXT,
+                device        TEXT,
+                device_id     TEXT,
+                timestamp     INTEGER NOT NULL,
+                retry_count   INTEGER DEFAULT 0,
+                last_retry_at INTEGER,
+                created_at    INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        ]],
+        [[
+            INSERT INTO pending_koreader_progress_new
+                (id, book_cache_id, book_hash, progress, percentage, location,
+                 device, device_id, timestamp, retry_count, last_retry_at, created_at)
+            SELECT id, book_cache_id, book_hash, progress, percentage, location,
+                   device, device_id, timestamp, retry_count, last_retry_at, created_at
+            FROM pending_koreader_progress
+        ]],
+        [[
+            DROP TABLE pending_koreader_progress
+        ]],
+        [[
+            ALTER TABLE pending_koreader_progress_new RENAME TO pending_koreader_progress
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_koreader_progress_book_hash
+            ON pending_koreader_progress(book_hash)
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_koreader_progress_created_at
+            ON pending_koreader_progress(created_at)
+        ]],
+    },
 }
 
 -- Post-migration hooks: Lua functions run after the SQL transaction commits.
@@ -719,6 +813,7 @@ Database.migration_hooks = {
     end,
 }
 
+---Database:new.
 function Database:new(plugin)
     local o = {
         plugin = plugin
@@ -728,6 +823,7 @@ function Database:new(plugin)
     return o
 end
 
+---Database:init.
 function Database:init(db_name)
     db_name = db_name or "booklore-sync.sqlite"
     self.db_path = DataStorage:getSettingsDir() .. "/" .. db_name
@@ -784,6 +880,7 @@ function Database:init(db_name)
     return true
 end
 
+---Database:close.
 function Database:close()
     if self.conn then
         self.conn:close()
@@ -792,6 +889,7 @@ function Database:close()
     end
 end
 
+---Database:getCurrentVersion.
 function Database:getCurrentVersion()
     local stmt = self.conn:prepare([[
         SELECT name FROM sqlite_master 
@@ -828,6 +926,7 @@ function Database:getCurrentVersion()
     return version
 end
 
+---Database:runMigrations.
 function Database:runMigrations()
     local current_version = self:getCurrentVersion()
     self.plugin:logInfo("BookloreSync Database: Current schema version:", current_version)
@@ -929,6 +1028,7 @@ function Database:runMigrations()
     return true
 end
 
+---Database:getBookByFilePath.
 function Database:getBookByFilePath(file_path)
     self.plugin:logDbg("BookloreSync Database: getBookByFilePath called")
     self.plugin:logDbg("  file_path:", file_path, "type:", type(file_path))
@@ -982,6 +1082,7 @@ function Database:getBookByFilePath(file_path)
     return book
 end
 
+---Database:getBookByHash.
 function Database:getBookByHash(file_hash)
     local stmt = self.conn:prepare([[
         SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13, hardcover_id
@@ -1018,6 +1119,7 @@ function Database:getBookByHash(file_hash)
     return book
 end
 
+---Database:getBookByBookId.
 function Database:getBookByBookId(book_id)
     book_id = tonumber(book_id)
     if not book_id then
@@ -1057,6 +1159,7 @@ function Database:getBookByBookId(book_id)
     return book
 end
 
+---Database:saveBookCache.
 function Database:saveBookCache(file_path, file_hash, book_id, title, author, isbn10, isbn13)
     file_path = tostring(file_path or "")
     file_hash = tostring(file_hash or "")
@@ -1111,6 +1214,7 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
 end
 
 -- Convenience method for caching a book without title/author/isbn.
+---Database:cacheBook.
 function Database:cacheBook(file_path, file_hash, book_id)
     return self:saveBookCache(file_path, file_hash, book_id, nil, nil, nil, nil)
 end
@@ -1126,6 +1230,7 @@ sync with the filesystem.
 @param new_path string  The new file_path to store.
 @return boolean  true on success, false on failure.
 --]]
+---Database:updateFilePath.
 function Database:updateFilePath(old_path, new_path)
     old_path = tostring(old_path or "")
     new_path = tostring(new_path or "")
@@ -1157,6 +1262,7 @@ function Database:updateFilePath(old_path, new_path)
     return true
 end
 
+---Database:updateBookId.
 function Database:updateBookId(file_hash, book_id)
     if book_id ~= nil then
         book_id = tonumber(book_id)
@@ -1191,6 +1297,7 @@ Used by the debug metadata-fetch action to know which books to query.
 
 @return table  Array of { id, file_path, file_hash, book_id, hardcover_id }
 --]]
+---Database:getAllMatchedBooks.
 function Database:getAllMatchedBooks()
     local stmt = self.conn:prepare([[
         SELECT id, file_path, file_hash, book_id, hardcover_id
@@ -1229,6 +1336,7 @@ so subsequent rating syncs can skip the lookup entirely.
 @param hardcover_id number|nil  Hardcover integer book ID (nil to clear)
 @return boolean true on success
 --]]
+---Database:updateHardcoverId.
 function Database:updateHardcoverId(file_hash, hardcover_id)
     if hardcover_id ~= nil then
         hardcover_id = tonumber(hardcover_id)
@@ -1257,6 +1365,7 @@ function Database:updateHardcoverId(file_hash, hardcover_id)
     return true
 end
 
+---Database:getAllUnmatchedBooks.
 function Database:getAllUnmatchedBooks()
     local stmt = self.conn:prepare([[
         SELECT id, file_path, file_hash, title, author
@@ -1285,6 +1394,7 @@ function Database:getAllUnmatchedBooks()
     return books
 end
 
+---Database:getBookCacheStats.
 function Database:getBookCacheStats()
     local stmt = self.conn:prepare([[
         SELECT 
@@ -1311,12 +1421,14 @@ function Database:getBookCacheStats()
     return stats
 end
 
+---Database:clearBookCache.
 function Database:clearBookCache()
     self.conn:exec("DELETE FROM book_cache")
     self.plugin:logInfo("BookloreSync Database: Book cache cleared")
     return true
 end
 
+---Database:addPendingSession.
 function Database:addPendingSession(session_data)
     local book_id = session_data.bookId
     if book_id ~= nil then
@@ -1369,6 +1481,7 @@ function Database:addPendingSession(session_data)
     return true
 end
 
+---Database:getPendingSessions.
 function Database:getPendingSessions(limit)
     limit = limit or 100
     
@@ -1413,6 +1526,7 @@ function Database:getPendingSessions(limit)
     return sessions
 end
 
+---Database:deletePendingSession.
 function Database:deletePendingSession(session_id)
     local stmt = self.conn:prepare("DELETE FROM pending_sessions WHERE id = ?")
     
@@ -1428,6 +1542,7 @@ function Database:deletePendingSession(session_id)
     return true
 end
 
+---Database:archivePendingSession.
 function Database:archivePendingSession(session_id)
     -- Archives a pending session to historical_sessions before deletion.
     local get_stmt = self.conn:prepare([[
@@ -1517,12 +1632,14 @@ function Database:archivePendingSession(session_id)
     end
 end
 
+---Database:clearPendingSessions.
 function Database:clearPendingSessions()
     self.conn:exec("DELETE FROM pending_sessions")
     self.plugin:logInfo("BookloreSync Database: Pending sessions cleared")
     return true
 end
 
+---Database:getPendingSessionCount.
 function Database:getPendingSessionCount()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_sessions")
     
@@ -1540,6 +1657,7 @@ function Database:getPendingSessionCount()
     return count
 end
 
+---Database:incrementSessionRetryCount.
 function Database:incrementSessionRetryCount(session_id)
     local stmt = self.conn:prepare([[
         UPDATE pending_sessions 
@@ -1560,6 +1678,7 @@ function Database:incrementSessionRetryCount(session_id)
     return true
 end
 
+---Database:updatePendingSessionBookId.
 function Database:updatePendingSessionBookId(session_id, book_id)
     local stmt = self.conn:prepare([[
         UPDATE pending_sessions
@@ -1579,6 +1698,7 @@ function Database:updatePendingSessionBookId(session_id, book_id)
     return true
 end
 
+---Database:getUnmatchedHistoricalBooks.
 function Database:getUnmatchedHistoricalBooks()
     local stmt = self.conn:prepare([[
         SELECT 
@@ -1611,6 +1731,7 @@ function Database:getUnmatchedHistoricalBooks()
     return books
 end
 
+---Database:getMatchedUnsyncedBooks.
 function Database:getMatchedUnsyncedBooks()
     local stmt = self.conn:prepare([[
         SELECT 
@@ -1643,6 +1764,7 @@ function Database:getMatchedUnsyncedBooks()
     return books
 end
 
+---Database:getHistoricalSessionsForBook.
 function Database:getHistoricalSessionsForBook(koreader_book_id)
     local stmt = self.conn:prepare([[
         SELECT 
@@ -1683,6 +1805,7 @@ function Database:getHistoricalSessionsForBook(koreader_book_id)
     return sessions
 end
 
+---Database:getHistoricalSessionsForBookUnsynced.
 function Database:getHistoricalSessionsForBookUnsynced(koreader_book_id)
     local stmt = self.conn:prepare([[
         SELECT 
@@ -1723,6 +1846,7 @@ function Database:getHistoricalSessionsForBookUnsynced(koreader_book_id)
     return sessions
 end
 
+---Database:markHistoricalSessionsMatched.
 function Database:markHistoricalSessionsMatched(koreader_book_id, book_id)
     local stmt = self.conn:prepare([[
         UPDATE historical_sessions 
@@ -1742,6 +1866,7 @@ function Database:markHistoricalSessionsMatched(koreader_book_id, book_id)
     return result == SQ3.DONE or result == SQ3.OK
 end
 
+---Database:addHistoricalSessions.
 function Database:addHistoricalSessions(sessions)
     if #sessions == 0 then
         return true
@@ -1792,6 +1917,7 @@ function Database:addHistoricalSessions(sessions)
     return success_count == #sessions
 end
 
+---Database:getHistoricalSessionStats.
 function Database:getHistoricalSessionStats()
     local stmt = self.conn:prepare([[
         SELECT 
@@ -1821,6 +1947,7 @@ function Database:getHistoricalSessionStats()
     return stats
 end
 
+---Database:markHistoricalSessionSynced.
 function Database:markHistoricalSessionSynced(session_id)
     local stmt = self.conn:prepare([[
         UPDATE historical_sessions 
@@ -1840,6 +1967,7 @@ function Database:markHistoricalSessionSynced(session_id)
     return result == SQ3.DONE or result == SQ3.OK
 end
 
+---Database:markHistoricalSessionUnmatched.
 function Database:markHistoricalSessionUnmatched(session_id)
     local stmt = self.conn:prepare([[
         UPDATE historical_sessions 
@@ -1859,6 +1987,7 @@ function Database:markHistoricalSessionUnmatched(session_id)
     return result == SQ3.DONE or result == SQ3.OK
 end
 
+---Database:getAllSyncedHistoricalSessions.
 function Database:getAllSyncedHistoricalSessions()
     local stmt = self.conn:prepare([[
         SELECT 
@@ -1898,6 +2027,7 @@ function Database:getAllSyncedHistoricalSessions()
     return sessions
 end
 
+---Database:getMatchedUnsyncedHistoricalSessions.
 function Database:getMatchedUnsyncedHistoricalSessions()
     local stmt = self.conn:prepare([[
         SELECT 
@@ -1937,6 +2067,7 @@ function Database:getMatchedUnsyncedHistoricalSessions()
     return sessions
 end
 
+---Database:hasHistoricalSessions.
 function Database:hasHistoricalSessions()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM historical_sessions LIMIT 1")
     
@@ -1954,6 +2085,7 @@ function Database:hasHistoricalSessions()
     return has_sessions
 end
 
+---Database:findBookIdByHash.
 function Database:findBookIdByHash(md5_hash)
     if not md5_hash or md5_hash == "" then
         return nil
@@ -1993,6 +2125,7 @@ Find book_id by ISBN (prefers ISBN-13 over ISBN-10)
 @param isbn13 ISBN-13 string (optional)
 @return table|nil Returns {book_id, title, author, file_hash, isbn10, isbn13} or nil
 --]]
+---Database:findBookIdByIsbn.
 function Database:findBookIdByIsbn(isbn10, isbn13)
     if isbn13 and isbn13 ~= "" then
         local stmt = self.conn:prepare([[
@@ -2057,6 +2190,7 @@ function Database:findBookIdByIsbn(isbn10, isbn13)
     return nil
 end
 
+---Database:migrateFromLuaSettings.
 function Database:migrateFromLuaSettings(local_db)
     self.plugin:logInfo("BookloreSync Database: Starting migration from LuaSettings")
     
@@ -2119,6 +2253,7 @@ function Database:migrateFromLuaSettings(local_db)
     return success
 end
 
+---Database:saveBearerToken.
 function Database:saveBearerToken(username, token)
     -- Expires in 4 weeks (28 days)
     local expires_at = os.time() + (28 * 24 * 60 * 60)
@@ -2152,6 +2287,7 @@ function Database:saveBearerToken(username, token)
     end
 end
 
+---Database:getBearerToken.
 function Database:getBearerToken(username)
     local stmt = self.conn:prepare([[
         SELECT token, expires_at
@@ -2183,6 +2319,7 @@ function Database:getBearerToken(username)
     return token, expires_at
 end
 
+---Database:deleteBearerToken.
 function Database:deleteBearerToken(username)
     local stmt = self.conn:prepare("DELETE FROM bearer_tokens WHERE username = ?")
     
@@ -2199,6 +2336,7 @@ function Database:deleteBearerToken(username)
     return true
 end
 
+---Database:cleanupExpiredTokens.
 function Database:cleanupExpiredTokens()
     local stmt = self.conn:prepare("DELETE FROM bearer_tokens WHERE expires_at <= ?")
     
@@ -2221,6 +2359,7 @@ Get cached value from updater_cache if not expired
 @param key Cache key
 @return string|nil Cached value (JSON string) or nil if expired/not found
 --]]
+---Database:getUpdaterCache.
 function Database:getUpdaterCache(key)
     local stmt = self.conn:prepare("SELECT value, cached_at FROM updater_cache WHERE key = ?")
     
@@ -2257,6 +2396,7 @@ Save value to updater_cache with current timestamp
 @param value Value to cache (JSON string)
 @return boolean success
 --]]
+---Database:setUpdaterCache.
 function Database:setUpdaterCache(key, value)
     local stmt = self.conn:prepare("INSERT OR REPLACE INTO updater_cache (key, value, cached_at) VALUES (?, ?, ?)")
     
@@ -2278,6 +2418,7 @@ Clear all cached updater data
 
 @return boolean success
 --]]
+---Database:clearUpdaterCache.
 function Database:clearUpdaterCache()
     local stmt = self.conn:prepare("DELETE FROM updater_cache")
     
@@ -2293,6 +2434,7 @@ function Database:clearUpdaterCache()
     return true
 end
 
+---Database:getBookCacheById.
 function Database:getBookCacheById(id)
     if not id then
         return nil
@@ -2337,6 +2479,7 @@ Get the book_cache id for a given file path.
 @param file_path Full path to the document file
 @return number|nil The book_cache.id or nil if not found
 --]]
+---Database:getBookCacheIdByFilePath.
 function Database:getBookCacheIdByFilePath(file_path)
     if not file_path then
         return nil
@@ -2374,6 +2517,7 @@ Upsert a row in book_metadata for the given book_cache_id.
 @param fields Table with any of: sdr_path, rating, rating_synced, pending_rating_prompt
 @return boolean success
 --]]
+---Database:upsertBookMetadata.
 function Database:upsertBookMetadata(book_cache_id, fields)
     if not book_cache_id then
         self.plugin:logErr("BookloreSync Database: upsertBookMetadata called without book_cache_id")
@@ -2473,6 +2617,7 @@ Get the book_metadata row for a given book_cache_id.
 @param book_cache_id The book_cache.id
 @return table|nil {id, book_cache_id, sdr_path, rating, rating_synced, pending_rating_prompt} or nil
 --]]
+---Database:getBookMetadata.
 function Database:getBookMetadata(book_cache_id)
     if not book_cache_id then return nil end
     book_cache_id = tonumber(book_cache_id)
@@ -2513,6 +2658,7 @@ Store a rating (1-10) for a book, clearing the synced flag.
 @param rating integer 1-10
 @return boolean success
 --]]
+---Database:storeRating.
 function Database:storeRating(book_cache_id, rating)
     return self:upsertBookMetadata(book_cache_id, { rating = rating, rating_synced = false })
 end
@@ -2523,6 +2669,7 @@ Mark the rating for a book as synced to the server.
 @param book_cache_id The book_cache.id
 @return boolean success
 --]]
+---Database:markRatingSynced.
 function Database:markRatingSynced(book_cache_id)
     return self:upsertBookMetadata(book_cache_id, { rating_synced = true })
 end
@@ -2538,6 +2685,7 @@ has been resolved.
 @param book_cache_id integer  book_cache.id
 @return boolean success
 --]]
+---Database:setPendingRatingPrompt.
 function Database:setPendingRatingPrompt(book_cache_id, value)
     return self:upsertBookMetadata(book_cache_id, { pending_rating_prompt = (value ~= false) })
 end
@@ -2548,6 +2696,7 @@ known book_id so that the caller can act on them.
 
 @return table  Array of {book_cache_id, book_id, file_path}
 --]]
+---Database:getBooksPendingRatingPrompt.
 function Database:getBooksPendingRatingPrompt()
     local stmt = self.conn:prepare([[
         SELECT bm.book_cache_id, bc.book_id, bc.file_path
@@ -2573,6 +2722,7 @@ function Database:getBooksPendingRatingPrompt()
     return rows
 end
 
+---Database:addPendingRating.
 function Database:addPendingRating(book_cache_id, book_id, rating)
     -- book_id may be nil when the server was offline at book-close time.
     if not book_cache_id or not rating then
@@ -2625,6 +2775,7 @@ Return all rows from the pending_ratings queue.
 
 @return table  Array of {id, book_cache_id, book_id, rating, retry_count}
 --]]
+---Database:getPendingRatings.
 function Database:getPendingRatings()
     local stmt = self.conn:prepare([[
         SELECT id, book_cache_id, book_id, rating, retry_count
@@ -2655,6 +2806,7 @@ Return the number of ratings currently in the pending queue.
 
 @return integer
 --]]
+---Database:getPendingRatingCount.
 function Database:getPendingRatingCount()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_ratings")
     if not stmt then
@@ -2679,6 +2831,7 @@ upload in showRatingDialog).
 @param book_cache_id integer  pending_ratings.book_cache_id
 @return boolean success
 --]]
+---Database:deletePendingRatingByBookCacheId.
 function Database:deletePendingRatingByBookCacheId(book_cache_id)
     if not book_cache_id then
         self.plugin:logErr("BookloreSync Database: deletePendingRatingByBookCacheId called without book_cache_id")
@@ -2711,6 +2864,7 @@ Remove a successfully-synced rating from the pending queue.
 @param id integer  pending_ratings.id
 @return boolean success
 --]]
+---Database:deletePendingRating.
 function Database:deletePendingRating(id)
     if not id then
         self.plugin:logErr("BookloreSync Database: deletePendingRating called without id")
@@ -2743,6 +2897,7 @@ Increment the retry counter for a pending rating.
 @param id integer  pending_ratings.id
 @return boolean success
 --]]
+---Database:incrementPendingRatingRetryCount.
 function Database:incrementPendingRatingRetryCount(id)
     if not id then return false end
     id = tonumber(id)
@@ -2771,6 +2926,7 @@ function Database:incrementPendingRatingRetryCount(id)
     return result == SQ3.DONE or result == SQ3.OK
 end
 
+---Database:isAnnotationSynced.
 function Database:isAnnotationSynced(book_cache_id, koreader_datetime, annotation_type)
     if not book_cache_id or not koreader_datetime or not annotation_type then
         return false
@@ -2815,6 +2971,7 @@ Record that a KOReader annotation has been synced to the server.
 @param server_id         number|nil  ID returned by the server (optional)
 @return boolean success
 --]]
+---Database:markAnnotationSynced.
 function Database:markAnnotationSynced(book_cache_id, koreader_datetime, annotation_type, server_id)
     if not book_cache_id or not koreader_datetime or not annotation_type then
         self.plugin:logErr("BookloreSync Database: markAnnotationSynced called with missing args")
@@ -2854,6 +3011,7 @@ function Database:markAnnotationSynced(book_cache_id, koreader_datetime, annotat
     return result == SQ3.DONE or result == SQ3.OK
 end
 
+---Database:addPendingAnnotation.
 function Database:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, payload)
     if not book_cache_id or not ann_type or not datetime or not payload then
         self.plugin:logErr("BookloreSync Database: addPendingAnnotation called with missing args")
@@ -2905,6 +3063,7 @@ Return all rows from the pending_annotations queue, oldest first.
 
 @return table  Array of {id, book_cache_id, book_id, ann_type, datetime, payload, retry_count}
 --]]
+---Database:getPendingAnnotations.
 function Database:getPendingAnnotations()
     local stmt = self.conn:prepare([[
         SELECT id, book_cache_id, book_id, ann_type, datetime, payload, retry_count
@@ -2937,6 +3096,7 @@ Return the number of annotations currently in the pending queue.
 
 @return integer
 --]]
+---Database:getPendingAnnotationCount.
 function Database:getPendingAnnotationCount()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_annotations")
     if not stmt then
@@ -2958,6 +3118,7 @@ Remove a successfully-synced annotation from the pending queue.
 @param id integer  pending_annotations.id
 @return boolean success
 --]]
+---Database:deletePendingAnnotation.
 function Database:deletePendingAnnotation(id)
     if not id then
         self.plugin:logErr("BookloreSync Database: deletePendingAnnotation called without id")
@@ -2990,6 +3151,7 @@ Increment the retry counter for a pending annotation.
 @param id integer  pending_annotations.id
 @return boolean success
 --]]
+---Database:incrementPendingAnnotationRetryCount.
 function Database:incrementPendingAnnotationRetryCount(id)
     if not id then return false end
     id = tonumber(id)
@@ -3023,6 +3185,7 @@ Delete all rows from the pending_annotations queue.
 
 @return boolean success
 --]]
+---Database:clearPendingAnnotations.
 function Database:clearPendingAnnotations()
     local result = self.conn:exec("DELETE FROM pending_annotations")
     return result == SQ3.OK
@@ -3033,11 +3196,13 @@ Delete all rows from pending_ratings.
 
 @return boolean success
 --]]
+---Database:clearPendingRatings.
 function Database:clearPendingRatings()
     local result = self.conn:exec("DELETE FROM pending_ratings")
     return result == SQ3.OK
 end
 
+---Database:getPendingBookmarkCount.
 function Database:getPendingBookmarkCount()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_bookmarks")
     if not stmt then
@@ -3059,6 +3224,7 @@ Count pending annotations for a specific book.
 @param book_cache_id integer  book_cache.id for the book
 @return integer count
 --]]
+---Database:getPendingAnnotationCountForBook.
 function Database:getPendingAnnotationCountForBook(book_cache_id)
     if not book_cache_id then return 0 end
     book_cache_id = tonumber(book_cache_id)
@@ -3084,6 +3250,7 @@ Count pending bookmarks for a specific book.
 @param book_cache_id integer  book_cache.id for the book
 @return integer count
 --]]
+---Database:getPendingBookmarkCountForBook.
 function Database:getPendingBookmarkCountForBook(book_cache_id)
     if not book_cache_id then return 0 end
     book_cache_id = tonumber(book_cache_id)
@@ -3109,6 +3276,7 @@ Count synced annotations for a specific book.
 @param book_cache_id integer  book_cache.id for the book
 @return integer count
 --]]
+---Database:getSyncedAnnotationCountForBook.
 function Database:getSyncedAnnotationCountForBook(book_cache_id)
     if not book_cache_id then return 0 end
     book_cache_id = tonumber(book_cache_id)
@@ -3134,6 +3302,7 @@ Count synced bookmarks for a specific book.
 @param book_cache_id integer  book_cache.id for the book
 @return integer count
 --]]
+---Database:getSyncedBookmarkCountForBook.
 function Database:getSyncedBookmarkCountForBook(book_cache_id)
     if not book_cache_id then return 0 end
     book_cache_id = tonumber(book_cache_id)
@@ -3158,8 +3327,281 @@ Delete all rows from the pending_bookmarks queue.
 
 @return boolean success
 --]]
+---Database:clearPendingBookmarks.
 function Database:clearPendingBookmarks()
     local result = self.conn:exec("DELETE FROM pending_bookmarks")
+    return result == SQ3.OK
+end
+
+-- ── KOReader progress helpers ───────────────────────────────────────────────
+
+--[[--
+Queue pending KOReader progress for a book hash.
+
+@param progress_data table required fields:
+  book_hash (string), progress (string), percentage (number), timestamp (number)
+optional fields:
+  book_cache_id (number), location (string), device (string), device_id (string)
+@return boolean success
+--]]
+---Database:addPendingKoreaderProgress.
+function Database:addPendingKoreaderProgress(progress_data)
+    if type(progress_data) ~= "table" then
+        self.plugin:logErr("BookloreSync Database: addPendingKoreaderProgress called with non-table")
+        return false
+    end
+
+    local book_hash = tostring(progress_data.book_hash or "")
+    local progress = tostring(progress_data.progress or "")
+    local percentage = tonumber(progress_data.percentage)
+    local timestamp = tonumber(progress_data.timestamp)
+    local book_cache_id = progress_data.book_cache_id and tonumber(progress_data.book_cache_id) or nil
+    local location = progress_data.location and tostring(progress_data.location) or nil
+    local device = progress_data.device and tostring(progress_data.device) or nil
+    local device_id = progress_data.device_id and tostring(progress_data.device_id) or nil
+
+    if book_hash == "" or progress == "" or not percentage or not timestamp then
+        self.plugin:logErr("BookloreSync Database: addPendingKoreaderProgress missing required fields")
+        return false
+    end
+
+    local stmt = self.conn:prepare([[
+        INSERT INTO pending_koreader_progress
+            (book_cache_id, book_hash, progress, percentage, location, device, device_id, timestamp, retry_count, last_retry_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, CAST(strftime('%s', 'now') AS INTEGER))
+    ]])
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare addPendingKoreaderProgress:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function()
+        stmt:bind(book_cache_id, book_hash, progress, percentage, location, device, device_id, timestamp)
+    end)
+    if not ok then
+        self.plugin:logErr("BookloreSync Database: Bind failed in addPendingKoreaderProgress:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    if result ~= SQ3.DONE and result ~= SQ3.OK then
+        self.plugin:logErr("BookloreSync Database: addPendingKoreaderProgress step failed:", self.conn:errmsg())
+        return false
+    end
+    return true
+end
+
+--[[-- Return all pending KOReader progress rows, oldest first. --]]
+---Database:getPendingKoreaderProgress.
+function Database:getPendingKoreaderProgress()
+    local rows = {}
+    local stmt = self.conn:prepare([[
+        SELECT id, book_cache_id, book_hash, progress, percentage, location,
+               device, device_id, timestamp, retry_count
+        FROM pending_koreader_progress
+        ORDER BY created_at ASC
+    ]])
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getPendingKoreaderProgress:", self.conn:errmsg())
+        return rows
+    end
+
+    for row in stmt:rows() do
+        table.insert(rows, {
+            id = tonumber(row[1]),
+            book_cache_id = row[2] and tonumber(row[2]) or nil,
+            book_hash = tostring(row[3]),
+            progress = tostring(row[4]),
+            percentage = tonumber(row[5]) or 0,
+            location = row[6] and tostring(row[6]) or nil,
+            device = row[7] and tostring(row[7]) or nil,
+            device_id = row[8] and tostring(row[8]) or nil,
+            timestamp = tonumber(row[9]) or 0,
+            retry_count = tonumber(row[10]) or 0,
+        })
+    end
+
+    stmt:close()
+    return rows
+end
+
+---Database:getPendingKoreaderProgressCount.
+function Database:getPendingKoreaderProgressCount()
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM pending_koreader_progress")
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getPendingKoreaderProgressCount:", self.conn:errmsg())
+        return 0
+    end
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
+    stmt:close()
+    return count
+end
+
+---Database:deletePendingKoreaderProgress.
+function Database:deletePendingKoreaderProgress(id)
+    if not id then return false end
+    local stmt = self.conn:prepare("DELETE FROM pending_koreader_progress WHERE id = ?")
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare deletePendingKoreaderProgress:", self.conn:errmsg())
+        return false
+    end
+    local ok, err = pcall(function() stmt:bind(id) end)
+    if not ok then
+        self.plugin:logErr("BookloreSync Database: Bind failed in deletePendingKoreaderProgress:", err)
+        stmt:close()
+        return false
+    end
+    local res = stmt:step()
+    stmt:close()
+    return res == SQ3.DONE or res == SQ3.OK
+end
+
+---Database:incrementPendingKoreaderProgressRetry.
+function Database:incrementPendingKoreaderProgressRetry(id)
+    if not id then return false end
+    local stmt = self.conn:prepare([[
+        UPDATE pending_koreader_progress
+        SET retry_count = retry_count + 1,
+            last_retry_at = CAST(strftime('%s', 'now') AS INTEGER)
+        WHERE id = ?
+    ]])
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare incrementPendingKoreaderProgressRetry:", self.conn:errmsg())
+        return false
+    end
+    local ok, err = pcall(function() stmt:bind(id) end)
+    if not ok then
+        self.plugin:logErr("BookloreSync Database: Bind failed in incrementPendingKoreaderProgressRetry:", err)
+        stmt:close()
+        return false
+    end
+    local res = stmt:step()
+    stmt:close()
+    return res == SQ3.DONE or res == SQ3.OK
+end
+
+---Database:clearPendingKoreaderProgress.
+function Database:clearPendingKoreaderProgress()
+    local result = self.conn:exec("DELETE FROM pending_koreader_progress")
+    return result == SQ3.OK
+end
+
+--[[--
+Store latest successfully-synced KOReader progress for a book hash.
+--]]
+---Database:markKoreaderProgressSynced.
+function Database:markKoreaderProgressSynced(progress_data)
+    if type(progress_data) ~= "table" then return false end
+    local book_hash = tostring(progress_data.book_hash or "")
+    local progress = tostring(progress_data.progress or "")
+    local percentage = tonumber(progress_data.percentage)
+    if book_hash == "" or progress == "" or not percentage then
+        return false
+    end
+
+    local stmt = self.conn:prepare([[
+        INSERT INTO synced_koreader_progress
+            (book_cache_id, book_hash, progress, percentage, location,
+             remote_device, remote_device_id, remote_timestamp, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+        ON CONFLICT(book_hash) DO UPDATE SET
+            book_cache_id = excluded.book_cache_id,
+            progress = excluded.progress,
+            percentage = excluded.percentage,
+            location = excluded.location,
+            remote_device = excluded.remote_device,
+            remote_device_id = excluded.remote_device_id,
+            remote_timestamp = excluded.remote_timestamp,
+            synced_at = CAST(strftime('%s', 'now') AS INTEGER)
+    ]])
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare markKoreaderProgressSynced:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function()
+        stmt:bind(
+            progress_data.book_cache_id and tonumber(progress_data.book_cache_id) or nil,
+            book_hash,
+            progress,
+            percentage,
+            progress_data.location and tostring(progress_data.location) or nil,
+            progress_data.remote_device and tostring(progress_data.remote_device) or nil,
+            progress_data.remote_device_id and tostring(progress_data.remote_device_id) or nil,
+            progress_data.remote_timestamp and tonumber(progress_data.remote_timestamp) or nil
+        )
+    end)
+    if not ok then
+        self.plugin:logErr("BookloreSync Database: Bind failed in markKoreaderProgressSynced:", err)
+        stmt:close()
+        return false
+    end
+
+    local res = stmt:step()
+    stmt:close()
+    return res == SQ3.DONE or res == SQ3.OK
+end
+
+---Database:getSyncedKoreaderProgressByHash.
+function Database:getSyncedKoreaderProgressByHash(book_hash)
+    if not book_hash or book_hash == "" then return nil end
+    local stmt = self.conn:prepare([[
+        SELECT id, book_cache_id, book_hash, progress, percentage, location,
+               remote_device, remote_device_id, remote_timestamp, synced_at
+        FROM synced_koreader_progress
+        WHERE book_hash = ?
+        LIMIT 1
+    ]])
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getSyncedKoreaderProgressByHash:", self.conn:errmsg())
+        return nil
+    end
+    stmt:bind(tostring(book_hash))
+    local row_data = nil
+    for row in stmt:rows() do
+        row_data = {
+            id = tonumber(row[1]),
+            book_cache_id = row[2] and tonumber(row[2]) or nil,
+            book_hash = tostring(row[3]),
+            progress = tostring(row[4]),
+            percentage = tonumber(row[5]) or 0,
+            location = row[6] and tostring(row[6]) or nil,
+            remote_device = row[7] and tostring(row[7]) or nil,
+            remote_device_id = row[8] and tostring(row[8]) or nil,
+            remote_timestamp = row[9] and tonumber(row[9]) or nil,
+            synced_at = row[10] and tonumber(row[10]) or nil,
+        }
+        break
+    end
+    stmt:close()
+    return row_data
+end
+
+---Database:getSyncedKoreaderProgressCount.
+function Database:getSyncedKoreaderProgressCount()
+    local stmt = self.conn:prepare("SELECT COUNT(*) FROM synced_koreader_progress")
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getSyncedKoreaderProgressCount:", self.conn:errmsg())
+        return 0
+    end
+    local count = 0
+    for row in stmt:rows() do
+        count = tonumber(row[1]) or 0
+        break
+    end
+    stmt:close()
+    return count
+end
+
+---Database:clearSyncedKoreaderProgress.
+function Database:clearSyncedKoreaderProgress()
+    local result = self.conn:exec("DELETE FROM synced_koreader_progress")
     return result == SQ3.OK
 end
 
@@ -3169,6 +3611,7 @@ end
 Count rows in historical_sessions.
 @return integer count
 --]]
+---Database:getHistoricalSessionCount.
 function Database:getHistoricalSessionCount()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM historical_sessions")
     if not stmt then return 0 end
@@ -3182,6 +3625,7 @@ end
 Delete all rows from historical_sessions.
 @return boolean success
 --]]
+---Database:clearHistoricalSessions.
 function Database:clearHistoricalSessions()
     local result = self.conn:exec("DELETE FROM historical_sessions")
     self.plugin:logInfo("BookloreSync Database: Historical sessions cleared")
@@ -3192,6 +3636,7 @@ end
 Count rows in synced_annotations.
 @return integer count
 --]]
+---Database:getSyncedAnnotationCount.
 function Database:getSyncedAnnotationCount()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM synced_annotations")
     if not stmt then return 0 end
@@ -3206,6 +3651,7 @@ Delete all rows from synced_annotations.
 Clearing this allows annotations to be re-synced to the server.
 @return boolean success
 --]]
+---Database:clearSyncedAnnotations.
 function Database:clearSyncedAnnotations()
     local result = self.conn:exec("DELETE FROM synced_annotations")
     self.plugin:logInfo("BookloreSync Database: Synced annotations cleared")
@@ -3216,6 +3662,7 @@ end
 Count rows in synced_bookmarks.
 @return integer count
 --]]
+---Database:getSyncedBookmarkCount.
 function Database:getSyncedBookmarkCount()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM synced_bookmarks")
     if not stmt then return 0 end
@@ -3230,6 +3677,7 @@ Delete all rows from synced_bookmarks.
 Clearing this allows bookmarks to be re-synced to the server.
 @return boolean success
 --]]
+---Database:clearSyncedBookmarks.
 function Database:clearSyncedBookmarks()
     local result = self.conn:exec("DELETE FROM synced_bookmarks")
     self.plugin:logInfo("BookloreSync Database: Synced bookmarks cleared")
@@ -3240,6 +3688,7 @@ end
 Count rows in rating_sync_history.
 @return integer count
 --]]
+---Database:getRatingSyncHistoryCount.
 function Database:getRatingSyncHistoryCount()
     local stmt = self.conn:prepare("SELECT COUNT(*) FROM rating_sync_history")
     if not stmt then return 0 end
@@ -3253,6 +3702,7 @@ end
 Delete all rows from rating_sync_history.
 @return boolean success
 --]]
+---Database:clearRatingSyncHistory.
 function Database:clearRatingSyncHistory()
     local result = self.conn:exec("DELETE FROM rating_sync_history")
     self.plugin:logInfo("BookloreSync Database: Rating sync history cleared")
@@ -3275,6 +3725,7 @@ Tables updated:
 
 @return boolean success
 --]]
+---Database:resetAllBookIds.
 function Database:resetAllBookIds()
     local stmts = {
         "UPDATE book_cache          SET book_id = NULL",
@@ -3297,6 +3748,7 @@ function Database:resetAllBookIds()
     return true
 end
 
+---Database:getPluginSetting.
 function Database:getPluginSetting(key)
     if not key then return nil end
     key = tostring(key)
@@ -3343,6 +3795,7 @@ representation.  nil values are stored as a SQL NULL.
 @param value string|number|boolean|nil  Value to store
 @return boolean success
 --]]
+---Database:savePluginSetting.
 function Database:savePluginSetting(key, value)
     if not key then
         self.plugin:logErr("BookloreSync Database: savePluginSetting called without key")
@@ -3396,6 +3849,7 @@ using the same rules as getPluginSetting().
 
 @return table  { key = value, ... }
 --]]
+---Database:getAllPluginSettings.
 function Database:getAllPluginSettings()
     local settings = {}
     local stmt = self.conn:prepare("SELECT key, value FROM plugin_settings")
@@ -3424,6 +3878,7 @@ function Database:getAllPluginSettings()
     return settings
 end
 
+---Database:recordRatingSyncHistory.
 function Database:recordRatingSyncHistory(book_cache_id, rating, status, error_message)
     if not book_cache_id or not rating then
         self.plugin:logErr("BookloreSync Database: recordRatingSyncHistory called with missing args")
@@ -3471,6 +3926,7 @@ Retrieve the rating sync history for a given book.
 @param book_cache_id  number  book_cache.id
 @return table  Array of { id, book_cache_id, rating, synced_at, status, error_message }
 --]]
+---Database:getRatingSyncHistory.
 function Database:getRatingSyncHistory(book_cache_id)
     local rows = {}
     if not book_cache_id then return rows end
@@ -3517,6 +3973,7 @@ Stored in plugin_settings under the key "hardcover_user_id".
 @param user_id number  The integer user ID returned by the Hardcover `me {}` query
 @return boolean success
 --]]
+---Database:saveHardcoverUserId.
 function Database:saveHardcoverUserId(user_id)
     user_id = tonumber(user_id)
     if not user_id then
@@ -3531,6 +3988,7 @@ Retrieve the cached Hardcover user ID, or nil if not yet stored.
 
 @return number|nil  Integer user ID, or nil
 --]]
+---Database:getHardcoverUserId.
 function Database:getHardcoverUserId()
     return self:getPluginSetting("hardcover_user_id")
 end
@@ -3538,6 +3996,7 @@ end
 -- ── Bookmark helpers ──────────────────────────────────────────────────────────
 
 --[[-- Return true if the bookmark identified by datetime has already been synced. --]]
+---Database:isBookmarkSynced.
 function Database:isBookmarkSynced(book_cache_id, datetime)
     if not book_cache_id or not datetime or datetime == "" then return false end
     local stmt = self.conn:prepare([[
@@ -3564,6 +4023,7 @@ function Database:isBookmarkSynced(book_cache_id, datetime)
 end
 
 --[[-- Mark a bookmark as synced (insert into synced_bookmarks). --]]
+---Database:markBookmarkSynced.
 function Database:markBookmarkSynced(book_cache_id, datetime, server_id)
     if not book_cache_id or not datetime or datetime == "" then
         self.plugin:logErr("BookloreSync Database: markBookmarkSynced called with missing args")
@@ -3589,6 +4049,7 @@ function Database:markBookmarkSynced(book_cache_id, datetime, server_id)
 end
 
 --[[-- Add a bookmark to the pending queue for retry. --]]
+---Database:addPendingBookmark.
 function Database:addPendingBookmark(book_cache_id, book_id, datetime, payload)
     if not book_cache_id or not datetime or datetime == "" or not payload then
         self.plugin:logErr("BookloreSync Database: addPendingBookmark called with missing args")
@@ -3636,6 +4097,7 @@ function Database:addPendingBookmark(book_cache_id, book_id, datetime, payload)
 end
 
 --[[-- Return all pending bookmarks, oldest first. --]]
+---Database:getPendingBookmarks.
 function Database:getPendingBookmarks()
     local rows = {}
     local stmt = self.conn:prepare([[
@@ -3662,6 +4124,7 @@ function Database:getPendingBookmarks()
 end
 
 --[[-- Remove a single pending bookmark by id (after successful sync). --]]
+---Database:deletePendingBookmark.
 function Database:deletePendingBookmark(id)
     if not id then return false end
     local stmt = self.conn:prepare("DELETE FROM pending_bookmarks WHERE id = ?")
@@ -3681,6 +4144,7 @@ function Database:deletePendingBookmark(id)
 end
 
 --[[-- Increment retry_count and update last_retry_at for a pending bookmark. --]]
+---Database:incrementBookmarkRetry.
 function Database:incrementBookmarkRetry(id)
     if not id then return false end
     local stmt = self.conn:prepare([[
@@ -3716,6 +4180,7 @@ at the time of deletion, so the shelf-removal can be retried later.
 @param book_id    number|nil  Booklore book ID if known
 @return boolean success
 --]]
+---Database:savePendingDeletion.
 function Database:savePendingDeletion(file_hash, stem, book_id)
     file_hash = tostring(file_hash or "")
     stem      = tostring(stem      or "")
@@ -3755,6 +4220,7 @@ function Database:savePendingDeletion(file_hash, stem, book_id)
 end
 
 --[[-- Return all pending deletions, oldest first. --]]
+---Database:getPendingDeletions.
 function Database:getPendingDeletions()
     local rows = {}
     local stmt = self.conn:prepare([[
@@ -3780,6 +4246,7 @@ function Database:getPendingDeletions()
 end
 
 --[[-- Remove a pending deletion by id after successful server sync. --]]
+---Database:removePendingDeletion.
 function Database:removePendingDeletion(deletion_id)
     if not deletion_id then return false end
     local stmt = self.conn:prepare("DELETE FROM pending_deletions WHERE id = ?")
@@ -3799,6 +4266,7 @@ function Database:removePendingDeletion(deletion_id)
 end
 
 --[[-- Increment retry_count for a pending deletion. --]]
+---Database:incrementDeletionRetry.
 function Database:incrementDeletionRetry(deletion_id)
     if not deletion_id then return false end
     local stmt = self.conn:prepare([[
@@ -3825,6 +4293,7 @@ end
 Begins a SQLite transaction.
 @return boolean true on success
 --]]
+---Database:beginTransaction.
 function Database:beginTransaction()
     if not self.conn then
         self.plugin:logErr("BookloreSync Database: beginTransaction called with no connection")
@@ -3842,6 +4311,7 @@ end
 Commits the current SQLite transaction.
 @return boolean true on success
 --]]
+---Database:commit.
 function Database:commit()
     if not self.conn then
         self.plugin:logErr("BookloreSync Database: commit called with no connection")
@@ -3859,6 +4329,7 @@ end
 Rolls back the current SQLite transaction.
 @return boolean true on success
 --]]
+---Database:rollback.
 function Database:rollback()
     if not self.conn then
         self.plugin:logErr("BookloreSync Database: rollback called with no connection")
@@ -3881,6 +4352,7 @@ Set the tracking_enabled flag for a book identified by its file path.
 @param enabled   boolean  true = track (default), false = skip uploads
 @return boolean success
 --]]
+---Database:setBookTracking.
 function Database:setBookTracking(file_path, enabled)
     if not file_path then return false end
     local val = enabled and 1 or 0
@@ -3909,6 +4381,7 @@ Returns true if the book is not yet in book_cache (default = enabled).
 @param file_path string  Absolute path to the book file
 @return boolean  true = track, false = skip
 --]]
+---Database:isBookTrackingEnabled.
 function Database:isBookTrackingEnabled(file_path)
     if not file_path then return true end
     local stmt = self.conn:prepare([[
@@ -3937,6 +4410,7 @@ Retrieve the cached shelf state for a shelf.
 @param shelf_id  number  Shelf ID
 @return table|nil  { books_json=string, synced_at=number } or nil if not cached
 --]]
+---Database:getShelfState.
 function Database:getShelfState(shelf_id)
     shelf_id = tonumber(shelf_id)
     if not shelf_id then return nil end
@@ -3967,6 +4441,7 @@ Uses INSERT OR REPLACE so repeated calls simply overwrite the previous row.
 @param shelf_id    number  Shelf ID
 @param books_json  string  JSON-encoded array of book objects from the API
 --]]
+---Database:saveShelfState.
 function Database:saveShelfState(shelf_id, books_json)
     shelf_id = tonumber(shelf_id)
     if not shelf_id or type(books_json) ~= "string" then
@@ -3999,6 +4474,7 @@ a full pass.
 
 @param shelf_id  number  Shelf ID
 --]]
+---Database:clearShelfState.
 function Database:clearShelfState(shelf_id)
     shelf_id = tonumber(shelf_id)
     if not shelf_id then return end

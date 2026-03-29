@@ -32,6 +32,7 @@ local Updater = {
     db = nil,
 }
 
+---Updater:new.
 function Updater:new(plugin)
     local o = {
         plugin = plugin
@@ -47,6 +48,7 @@ Initialize updater with paths and database reference
 @param plugin_dir Path to the plugin directory
 @param db Database instance for caching
 --]]
+---Updater:init.
 function Updater:init(plugin_dir, db)
     self.plugin_dir = plugin_dir
     self.db = db
@@ -69,6 +71,7 @@ Get current plugin version from plugin_version.lua
 
 @return table Version information {version, version_type, git_commit, build_date}
 --]]
+---Updater:getCurrentVersion.
 function Updater:getCurrentVersion()
     local version_file = self.plugin_dir .. "/plugin_version.lua"
     
@@ -92,6 +95,7 @@ Parse semantic version string into components
 @param version_string Version string like "1.2.3" or "v1.2.3"
 @return table {major, minor, patch, is_dev} or nil if invalid
 --]]
+---Updater:parseVersion.
 function Updater:parseVersion(version_string)
     if not version_string then
         return nil
@@ -125,6 +129,7 @@ Compare two version objects
 @param v2 Second version object from parseVersion()
 @return number -1 if v1 < v2, 0 if equal, 1 if v1 > v2
 --]]
+---Updater:compareVersions.
 function Updater:compareVersions(v1, v2)
     if not v1 or not v2 then
         return 0
@@ -164,6 +169,7 @@ Make HTTP GET request with timeout and redirect support
 @return number|nil HTTP status code
 @return table|nil response headers
 --]]
+---Updater:_makeHttpRequest.
 function Updater:_makeHttpRequest(url, headers, max_redirects)
     max_redirects = max_redirects or 5
     local redirect_count = 0
@@ -236,6 +242,7 @@ Get latest release information from GitHub API
 @return table|nil Release info {version, download_url, changelog, changelog_url, published_at, size}
 @return string|nil Error message if failed
 --]]
+---Updater:getLatestRelease.
 function Updater:getLatestRelease()
     local url = string.format("%s/repos/%s/releases/latest",
         self.GITHUB_API_BASE, self.GITHUB_REPO)
@@ -294,6 +301,7 @@ Fetch changelog file content from URL
 @return string|nil Changelog text or nil if failed
 @return string|nil Error message if failed
 --]]
+---Updater:fetchChangelog.
 function Updater:fetchChangelog(changelog_url)
     if not changelog_url then
         return nil, "No changelog URL provided"
@@ -318,6 +326,7 @@ Parse CHANGELOG.md content to extract section for a specific version
 @param version Version to extract (e.g., "3.2.0" or "v3.2.0")
 @return string|nil Extracted changelog section or nil if not found
 --]]
+---Updater:parseChangelogForVersion.
 function Updater:parseChangelogForVersion(changelog_content, version)
     if not changelog_content or not version then
         return nil
@@ -366,6 +375,7 @@ Clean changelog content by removing links and commit references
 @param changelog_text Changelog text with markdown links
 @return string Cleaned changelog text
 --]]
+---Updater:cleanChangelog.
 function Updater:cleanChangelog(changelog_text)
     if not changelog_text then
         return ""
@@ -404,6 +414,7 @@ Get cached release information from database
 
 @return table|nil Cached release info or nil if expired/not found
 --]]
+---Updater:getCachedReleaseInfo.
 function Updater:getCachedReleaseInfo()
     if not self.db then
         return nil
@@ -430,6 +441,7 @@ Cache release information in database
 @param release_info Release information table
 @return boolean success
 --]]
+---Updater:cacheReleaseInfo.
 function Updater:cacheReleaseInfo(release_info)
     if not self.db then
         return false
@@ -444,6 +456,7 @@ Clear cached release information
 
 @return boolean success
 --]]
+---Updater:clearCache.
 function Updater:clearCache()
     if not self.db then
         return false
@@ -458,6 +471,7 @@ Check for available updates
 @param use_cache If true, use cached release info (if available and fresh)
 @return table|nil {available, current_version, latest_version, release_info}
 --]]
+---Updater:checkForUpdates.
 function Updater:checkForUpdates(use_cache)
     self.plugin:logInfo("BookloreSync Updater: Checking for updates (use_cache=" .. tostring(use_cache) .. ")")
     
@@ -513,6 +527,7 @@ installable update source whenever it is reachable.
 @param download_url string URL that returns a ZIP when downloaded
 @return table|nil {available, current_version, latest_version, release_info}
 --]]
+---Updater:checkForDirectDownload.
 function Updater:checkForDirectDownload(download_url)
     self.plugin:logInfo("BookloreSync Updater: Checking direct download URL")
 
@@ -559,6 +574,7 @@ Format bytes as human-readable size
 @param bytes Number of bytes
 @return string Formatted size (e.g., "35.6 KB", "1.2 MB")
 --]]
+---Updater:formatBytes.
 function Updater:formatBytes(bytes)
     if not bytes or bytes == 0 then
         return "Unknown size"
@@ -581,6 +597,7 @@ Download update file with progress callback and redirect support
 @return boolean success
 @return string zip_path or error message
 --]]
+---Updater:downloadUpdate.
 function Updater:downloadUpdate(url, progress_callback)
     self.plugin:logInfo("BookloreSync Updater: Downloading from", url)
     
@@ -649,6 +666,7 @@ function Updater:downloadUpdate(url, progress_callback)
     local bytes_downloaded = 0
     local total_bytes = 0
     
+    ---progress_sink.
     local function progress_sink(chunk, err)
         if chunk then
             file:write(chunk)
@@ -706,6 +724,7 @@ Validate ZIP file structure
 @return boolean valid
 @return string|nil error message
 --]]
+---Updater:_validateZipStructure.
 function Updater:_validateZipStructure(zip_path)
     self.plugin:logInfo("BookloreSync Updater: Validating ZIP structure")
     
@@ -737,6 +756,7 @@ Extract ZIP file to destination directory
 @return boolean success
 @return string|nil error message
 --]]
+---Updater:_extractZip.
 function Updater:_extractZip(zip_path, dest_dir)
     self.plugin:logInfo("BookloreSync Updater: Extracting to", dest_dir)
     
@@ -761,6 +781,7 @@ Backup current plugin version
 @return boolean success
 @return string backup_path or error message
 --]]
+---Updater:backupCurrentVersion.
 function Updater:backupCurrentVersion()
     local current_info = self:getCurrentVersion()
     local timestamp = os.date("%Y%m%d-%H%M%S")
@@ -793,6 +814,7 @@ Install update from ZIP file (atomic operation)
 @return boolean success
 @return string|nil error message
 --]]
+---Updater:installUpdate.
 function Updater:installUpdate(zip_path)
     self.plugin:logInfo("BookloreSync Updater: Installing update from", zip_path)
     
@@ -860,6 +882,7 @@ Rollback to most recent backup
 @return boolean success
 @return string|nil error message
 --]]
+---Updater:rollback.
 function Updater:rollback()
     self.plugin:logInfo("BookloreSync Updater: Rolling back to previous version")
     
@@ -905,6 +928,7 @@ Cleanup temporary download files
 
 @return boolean success
 --]]
+---Updater:cleanupTempFiles.
 function Updater:cleanupTempFiles()
     self.plugin:logInfo("BookloreSync Updater: Cleaning up temp files")
     os.execute(string.format("rm -rf '%s'", self.temp_dir))
@@ -917,6 +941,7 @@ Cleanup old backups, keeping only the most recent N
 @param keep_count Number of backups to keep (default: 3)
 @return number Number of backups deleted
 --]]
+---Updater:cleanupOldBackups.
 function Updater:cleanupOldBackups(keep_count)
     keep_count = keep_count or self.BACKUP_KEEP_COUNT
     

@@ -977,14 +977,16 @@ function Updater:_restoreUserFiles(preserved_files)
         local source_path = preserved_dir .. "/" .. filename
         local dest_path = self.plugin_dir .. "/" .. filename
 
-        local restore_cmd = string.format("mv '%s' '%s' 2>&1", source_path, dest_path)
-        local handle = io.popen(restore_cmd)
-        local output = handle:read("*a")
-        local success = handle:close()
-
+        local success, copy_err = copy_file(source_path, dest_path)
         if not success then
-            self.plugin:logErr("BookloreSync Updater: Failed to restore", filename, output)
-            return false, "Failed to restore " .. filename .. ": " .. output
+            self.plugin:logErr("BookloreSync Updater: Failed to restore", filename, copy_err)
+            return false, "Failed to restore " .. filename .. ": " .. tostring(copy_err)
+        end
+
+        local remove_ok, remove_err = os.remove(source_path)
+        if not remove_ok then
+            self.plugin:logErr("BookloreSync Updater: Failed to remove preserved source", filename, remove_err)
+            return false, "Failed to restore " .. filename .. ": " .. tostring(remove_err)
         end
 
         self.plugin:logInfo("BookloreSync Updater: Restored", filename)

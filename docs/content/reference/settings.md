@@ -32,7 +32,7 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `is_enabled` | boolean | `true` | Master on/off switch for all session tracking |
+| `is_enabled` | boolean | `false` | Master on/off switch for all session tracking |
 | `min_duration` | integer | `30` | Minimum session duration in seconds for a session to be saved |
 | `min_pages` | integer | `5` | Minimum pages read for a session to be saved (used in pages detection mode) |
 | `session_detection_mode` | string | `"duration"` | Validation mode: `"duration"` or `"pages"` |
@@ -40,12 +40,27 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 
 ---
 
+## KOReader progress sync settings
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `progress_sync_enabled` | boolean | `false` | Master toggle for KOReader document-position sync |
+| `progress_pull_on_open` | boolean | `true` | Pull remote progress when opening a book (if already connected) |
+| `progress_pull_on_resume` | boolean | `true` | Pull remote progress after resume (if already connected) |
+| `progress_sync_trigger` | string | `"book_open_close"` | Push mode selector (`"book_open_close"` or `"each_n_pages"`) |
+| `progress_sync_interval_pages` | integer | `10` | Number of page turns before periodic progress update; `0` disables periodic updates |
+| `progress_sync_forward_strategy` | string | `"prompt"` | Strategy when remote progress is newer: `"silent"`, `"prompt"`, or `"disable"` |
+| `progress_sync_backward_strategy` | string | `"disable"` | Strategy when remote progress is older: `"silent"`, `"prompt"`, or `"disable"` |
+| `progress_sync_set_read_on_rating` | boolean | `false` | Queue forced 100% progress when rating is submitted |
+
+---
+
 ## Sync mode settings
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `sync_mode` | string | *(derived)* | High-level sync mode: `"automatic"` (sync on suspend + WiFi enabled), `"manual"` (queue only; sync via **Sync Now**), or `"custom"` (manual configuration of the two flags below). Derived from `manual_sync_only` and `force_push_session_on_suspend`/`connect_network_on_suspend` on first run; saved explicitly after that. |
-| `manual_sync_only` | boolean | `false` | When `true`, sessions are queued but not auto-uploaded; requires manual **Sync Now**. Set automatically when `sync_mode` is `"manual"`. |
+| `sync_mode` | string | *(derived)* | High-level sync mode: `"automatic"` (sync on suspend + WiFi enabled), `"manual"` (queue only; sync via **Manage Sessions → Sync Pending Now**), or `"custom"` (manual configuration of the two flags below). Derived from `manual_sync_only` and `force_push_session_on_suspend`/`connect_network_on_suspend` on first run; saved explicitly after that. |
+| `manual_sync_only` | boolean | `false` | When `true`, sessions are queued but not auto-uploaded; requires manual **Manage Sessions → Sync Pending Now**. Set automatically when `sync_mode` is `"manual"`. |
 | `force_push_session_on_suspend` | boolean | `false` | When `true`, triggers `syncPendingSessions` on device suspend. Set automatically when `sync_mode` is `"automatic"`; also available as a custom toggle when `sync_mode` is `"custom"`. |
 | `connect_network_on_suspend` | boolean | `false` | When `true`, enables WiFi before syncing on suspend (works in conjunction with `force_push_session_on_suspend`). Set automatically when `sync_mode` is `"automatic"`; also available as a custom toggle when `sync_mode` is `"custom"`. |
 | `ask_wifi_enable` | boolean | `false` | When `true`, shows a confirmation dialog before enabling WiFi for a sync |
@@ -63,6 +78,7 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 | `delete_removed_shelf_books` | boolean | `false` | Delete local book files when they are removed from the shelf |
 | `shelf_use_original_filename` | boolean | `true` | Save downloaded books using the server's original filename (stem + `_<id>`) instead of deriving the name from the book title |
 | `delete_sdr_on_book_delete` | boolean | `false` | When deleting a shelf book, also delete its `.sdr` sidecar directory. Only applies when `delete_removed_shelf_books` is also `true` |
+| `min_free_space_mb` | integer | `500` | Minimum free disk space threshold (in MB) required before downloading shelf books |
 
 ---
 
@@ -94,7 +110,6 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 |-----|------|---------|-------------|
 | `silent_messages` | boolean | `false` | Suppress session-related popup notifications |
 | `log_to_file` | boolean | `false` | Enable file-based debug logging with daily rotation |
-| `secure_logs` | boolean | `false` | Redact URLs from all log output |
 
 ---
 
@@ -103,6 +118,7 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `auto_update_check` | boolean | `true` | Check for updates once per day at startup |
+| `use_dev_builds` | boolean | `false` | Use the dev-build update channel defined by `dev-build.location` instead of stable GitHub releases |
 | `last_update_check` | integer | `0` | Unix timestamp of the last update check (set automatically) |
 
 ---

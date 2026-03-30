@@ -32,6 +32,8 @@ To disable auto-check, toggle off **Auto-check for updates** in:
 
 **Tools → BookLore Sync → About & Updates → Toggle auto-check**
 
+If **Use Dev Builds** is enabled, startup auto-check for stable releases is skipped. Manual **Check for Updates** uses the URL from `dev-build.location` instead.
+
 ---
 
 ## Manual update check
@@ -77,6 +79,15 @@ flowchart TD
 
 The entire process happens on-device. No computer is needed.
 
+### Preserved user files
+
+During installation, the updater preserves and restores user-specific files that should survive plugin replacement:
+
+- `hardcover.token`
+- `dev-build.location`
+
+This allows account tokens and dev-build channel configuration to persist across updates.
+
 ---
 
 ## Backups and rollback
@@ -108,6 +119,8 @@ MAJOR.MINOR.PATCH
 | PATCH | Bug fixes |
 
 Development builds (built from uncommitted changes) show a version like `0.0.0-dev+<commit>` and are always treated as outdated - installing a release will always replace a dev build.
+
+When **Use Dev Builds** is enabled, updates are installed from the URL in `dev-build.location` and shown as a `dev-build` channel update.
 
 ---
 

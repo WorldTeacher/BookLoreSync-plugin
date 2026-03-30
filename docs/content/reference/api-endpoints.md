@@ -212,6 +212,45 @@ This is the primary upload endpoint. The plugin falls back to the single-session
 
 ---
 
+## KOReader progress endpoints
+
+### `GET /api/koreader/syncs/progress/:book_hash`
+
+Fetches the latest synced KOReader progress state for a document hash.
+
+**Authentication:** MD5 credentials (headers)
+
+**Path parameter:** `:book_hash` - MD5 hash of the document.
+
+**Behavior notes:**
+
+- `404 Not Found` is treated as a normal state (no progress stored yet).
+- When data exists, the plugin compares remote/local state and applies the configured sync strategy.
+
+---
+
+### `PUT /api/koreader/syncs/progress`
+
+Updates KOReader progress state for a document hash.
+
+**Authentication:** MD5 credentials (headers)
+
+**Request body:**
+```json
+{
+  "timestamp": 1711300000,
+  "document": "<book_hash>",
+  "percentage": 42.37,
+  "progress": "0.4237",
+  "device": "KOReader",
+  "device_id": "<uuid>"
+}
+```
+
+Used by the Progress Sync feature for open/close snapshots and periodic page-turn updates.
+
+---
+
 ## Rating endpoint
 
 ### `PUT /api/v1/books/personal-rating`

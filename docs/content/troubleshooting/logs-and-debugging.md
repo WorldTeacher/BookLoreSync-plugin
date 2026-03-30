@@ -6,29 +6,33 @@ weight = 2
 
 # Logs and Debugging
 
+> **Privacy note:** Logs are secured by default. Server URLs are not written to log output.
+
 ---
 
 ## KOReader system log
 
-KOReader writes all plugin log output to its main log file:
+KOReader system logs are written to:
 
 ```
-/tmp/koreader.log
+{your_koreader_installation}/crash.log
 ```
 
-To filter for BookLore Sync entries only:
+For this plugin, `crash.log` is mostly useful for early startup events (for example file-logger initialization) and updater check activity.
+
+Most BookLore Sync runtime logs are written to the plugin log file (see **File logging (plugin log)** below).
+
+To filter BookLore-related lines in `crash.log`:
 
 ```bash
-grep BookloreSync /tmp/koreader.log
+grep BookloreSync {your_koreader_installation}/crash.log
 ```
 
-To follow the log in real time while reproducing an issue:
+To follow `crash.log` in real time while reproducing an issue:
 
 ```bash
-tail -f /tmp/koreader.log | grep BookloreSync
+tail -f {your_koreader_installation}/crash.log | grep BookloreSync
 ```
-
-This log is not persistent - it is cleared each time KOReader starts.
 
 ---
 
@@ -69,40 +73,16 @@ Toggle **Debug logging** off in the same menu. The current log file is closed cl
 
 ---
 
-## Secure logs
-
-If you need to share a log file publicly (e.g., when reporting a bug), enable **Secure logs** before capturing:
-
-**Tools → BookLore Sync → Preferences → Secure logs**
-
-With this setting on, all URLs in log output are replaced with `[URL REDACTED]`, so your server address and path information are not exposed.
-
-**Recommended capture procedure:**
-
-{% mermaid() %}
-flowchart TD
-    A["1. Enable Debug logging"]
-    B["2. Enable Secure logs"]
-    C["3. Restart KOReader"]
-    D["4. Reproduce the issue"]
-    E["5. Copy log file from logs directory"]
-    F["6. Attach to bug report"]
-
-    A --> B --> C --> D --> E --> F
-{% end %}
-
----
-
 ## Log levels
 
 The plugin uses four log levels:
 
 | Level | Prefix | When it appears |
 |-------|--------|----------------|
-| Debug | `[D]` | Detailed internal state, only with debug logging on |
-| Info  | `[I]` | Normal operation milestones (session saved, sync started) |
-| Warning | `[W]` | Recoverable issues (retry needed, book not found) |
-| Error | `[E]` | Failures that need attention (auth failure, database error) |
+| Debug | `DEBUG` | Detailed internal state, only with debug logging on |
+| Info  | `INFO` | Normal operation milestones (session saved, sync started) |
+| Warning | `WARN` | Recoverable issues (retry needed, book not found) |
+| Error | `ERROR` | Failures that need attention (auth failure, database error) |
 
 ---
 
@@ -110,19 +90,19 @@ The plugin uses four log levels:
 
 ```bash
 # All errors
-grep "BookloreSync.*\[E\]" /tmp/koreader.log
+grep "BookloreSync.*ERROR" {your_koreader_installation}/plugins/bookloresync.koplugin/logs/booklore-YYYY-MM-DD.log
 
 # Session events only
-grep "BookloreSync.*session" /tmp/koreader.log
+grep "BookloreSync.*session" {your_koreader_installation}/plugins/bookloresync.koplugin/logs/booklore-YYYY-MM-DD.log
 
 # API calls
-grep "BookloreSync.*POST\|GET\|PUT" /tmp/koreader.log
+grep "BookloreSync.*POST\|GET\|PUT" {your_koreader_installation}/plugins/bookloresync.koplugin/logs/booklore-YYYY-MM-DD.log
 
 # Sync attempts
-grep "BookloreSync.*sync\|pending" /tmp/koreader.log
+grep "BookloreSync.*sync\|pending" {your_koreader_installation}/plugins/bookloresync.koplugin/logs/booklore-YYYY-MM-DD.log
 
 # Update checks
-grep "BookloreSync.*update\|version" /tmp/koreader.log
+grep "BookloreSync.*update\|version" {your_koreader_installation}/crash.log
 ```
 
 ---
@@ -135,5 +115,5 @@ When opening a bug report on the [GitHub issue tracker](https://github.com/World
 2. **KOReader version** (from KOReader's own About screen)
 3. **Device and OS** (Kindle, Kobo, Android, Linux, etc.)
 4. **Steps to reproduce** the issue
-5. **A log file** captured with Debug logging and Secure logs enabled
+5. **A log file** captured with Debug logging enabled
 6. **Database state** if relevant (see [Database](@/troubleshooting/database.md))

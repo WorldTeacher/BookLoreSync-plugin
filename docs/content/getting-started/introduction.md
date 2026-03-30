@@ -23,6 +23,7 @@ Beyond session tracking, the plugin also supports:
 - **Rating sync** - push your KOReader star rating to BookLore automatically, or pick a score on a 1–10 scale when you finish a book. Ratings can also be synced to your [Hardcover](https://hardcover.app) account.
 - **Highlights, notes, and bookmark sync** - upload annotations and position bookmarks made in KOReader to BookLore, either attached to the passage (in-book) or as standalone notes on the book page.
 - **Shelf sync** - pull books from a named BookLore shelf directly to your device for offline reading.
+- **Progress sync** - keep KOReader document position aligned with BookLore so reading can continue from the latest position across devices.
 - **Per-book tracking toggle** - disable session tracking for individual books (reference books, cookbooks, etc.) without affecting the rest of your library.
 - **Book deletion sync** - removing a book from KOReader notifies BookLore to remove it from your library too.
 - **Auto-update** - the plugin can check for and install updates from GitHub without leaving KOReader.
@@ -42,6 +43,7 @@ Beyond session tracking, the plugin also supports:
 | Bookmark sync | Fully implemented |
 | Annotations destination: In book / In BookLore / Both | Fully implemented |
 | Shelf sync (download books from BookLore shelf) | Fully implemented |
+| Progress sync (pull + push document position) | Fully implemented |
 | Per-book tracking toggle | Fully implemented |
 | Book deletion sync | Fully implemented |
 | File manager long-press actions | Fully implemented |
@@ -61,6 +63,7 @@ Beyond session tracking, the plugin also supports:
 | Session tracking | ✅ | ✅ | ✅ |
 | Offline queue & auto-retry | ✅ | ✅ | ✅ |
 | Batch session upload | ✅ | ✅ | ✅ |
+| Progress sync | ✅ | ✅ | ✅ |
 | Rating sync | ✅ | ✅ | ✅ |
 | Highlights & notes sync | ✅ | ✅ (mock CFI) | ❌ Not supported |
 | Bookmark sync | ✅ | ✅ | ❌ Not supported |
@@ -79,5 +82,4 @@ The plugin works with any book format that KOReader can open:
 - **EPUB** - full support, including EPUB CFI generation for precise annotation positioning.
 - **PDF** - page-based progress tracking, rating sync, and annotation sync with mock CFI.
 - **CBZ / CBR** - comic/archive formats with page-based tracking. Annotations are not supported.
-
 

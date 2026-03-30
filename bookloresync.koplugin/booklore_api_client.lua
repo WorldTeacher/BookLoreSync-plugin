@@ -60,18 +60,16 @@ end
 function APIClient:logWarn(...)
     if self.plugin then
         self.plugin:logWarn(...)
-    else
-        logger.warn(...)
     end
+    logger.warn(...)
 end
 
 ---APIClient:logErr.
 function APIClient:logErr(...)
     if self.plugin then
         self.plugin:logErr(...)
-    else
-        logger.err(...)
     end
+    logger.err(...)
 end
 
 ---APIClient:logDbg.

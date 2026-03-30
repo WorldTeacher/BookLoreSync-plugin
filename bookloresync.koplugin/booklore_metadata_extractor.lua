@@ -27,7 +27,6 @@ function BookloreMetadataExtractor:new(o)
     o = o or {}
     setmetatable(o, self)
     self.__index = self
-    self.plugin = o.plugin
     return o
 end
 

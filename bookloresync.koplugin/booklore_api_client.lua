@@ -60,6 +60,7 @@ end
 function APIClient:logWarn(...)
     if self.plugin then
         self.plugin:logWarn(...)
+        return
     end
     logger.warn(...)
 end
@@ -68,6 +69,7 @@ end
 function APIClient:logErr(...)
     if self.plugin then
         self.plugin:logErr(...)
+        return
     end
     logger.err(...)
 end
@@ -1617,10 +1619,15 @@ the Content-Length header without downloading the full file.
 function APIClient:getBookFileSize(book_id, username, password)
     self:logInfo("BookloreSync API: getBookFileSize - id:", book_id)
 
+    if not self.server_url or self.server_url == "" then
+        self:logErr("BookloreSync API: getBookFileSize - server URL not configured")
+        return nil, "Server URL not configured"
+    end
+
     local token_ok, token = self:getOrRefreshBearerToken(username, password)
     if not token_ok then
         self:logErr("BookloreSync API: getBookFileSize - auth failed:", token)
-        return nil, "Authentication failed"
+        return nil, "Authentication failed: " .. tostring(token)
     end
 
     local url = self.server_url .. "/api/v1/books/" .. book_id .. "/download"
@@ -1636,26 +1643,39 @@ function APIClient:getBookFileSize(book_id, username, password)
     http_client.TIMEOUT = self.timeout
 
     local res, code, response_headers = http_client.request(req_args)
+    local refresh_attempted = false
 
     -- Retry on 401/403
     if type(code) == "number" and (code == 401 or code == 403) then
+        refresh_attempted = true
         self:logWarn("BookloreSync API: getBookFileSize - token rejected, refreshing")
         if self.db then self.db:deleteBearerToken(username) end
         local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
-        if ref_ok then
-            req_args.headers = { ["Authorization"] = "Bearer " .. new_token }
-            res, code, response_headers = http_client.request(req_args)
+        if not ref_ok then
+            local err_msg = "Authentication refresh failed: " .. tostring(new_token)
+            self:logErr("BookloreSync API: getBookFileSize failed:", err_msg)
+            return nil, err_msg
         end
+        req_args.headers = { ["Authorization"] = "Bearer " .. new_token }
+        res, code, response_headers = http_client.request(req_args)
     end
 
     if not code then
-        local err_msg = "Network error: " .. tostring(res)
+        local prefix = refresh_attempted and "Network error after token refresh: " or "Network error: "
+        local err_msg = prefix .. tostring(res)
         self:logErr("BookloreSync API: getBookFileSize failed:", err_msg)
         return nil, err_msg
     end
 
-    if type(code) ~= "number" or code < 200 or code >= 300 then
-        local err_msg = "HTTP " .. tostring(code) .. ": HEAD request failed"
+    if type(code) ~= "number" then
+        local err_msg = "Connection error: " .. tostring(code)
+        self:logErr("BookloreSync API: getBookFileSize failed:", err_msg)
+        return nil, err_msg
+    end
+
+    if code < 200 or code >= 300 then
+        local suffix = refresh_attempted and " after token refresh" or ""
+        local err_msg = "HTTP " .. tostring(code) .. ": HEAD request failed" .. suffix
         self:logErr("BookloreSync API: getBookFileSize failed:", err_msg)
         return nil, err_msg
     end

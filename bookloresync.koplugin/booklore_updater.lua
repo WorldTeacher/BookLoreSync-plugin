@@ -17,6 +17,53 @@ local DataStorage = require("datastorage")
 local ffi = require("ffi")
 local util = require("util")
 
+local fallback_logger = {
+    logInfo = function(_, ...) logger.info(...) end,
+    logWarn = function(_, ...) logger.warn(...) end,
+    logErr = function(_, ...) logger.err(...) end,
+    logDbg = function(_, ...) logger.dbg(...) end,
+}
+
+local function copy_file(src_path, dst_path)
+    local src_file, src_err = io.open(src_path, "rb")
+    if not src_file then
+        return false, src_err or "unable to open source file"
+    end
+
+    local content = src_file:read("*a")
+    local read_err = nil
+    if content == nil then
+        read_err = "unable to read source file"
+    end
+
+    local src_close_ok, src_close_err = src_file:close()
+    if not src_close_ok then
+        return false, src_close_err or "unable to close source file"
+    end
+
+    if read_err then
+        return false, read_err
+    end
+
+    local dst_file, dst_err = io.open(dst_path, "wb")
+    if not dst_file then
+        return false, dst_err or "unable to open destination file"
+    end
+
+    local write_ok, write_err = dst_file:write(content)
+    local dst_close_ok, dst_close_err = dst_file:close()
+
+    if not write_ok then
+        return false, write_err or "unable to write destination file"
+    end
+
+    if not dst_close_ok then
+        return false, dst_close_err or "unable to close destination file"
+    end
+
+    return true, nil
+end
+
 local Updater = {
     GITHUB_REPO = "WorldTeacher/BookLoreSync-plugin",
     GITHUB_API_BASE = "https://api.github.com",
@@ -35,7 +82,7 @@ local Updater = {
 ---Updater:new.
 function Updater:new(plugin)
     local o = {
-        plugin = plugin
+        plugin = plugin or fallback_logger
     }
     setmetatable(o, self)
     self.__index = self
@@ -518,6 +565,70 @@ function Updater:checkForUpdates(use_cache)
 end
 
 --[[--
+Probe a direct download endpoint with HEAD and follow redirects.
+
+@param url string
+@param max_redirects number|nil
+@return boolean success
+@return string|nil final_url_or_error
+@return number|nil content_length
+@return number|nil http_status
+--]]
+---Updater:_headRequest.
+function Updater:_headRequest(url, max_redirects)
+    local final_url = url
+    max_redirects = max_redirects or 5
+    local redirect_count = 0
+
+    while redirect_count <= max_redirects do
+        local protocol = final_url:match("^https") and https or http
+        protocol.TIMEOUT = self.HTTP_TIMEOUT
+
+        local response_body = {}
+        local response, code, response_headers = protocol.request{
+            url = final_url,
+            method = "HEAD",
+            headers = {
+                ["User-Agent"] = "BookloreSync-KOReader-Plugin"
+            },
+            sink = ltn12.sink.table(response_body),
+        }
+
+        if type(code) ~= "number" then
+            return false, tostring(code), nil, nil
+        end
+
+        if code >= 300 and code < 400 then
+            local location = response_headers and response_headers["location"]
+            if not location then
+                return false, "Redirect without location", nil, code
+            end
+
+            if location:sub(1, 1) == "/" then
+                local base_url = final_url:match("^(https?://[^/]+)")
+                location = base_url .. location
+            end
+
+            redirect_count = redirect_count + 1
+            if redirect_count > max_redirects then
+                return false, "Too many redirects", nil, code
+            end
+
+            self.plugin:logInfo("BookloreSync Updater: Following redirect to", location)
+            final_url = location
+        elseif code >= 200 and code < 300 then
+            local cl = response_headers and (response_headers["content-length"] or response_headers["Content-Length"])
+            local content_length = tonumber(cl) or 0
+            return true, final_url, content_length, code
+        else
+            return false, "HTTP " .. tostring(code), nil, code
+        end
+    end
+
+    return false, "Redirect loop", nil, nil
+end
+
+--[[--
 Build an update result for a direct download endpoint.
 
 This mode is intended for development build feeds where a stable semantic
@@ -539,24 +650,24 @@ function Updater:checkForDirectDownload(download_url)
         return nil
     end
 
-    -- Validate that the endpoint is reachable before presenting install UI.
-    -- We intentionally do not parse a remote version for dev-channel endpoints.
-    local success, response, code = self:_makeHttpRequest(download_url, nil, 5)
+    -- Validate endpoint reachability with HEAD to avoid downloading the ZIP
+    -- during update checks.
+    local success, final_url_or_error, content_length, code = self:_headRequest(download_url, 5)
     if not success then
-        self.plugin:logErr("BookloreSync Updater: Direct download endpoint check failed:", response)
+        self.plugin:logErr("BookloreSync Updater: Direct download endpoint check failed:", tostring(final_url_or_error))
         return nil
     end
 
-    local response_size = type(response) == "string" and #response or 0
-    self.plugin:logInfo("BookloreSync Updater: Direct endpoint reachable, status:", code, "bytes:", response_size)
+    local final_url = final_url_or_error
+    self.plugin:logInfo("BookloreSync Updater: Direct endpoint reachable, status:", code, "bytes:", content_length)
 
     local release_info = {
         version = "dev-build",
-        download_url = download_url,
+        download_url = final_url,
         changelog = "",
         changelog_url = nil,
         published_at = "",
-        size = response_size,
+        size = content_length,
         channel = "dev",
     }
 
@@ -808,6 +919,81 @@ function Updater:backupCurrentVersion()
 end
 
 --[[--
+Preserve user-specific files before replacing plugin directory
+
+@return boolean success
+@return table|string List of preserved filenames or error message
+--]]
+---Updater:_preserveUserFiles.
+function Updater:_preserveUserFiles()
+    local files_to_preserve = {
+        "hardcover.token",
+        "dev-build.location",
+    }
+
+    local preserved_dir = self.temp_dir .. "/preserved-user-files"
+    os.execute(string.format("mkdir -p '%s'", preserved_dir))
+
+    local preserved_files = {}
+
+    for _, filename in ipairs(files_to_preserve) do
+        local source_path = self.plugin_dir .. "/" .. filename
+        local source_file = io.open(source_path, "r")
+        if source_file then
+            source_file:close()
+
+            local dest_path = preserved_dir .. "/" .. filename
+            local success, copy_err = copy_file(source_path, dest_path)
+
+            if not success then
+                self.plugin:logErr("BookloreSync Updater: Failed to preserve", filename, copy_err)
+                return false, "Failed to preserve " .. filename .. ": " .. tostring(copy_err)
+            end
+
+            table.insert(preserved_files, filename)
+            self.plugin:logInfo("BookloreSync Updater: Preserved", filename)
+        end
+    end
+
+    return true, preserved_files
+end
+
+--[[--
+Restore preserved user-specific files after installing new plugin version
+
+@param preserved_files table List of filenames to restore
+@return boolean success
+@return string|nil error message
+--]]
+---Updater:_restoreUserFiles.
+function Updater:_restoreUserFiles(preserved_files)
+    if not preserved_files or #preserved_files == 0 then
+        return true, nil
+    end
+
+    local preserved_dir = self.temp_dir .. "/preserved-user-files"
+
+    for _, filename in ipairs(preserved_files) do
+        local source_path = preserved_dir .. "/" .. filename
+        local dest_path = self.plugin_dir .. "/" .. filename
+
+        local restore_cmd = string.format("mv '%s' '%s' 2>&1", source_path, dest_path)
+        local handle = io.popen(restore_cmd)
+        local output = handle:read("*a")
+        local success = handle:close()
+
+        if not success then
+            self.plugin:logErr("BookloreSync Updater: Failed to restore", filename, output)
+            return false, "Failed to restore " .. filename .. ": " .. output
+        end
+
+        self.plugin:logInfo("BookloreSync Updater: Restored", filename)
+    end
+
+    return true, nil
+end
+
+--[[--
 Install update from ZIP file (atomic operation)
 
 @param zip_path Path to downloaded ZIP file
@@ -817,6 +1003,7 @@ Install update from ZIP file (atomic operation)
 ---Updater:installUpdate.
 function Updater:installUpdate(zip_path)
     self.plugin:logInfo("BookloreSync Updater: Installing update from", zip_path)
+    local preserved_files = nil
     
     -- Step 1: Validate ZIP structure
     local valid, error_msg = self:_validateZipStructure(zip_path)
@@ -844,8 +1031,14 @@ function Updater:installUpdate(zip_path)
     if not success then
         return false, "Backup failed: " .. error_msg
     end
+
+    -- Step 5: Preserve user-specific files that should survive directory replacement
+    success, preserved_files = self:_preserveUserFiles()
+    if not success then
+        return false, preserved_files
+    end
     
-    -- Step 5: Remove old plugin directory
+    -- Step 6: Remove old plugin directory
     self.plugin:logInfo("BookloreSync Updater: Removing old plugin directory")
     local remove_cmd = string.format("rm -rf '%s' 2>&1", self.plugin_dir)
     local handle = io.popen(remove_cmd)
@@ -857,7 +1050,7 @@ function Updater:installUpdate(zip_path)
         return false, "Failed to remove old plugin: " .. output
     end
     
-    -- Step 6: Move new version to plugin location
+    -- Step 7: Move new version to plugin location
     self.plugin:logInfo("BookloreSync Updater: Installing new version")
     local install_cmd = string.format("mv '%s' '%s' 2>&1", new_plugin_dir, self.plugin_dir)
     handle = io.popen(install_cmd)
@@ -868,8 +1061,14 @@ function Updater:installUpdate(zip_path)
         self.plugin:logErr("BookloreSync Updater: Failed to install new version:", output)
         return false, "Failed to install new version: " .. output
     end
+
+    -- Step 8: Restore preserved user-specific files into fresh plugin directory
+    success, error_msg = self:_restoreUserFiles(preserved_files)
+    if not success then
+        return false, error_msg
+    end
     
-    -- Step 7: Cleanup temp files
+    -- Step 9: Cleanup temp files
     self:cleanupTempFiles()
     
     self.plugin:logInfo("BookloreSync Updater: Installation completed successfully")

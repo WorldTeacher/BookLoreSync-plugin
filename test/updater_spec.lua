@@ -136,8 +136,8 @@ describe("Updater helper methods", function()
       return { version = "3.8.4" }
     end
 
-    updater._makeHttpRequest = function()
-      return true, string.rep("x", 1234), 200, { ["content-type"] = "application/zip" }
+    updater._headRequest = function()
+      return true, "https://example.org/dev-download", 1234, 200
     end
 
     local result = updater:checkForDirectDownload("https://example.org/dev-download")
@@ -155,7 +155,7 @@ describe("Updater helper methods", function()
       return { version = "3.8.4" }
     end
 
-    updater._makeHttpRequest = function()
+    updater._headRequest = function()
       return false, "timeout", nil, nil
     end
 

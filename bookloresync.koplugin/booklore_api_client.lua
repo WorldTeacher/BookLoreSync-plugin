@@ -468,12 +468,22 @@ function APIClient:updateKoReaderProgress(payload)
         end
     end
 
+    local timestamp = tonumber(payload.timestamp)
+    if not timestamp then
+        return false, "Invalid progress field: timestamp must be numeric", nil
+    end
+
+    local percentage = tonumber(payload.percentage)
+    if not percentage then
+        return false, "Invalid progress field: percentage must be numeric", nil
+    end
+
     self:logInfo("BookloreSync API: Updating KOReader progress for hash:", tostring(payload.document))
 
     local body = {
-        timestamp = tonumber(payload.timestamp),
+        timestamp = timestamp,
         document = tostring(payload.document),
-        percentage = tonumber(payload.percentage),
+        percentage = percentage,
         progress = tostring(payload.progress),
         device = tostring(payload.device),
         device_id = tostring(payload.device_id),

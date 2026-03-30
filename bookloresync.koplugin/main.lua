@@ -600,7 +600,9 @@ end
 
 ---BookloreSync:onExit.
 function BookloreSync:onExit()
-    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions")
+    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row1")
+    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row2")
+    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row3")
 
     if self.db then
         self.db:close()

@@ -217,13 +217,13 @@ function Settings:configureMinDuration(parent)
                     text = _("Save"),
                     is_enter_default = true,
                     callback = function()
-                        local input_value = tonumber(input_dialog:getInputText())
-                        if input_value and input_value > 0 then
-                            parent.min_duration = input_value
-                            local success = parent.settings:saveSetting("min_duration", parent.min_duration)
-                            parent.settings:flush()
-                            UIManager:close(input_dialog)
+                        local new_value = tonumber(input_dialog:getInputText())
+                        if new_value and new_value > 0 then
+                            local success = parent.settings:saveSetting("min_duration", new_value)
                             if success ~= false then
+                                parent.min_duration = new_value
+                                parent.settings:flush()
+                                UIManager:close(input_dialog)
                                 UIManager:show(InfoMessage:new{
                                     text = T(_("Minimum duration set to %1 seconds"), tostring(parent.min_duration)),
                                     timeout = 2,
@@ -269,13 +269,13 @@ function Settings:configureMinPages(parent)
                     text = _("Save"),
                     is_enter_default = true,
                     callback = function()
-                        local input_value = tonumber(input_dialog:getInputText())
-                        if input_value and input_value > 0 and input_value == math.floor(input_value) then
-                            parent.min_pages = input_value
-                            local success = parent.settings:saveSetting("min_pages", parent.min_pages)
-                            parent.settings:flush()
-                            UIManager:close(input_dialog)
+                        local new_value = tonumber(input_dialog:getInputText())
+                        if new_value and new_value > 0 and new_value == math.floor(new_value) then
+                            local success = parent.settings:saveSetting("min_pages", new_value)
                             if success ~= false then
+                                parent.min_pages = new_value
+                                parent.settings:flush()
+                                UIManager:close(input_dialog)
                                 UIManager:show(InfoMessage:new{
                                     text = T(_("Minimum pages set to %1"), tostring(parent.min_pages)),
                                     timeout = 2,

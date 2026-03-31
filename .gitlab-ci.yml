@@ -54,7 +54,8 @@ build-koplugin-artifact:
     - apk add --no-cache zip bash git gettext curl
   script:
     - echo "Generating version information"
-    - bash generate-version.sh
+    - export PLUGIN_VERSION="dev-build-$(date -u +%Y%m%d%H%M%S)"
+    - VERSION_OVERRIDE="$PLUGIN_VERSION" bash generate-version.sh
 
     - echo "Compiling gettext translations"
     - |

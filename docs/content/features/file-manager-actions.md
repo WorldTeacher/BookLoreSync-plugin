@@ -6,7 +6,7 @@ weight = 7
 
 # File Manager Actions
 
-The plugin adds three entries to the KOReader file manager's long-press (hold) context menu. These actions are available for any supported book file (EPUB, PDF, CBZ, CBR).
+The plugin adds five entries to the KOReader file manager's long-press (hold) context menu. These actions are available for any supported book file (EPUB, PDF, CBZ, CBR).
 
 ![KOReader long press menu](../book-long-press-menu.png)
 ---
@@ -95,3 +95,19 @@ The tracking state is stored in the local database (`tracking_enabled` column in
 > Disabling tracking does not remove sessions that were already recorded. Pending sessions already in the queue are kept and will be uploaded on the next sync. Only new sessions are suppressed.
 
 See also: [Session Tracking → Per-book tracking toggle](@/features/session-tracking.md#per-book-tracking-toggle)
+
+---
+
+## Show Stored Data
+
+Shows cached plugin data for the selected book from the local SQLite database.
+
+This action is read-only. It is useful when you want to inspect what the plugin currently knows about a book (for example, matching state or cached metadata) before attempting a sync or re-match.
+
+---
+
+## Extract from Sidecar
+
+Extracts highlights, notes, and related metadata directly from the book's `.sdr` sidecar and prepares them for sync.
+
+Use this when annotation data exists in KOReader sidecar files but has not yet been reflected in BookLore, or when you want to trigger sidecar-based extraction without opening the book.

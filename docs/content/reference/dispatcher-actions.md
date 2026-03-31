@@ -15,7 +15,7 @@ The plugin registers five actions with KOReader's dispatcher system. These can b
 | Action name | Dispatcher key | Description |
 |-------------|---------------|-------------|
 | Toggle BookLore Sync | `ToggleBookloreSync` | Enables or disables the plugin. When disabled, no sessions are tracked. Toggle again to re-enable. |
-| Sync Pending Sessions | `SyncBooklorePending` | Triggers an immediate upload of all pending sessions, ratings, and annotations in the local queue. |
+| Sync Pending Sessions | `SyncBooklorePending` | Triggers an immediate upload of all pending sessions, ratings, annotations, bookmarks, and progress updates in the local queue. |
 | Toggle Manual Sync Only | `ToggleBookloreManualSyncOnly` | Switches between automatic sync (upload after each session) and manual sync (upload only when you trigger it). |
 | Test Connection | `TestBookloreConnection` | Runs a connection test and shows the result as a notification. Equivalent to tapping **Test Connection** in the Settings menu. |
 | Sync Shelf | `booklore_sync_shelf` | Triggers an immediate shelf sync - downloads new books from the configured BookLore shelf and optionally removes books no longer on the shelf. |
@@ -38,7 +38,7 @@ The exact navigation path varies by device and KOReader version. Consult the KOR
 
 ## Use cases
 
-**Sync Pending Sessions** (`SyncBooklorePending`) is the most commonly assigned action. Assigning it to a swipe gesture lets you sync your reading data with a single gesture without navigating any menus.
+**Sync Pending Sessions** (`SyncBooklorePending`) is the most commonly assigned action. Assigning it to a swipe gesture lets you sync your queued reading data (sessions, annotations, ratings, bookmarks, and progress updates) with a single gesture without navigating any menus.
 
 **Toggle BookLore Sync** (`ToggleBookloreSync`) is useful if you read some books that are not in your BookLore library (e.g., work documents, temporary files) and you want to quickly disable tracking without going into the Settings menu.
 

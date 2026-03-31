@@ -109,6 +109,15 @@ You can override this path via **Tools → BookLore Sync → Shelf Sync → Down
 
 A **Reset** button in that dialog restores the automatically detected path.
 
+### Storage guard (minimum free space)
+
+Before each download, the plugin checks available disk space and enforces a minimum-free-space threshold.
+
+- **Default threshold:** `500 MB`
+- **Menu path:** **Tools → BookLore Sync → Shelf Sync → Minimum free space**
+
+If available space drops below the threshold, shelf sync stops before starting the next download.
+
 ### Filenames
 
 Every downloaded filename has the BookLore **book ID appended to the stem** (e.g., `My Book_42.epub`). This tag is embedded regardless of the filename mode chosen below, and it is what the plugin uses to identify previously-downloaded files during subsequent syncs - so renaming or moving a file without preserving the `_<id>` suffix will cause it to be downloaded again.
@@ -140,6 +149,15 @@ Shelf sync can be started in three ways:
 | **Dispatcher action** | Assign `booklore_sync_shelf` to a gesture or hardware button in **Settings → Gestures**. |
 
 When shelf sync starts, a status dialog is shown with a **Cancel** button. The dialog title updates as each book is processed. The device UI is not usable during the sync - tapping outside the dialog does nothing.
+
+### Full vs delta sync
+
+Shelf sync uses cached shelf state to run incrementally (delta-based) after the first successful run.
+
+- **Normal sync** compares the current shelf with cached state and processes only changes.
+- **Force full re-sync** clears cached shelf state first, then runs a complete sync pass.
+
+Use **Force full re-sync** after manual filesystem changes (for example, if downloaded files were deleted outside the plugin and you want them re-downloaded).
 
 ---
 

@@ -79,7 +79,7 @@ If the pending count stays at 0, sessions may be failing validation. Move on to 
 
 **Check 3 - Try a manual sync:**
 
-**Tools → BookLore Sync → Sync Now**
+**Tools → BookLore Sync → Manage Sessions → Sync Pending Now**
 
 If this also fails, check the KOReader log for network errors:
 
@@ -97,9 +97,9 @@ Check your thresholds:
 
 **Check 5 - Manual Sync Only mode:**
 
-If **Manual Sync Only** is enabled, sessions will accumulate in the queue until you tap **Sync Now** manually.
+If **Manual Sync Only** is enabled, sessions will accumulate in the queue until you trigger **Sync Pending Now** manually.
 
-**Tools → BookLore Sync → Preferences** → confirm Manual Sync Only is off.
+**Tools → BookLore Sync → Sync Settings → Sync Triggers** → confirm **Manual only (cache everything)** is off.
 
 ---
 

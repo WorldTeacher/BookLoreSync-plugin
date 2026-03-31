@@ -47,18 +47,6 @@ Enable this setting when investigating an issue and share the log file when repo
 
 ---
 
-## Secure Logs
-
-**Default:** Off
-
-When enabled, all URLs are redacted from log output and replaced with `[URL REDACTED]`.
-
-This is useful when you want to share a log file for debugging purposes but do not want to expose your server address or any path information.
-
-Enable **Debug Logging** and **Secure Logs** together before capturing a log to share publicly.
-
----
-
 ## Ask Before Enabling WiFi
 
 **Default:** Off

@@ -94,7 +94,7 @@ Pending sessions are synced automatically in these situations:
 | **Session end** | Sync attempted after every valid session (if not in Manual Sync Only mode) |
 | **Device resume** | Deferred background sync 15 seconds after device wakes from sleep |
 | **Network connected** | Immediate sync when network becomes available (if a wake sync was pending) |
-| **Manual Sync Now** | Triggered by **Tools → BookLore Sync → Sync Now** |
+| **Manual Sync Now** | Triggered by **Tools → BookLore Sync → Manage Sessions → Sync Pending Now** |
 | **Dispatcher action** | `SyncBooklorePending` can be assigned to a button or gesture |
 
 ---

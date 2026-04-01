@@ -88,8 +88,9 @@ Progress is queued and uploaded in these situations:
 
 Use **Periodically sync every # pages** to set the page-turn threshold:
 
-- `0` disables periodic page-turn updates.
-- Open/close snapshots are still queued even when set to `0`.
+- Minimum value is `1` page turn.
+- To disable periodic updates, turn off **Periodic page-turn updates**.
+- Open/close snapshots are still queued even when periodic updates are disabled.
 
 To avoid excessive API traffic, page-triggered uploads are debounced (25 seconds minimum between pushes).
 

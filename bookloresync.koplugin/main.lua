@@ -325,8 +325,17 @@ function BookloreSync:init()
     end
     self.progress_sync_trigger = self.settings:readSetting("progress_sync_trigger") or "book_open_close"
     self.progress_sync_interval_pages = tonumber(self.settings:readSetting("progress_sync_interval_pages")) or 10
-    if self.progress_sync_interval_pages < 0 then
-        self.progress_sync_interval_pages = 0
+    self.progress_sync_page_updates_enabled = self.settings:readSetting("progress_sync_page_updates_enabled")
+    if self.progress_sync_page_updates_enabled == nil then
+        self.progress_sync_page_updates_enabled = true
+    end
+    if self.progress_sync_interval_pages < 1 then
+        self.progress_sync_interval_pages = 1
+    end
+    if not self.progress_sync_page_updates_enabled then
+        self.progress_sync_trigger = "book_open_close"
+    else
+        self.progress_sync_trigger = "each_n_pages"
     end
     self.progress_sync_set_read_on_rating = self.settings:readSetting("progress_sync_set_read_on_rating")
     if self.progress_sync_set_read_on_rating == nil then
@@ -3224,31 +3233,53 @@ function BookloreSync:addToMainMenu(menu_items)
                         keep_menu_open = true,
                     },
                     {
-                        text_func = function()
-                            return T(_("Periodically sync every # pages (%1)"), tostring(self.progress_sync_interval_pages or 0))
+                        text = _("Periodic page-turn updates"),
+                        help_text = _("Enable or disable periodic page-turn progress updates. Book-open and book-close positions are always stored."),
+                        checked_func = function()
+                            return self.progress_sync_page_updates_enabled
                         end,
-                        help_text = _("How many page turns before a periodic sync update is queued. Set to 0 to disable periodic page-turn updates. Book-open and book-close positions are always stored."),
                         enabled_func = function()
                             return self.progress_sync_enabled
                         end,
                         keep_menu_open = true,
                         callback = function()
+                            self.progress_sync_page_updates_enabled = not self.progress_sync_page_updates_enabled
+                            self.progress_sync_trigger = self.progress_sync_page_updates_enabled and "each_n_pages" or "book_open_close"
+                            self.settings:saveSetting("progress_sync_page_updates_enabled", self.progress_sync_page_updates_enabled)
+                            self.settings:saveSetting("progress_sync_trigger", self.progress_sync_trigger)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.progress_sync_page_updates_enabled and _("Periodic page-turn updates enabled") or _("Periodic page-turn updates disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Periodically sync every # pages (%1)"), tostring(self.progress_sync_interval_pages or 1))
+                        end,
+                        help_text = _("How many page turns before a periodic sync update is queued. Minimum is 1 when periodic updates are enabled."),
+                        enabled_func = function()
+                            return self.progress_sync_enabled and self.progress_sync_page_updates_enabled
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
                             local SpinWidget = require("ui/widget/spinwidget")
                             local widget = SpinWidget:new{
-                                text = _("This value determines how many page turns it takes to update book progress.\nIf set to 0, updating progress based on page turns will be disabled."),
-                                value = self.progress_sync_interval_pages or 0,
-                                value_min = 0,
+                                text = _("This value determines how many page turns it takes to update book progress.\nMinimum value is 1."),
+                                value = self.progress_sync_interval_pages or 1,
+                                value_min = 1,
                                 value_max = 999,
                                 value_step = 1,
                                 value_hold_step = 10,
                                 ok_text = _("Set"),
                                 title_text = _("Number of pages before update"),
-                                default_value = 0,
+                                default_value = 10,
                                 callback = function(spin)
-                                    local n = math.floor(tonumber(spin.value) or 0)
-                                    if n < 0 then n = 0 end
+                                    local n = math.floor(tonumber(spin.value) or 1)
+                                    if n < 1 then n = 1 end
                                     self.progress_sync_interval_pages = n
-                                    self.progress_sync_trigger = (n > 0) and "each_n_pages" or "book_open_close"
+                                    self.progress_sync_trigger = self.progress_sync_page_updates_enabled and "each_n_pages" or "book_open_close"
                                     self.settings:saveSetting("progress_sync_interval_pages", n)
                                     self.settings:saveSetting("progress_sync_trigger", self.progress_sync_trigger)
                                     self.settings:flush()
@@ -5154,7 +5185,14 @@ function BookloreSync:onPageUpdate(page)
         self.progress_sync_page_counter = (self.progress_sync_page_counter or 0) + 1
     end
 
+    if not self.progress_sync_page_updates_enabled then
+        return false
+    end
+
     local threshold = tonumber(self.progress_sync_interval_pages) or 10
+    if threshold < 1 then
+        threshold = 1
+    end
     if threshold <= 0 then
         return false
     end

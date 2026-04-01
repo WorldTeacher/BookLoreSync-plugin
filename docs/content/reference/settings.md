@@ -48,7 +48,8 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 | `progress_pull_on_open` | boolean | `true` | Pull remote progress when opening a book (if already connected) |
 | `progress_pull_on_resume` | boolean | `true` | Pull remote progress after resume (if already connected) |
 | `progress_sync_trigger` | string | `"book_open_close"` | Push mode selector (`"book_open_close"` or `"each_n_pages"`) |
-| `progress_sync_interval_pages` | integer | `10` | Number of page turns before periodic progress update; `0` disables periodic updates |
+| `progress_sync_interval_pages` | integer | `10` | Number of page turns before periodic progress update; minimum is `1` |
+| `progress_sync_page_updates_enabled` | boolean | `true` | Enable or disable periodic page-turn updates (open/close snapshots are always queued) |
 | `progress_sync_forward_strategy` | string | `"prompt"` | Strategy when remote progress is newer: `"silent"`, `"prompt"`, or `"disable"` |
 | `progress_sync_backward_strategy` | string | `"disable"` | Strategy when remote progress is older: `"silent"`, `"prompt"`, or `"disable"` |
 | `progress_sync_set_read_on_rating` | boolean | `false` | Queue forced 100% progress when rating is submitted |

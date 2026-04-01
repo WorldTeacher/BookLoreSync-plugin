@@ -9,7 +9,7 @@ include:
       - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
         when: always
       - when: never
-  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola@1.0"
+  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola@1.1"
     inputs:
       lint-disabled: true
       lychee-enabled: false
@@ -18,7 +18,7 @@ include:
       - changes:
           - docs/**/*
   # Zola template (GitLab Pages variant)
-  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola-pages@1.0"
+  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola-pages@1.1"
     rules:
       - changes:
           - docs/**/*
@@ -48,8 +48,10 @@ build-koplugin-artifact:
   stage: build
   image: alpine:latest
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
+    # Always build plugin artifacts for MR pipelines (detached/merged-result)
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # And for direct pushes to develop
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"'
   before_script:
     - apk add --no-cache zip bash git gettext curl
   script:

@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 24,  -- Current database schema version
+    VERSION = 25,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -639,6 +639,58 @@ Database.migrations = {
             SELECT id, book_cache_id, book_hash, progress, percentage, location,
                    device, device_id, timestamp, retry_count, last_retry_at, created_at
             FROM pending_koreader_progress
+        ]],
+        [[
+            DROP TABLE pending_koreader_progress
+        ]],
+        [[
+            ALTER TABLE pending_koreader_progress_new RENAME TO pending_koreader_progress
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_koreader_progress_book_hash
+            ON pending_koreader_progress(book_hash)
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_pending_koreader_progress_created_at
+            ON pending_koreader_progress(created_at)
+        ]],
+    },
+
+    -- Migration 25: Revert KOReader pending progress queue to one row per book.
+    -- Keep only the latest row for each book_hash, then re-introduce
+    -- UNIQUE(book_hash) so new progress updates overwrite stale unsynced rows.
+    [25] = {
+        [[
+            CREATE TABLE IF NOT EXISTS pending_koreader_progress_new (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_cache_id INTEGER,
+                book_hash     TEXT    NOT NULL,
+                progress      TEXT    NOT NULL,
+                percentage    REAL    NOT NULL,
+                location      TEXT,
+                device        TEXT,
+                device_id     TEXT,
+                timestamp     INTEGER NOT NULL,
+                retry_count   INTEGER DEFAULT 0,
+                last_retry_at INTEGER,
+                created_at    INTEGER DEFAULT (strftime('%s', 'now')),
+                UNIQUE(book_hash)
+            )
+        ]],
+        [[
+            INSERT INTO pending_koreader_progress_new
+                (book_cache_id, book_hash, progress, percentage, location,
+                 device, device_id, timestamp, retry_count, last_retry_at, created_at)
+            SELECT p.book_cache_id, p.book_hash, p.progress, p.percentage, p.location,
+                   p.device, p.device_id, p.timestamp, p.retry_count, p.last_retry_at, p.created_at
+            FROM pending_koreader_progress p
+            WHERE p.id = (
+                SELECT p2.id
+                FROM pending_koreader_progress p2
+                WHERE p2.book_hash = p.book_hash
+                ORDER BY p2.created_at DESC, p2.timestamp DESC, p2.id DESC
+                LIMIT 1
+            )
         ]],
         [[
             DROP TABLE pending_koreader_progress
@@ -3369,6 +3421,17 @@ function Database:addPendingKoreaderProgress(progress_data)
         INSERT INTO pending_koreader_progress
             (book_cache_id, book_hash, progress, percentage, location, device, device_id, timestamp, retry_count, last_retry_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, CAST(strftime('%s', 'now') AS INTEGER))
+        ON CONFLICT(book_hash) DO UPDATE SET
+            book_cache_id = excluded.book_cache_id,
+            progress = excluded.progress,
+            percentage = excluded.percentage,
+            location = excluded.location,
+            device = excluded.device,
+            device_id = excluded.device_id,
+            timestamp = excluded.timestamp,
+            retry_count = 0,
+            last_retry_at = NULL,
+            created_at = CAST(strftime('%s', 'now') AS INTEGER)
     ]])
     if not stmt then
         self.plugin:logErr("BookloreSync Database: Failed to prepare addPendingKoreaderProgress:", self.conn:errmsg())

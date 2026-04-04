@@ -11,10 +11,113 @@ local InputDialog = require("ui/widget/inputdialog")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local json = require("json")
+local ok_branding, Branding = pcall(require, "booklore_branding")
+if not ok_branding or type(Branding) ~= "table" then
+    Branding = {
+        apply = function(text)
+            return text
+        end,
+        normalizeDisplayName = function(value)
+            return (type(value) == "string" and value ~= "") and value or "Booklore"
+        end,
+        normalizeShortcutName = function(display_name)
+            local base = (type(display_name) == "string" and display_name ~= "") and display_name or "Booklore"
+            return base .. "Sync"
+        end,
+        saveGlobalNames = function()
+        end,
+    }
+end
 local T = require("ffi/util").template
-local _ = require("gettext")
+local gettext = require("gettext")
+local _raw = gettext
+local function _(text)
+    return Branding.apply(_raw(text))
+end
 
 local Settings = {}
+
+---Settings:configureDisplayName.
+function Settings:configureDisplayName(parent)
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title = _("Plugin Name"),
+        input = parent.brand_display_name or "",
+        input_hint = _("Booklore"),
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    callback = function()
+                        UIManager:close(input_dialog)
+                    end,
+                },
+                {
+                    text = _("Save"),
+                    is_enter_default = true,
+                    callback = function()
+                        local previous_display = parent.brand_display_name
+                        local previous_shortcut = parent.brand_shortcut_name
+                        local new_display = Branding.normalizeDisplayName(input_dialog:getInputText())
+                        local new_shortcut = Branding.normalizeShortcutName(new_display)
+
+                        local ok_save, save_result = pcall(function()
+                            return parent.settings:saveSetting("booklore_brand_display_name", new_display)
+                        end)
+                        if not ok_save or save_result == false then
+                            local save_detail = ok_save and save_result or save_result
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Failed to save plugin name: %1"), tostring(save_detail)),
+                                timeout = 3,
+                            })
+                            return
+                        end
+
+                        local ok_flush, flush_err = pcall(function()
+                            if parent.settings.flush then
+                                parent.settings:flush()
+                            end
+                        end)
+                        if not ok_flush then
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Failed to persist plugin name: %1"), tostring(flush_err)),
+                                timeout = 3,
+                            })
+                            return
+                        end
+
+                        parent.brand_display_name = new_display
+                        parent.brand_shortcut_name = new_shortcut
+                        -- Persist to plugin settings DB and mirror to global reader settings.
+                        -- Plugin DB is the source of truth for this plugin; global storage lets
+                        -- branding apply very early (e.g. metadata/UI string rendering) before
+                        -- plugin settings are fully initialized.
+                        local ok_global, global_err = pcall(function()
+                            Branding.saveGlobalNames(parent.brand_display_name)
+                        end)
+                        if not ok_global then
+                            parent.brand_display_name = previous_display
+                            parent.brand_shortcut_name = previous_shortcut
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Saved locally but failed to apply global branding: %1"), tostring(global_err)),
+                                timeout = 3,
+                            })
+                            return
+                        end
+
+                        UIManager:close(input_dialog)
+                        UIManager:show(InfoMessage:new{
+                            text = _("Display name saved"),
+                            timeout = 2,
+                        })
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
+end
 
 ---Settings:configureServerUrl.
 function Settings:configureServerUrl(parent)
@@ -831,6 +934,14 @@ function Settings:buildPreferencesMenu(parent)
                 keep_menu_open = true,
                 callback = function()
                     self:exportSettings(parent)
+                end,
+            },
+            {
+                text = _("Plugin Name"),
+                help_text = _("Set your custom plugin name. Exclude 'Sync' - the plugin adds it automatically for shortcuts."),
+                keep_menu_open = true,
+                callback = function()
+                    self:configureDisplayName(parent)
                 end,
             },
         },

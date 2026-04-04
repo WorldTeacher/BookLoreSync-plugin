@@ -29,10 +29,31 @@ local HardcoverClient = require("hardcover_api_client")
 local Updater = require("booklore_updater")
 local FileLogger = require("booklore_file_logger")
 local MetadataExtractor = require("booklore_metadata_extractor")
+local ok_branding, Branding = pcall(require, "booklore_branding")
+if not ok_branding or type(Branding) ~= "table" then
+    Branding = {
+        apply = function(text)
+            return text
+        end,
+        normalizeDisplayName = function(value)
+            return (type(value) == "string" and value ~= "") and value or "Booklore"
+        end,
+        normalizeShortcutName = function(display_name)
+            local base = (type(display_name) == "string" and display_name ~= "") and display_name or "Booklore"
+            return base .. "Sync"
+        end,
+        saveGlobalNames = function()
+        end,
+    }
+end
 local logger = require("logger")
 local random = require("random")
 
-local _ = require("gettext")
+local gettext = require("gettext")
+local _raw = gettext
+local function _(text)
+    return Branding.apply(_raw(text))
+end
 local T = require("ffi/util").template
 local ffi = require("ffi")
 local ffiutil = require("ffi/util")
@@ -308,6 +329,10 @@ function BookloreSync:init()
     self.server_url = self.settings:readSetting("server_url") or ""
     self.username   = self.settings:readSetting("username")   or ""
     self.password   = self.settings:readSetting("password")   or ""
+
+    self.brand_display_name = Branding.normalizeDisplayName(self.settings:readSetting("booklore_brand_display_name"))
+    self.brand_shortcut_name = Branding.normalizeShortcutName(self.brand_display_name)
+    Branding.saveGlobalNames(self.brand_display_name)
 
     self.is_enabled      = self.settings:readSetting("is_enabled")      or false
     self.log_to_file     = self.settings:readSetting("log_to_file")     or false

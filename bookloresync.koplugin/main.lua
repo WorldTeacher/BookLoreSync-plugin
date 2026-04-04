@@ -39,8 +39,17 @@ if not ok_branding or type(Branding) ~= "table" then
             return (type(value) == "string" and value ~= "") and value or "Booklore"
         end,
         normalizeShortcutName = function(display_name)
-            local base = (type(display_name) == "string" and display_name ~= "") and display_name or "Booklore"
-            return base .. "Sync"
+            local base = Branding.normalizeDisplayName(display_name)
+            local core = base:gsub("[%s_-]*[Ss][Yy][Nn][Cc]$", "")
+            if core == "" then
+                core = "Booklore"
+            end
+            return core .. "Sync"
+        end,
+        getNames = function(display_name)
+            local resolved_display = Branding.normalizeDisplayName(display_name)
+            local resolved_shortcut = Branding.normalizeShortcutName(resolved_display)
+            return resolved_display, resolved_shortcut
         end,
         saveGlobalNames = function()
         end,
@@ -330,9 +339,11 @@ function BookloreSync:init()
     self.username   = self.settings:readSetting("username")   or ""
     self.password   = self.settings:readSetting("password")   or ""
 
-    self.brand_display_name = Branding.normalizeDisplayName(self.settings:readSetting("booklore_brand_display_name"))
-    self.brand_shortcut_name = Branding.normalizeShortcutName(self.brand_display_name)
-    Branding.saveGlobalNames(self.brand_display_name)
+    local local_brand_display = self.settings:readSetting("booklore_brand_display_name")
+    self.brand_display_name, self.brand_shortcut_name = Branding.getNames(local_brand_display)
+    if local_brand_display and local_brand_display ~= "" then
+        Branding.saveGlobalNames(self.brand_display_name)
+    end
 
     self.is_enabled      = self.settings:readSetting("is_enabled")      or false
     self.log_to_file     = self.settings:readSetting("log_to_file")     or false

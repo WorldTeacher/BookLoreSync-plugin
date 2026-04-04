@@ -70,7 +70,9 @@ function Branding.apply(text, display_name)
 
     local resolved_display, resolved_shortcut = Branding.getNames(display_name)
 
-    -- Use placeholders to avoid re-replacing parts of already-replaced text.
+    -- Use SOH-delimited placeholders ("\1...") because SOH is non-printable
+    -- and extremely unlikely to exist in UI/localized strings. These markers
+    -- must stay unique and temporary so they never leak to user-visible text.
     local mark_space = "\1BRAND_SPACE\1"
     local mark_short = "\1BRAND_SHORT\1"
     local mark_base = "\1BRAND_BASE\1"

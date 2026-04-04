@@ -6,7 +6,7 @@ weight = 2
 
 # Logs and Debugging
 
-> **Privacy note:** Logs are secured by default. Server URLs are not written to log output.
+> **Privacy note:** Logs are secured by default. API request URLs are redacted so server hostnames are not written to log output.
 
 ---
 
@@ -14,7 +14,7 @@ weight = 2
 
 KOReader system logs are written to:
 
-```
+```text
 {your_koreader_installation}/crash.log
 ```
 
@@ -62,7 +62,7 @@ When file logging is enabled, the log includes:
 - Session start and end events with timestamps and progress values
 - Book hash calculation results
 - Database read/write operations
-- API request URLs, response codes, and response bodies
+- Redacted API request URLs, response codes, and response bodies
 - Error conditions with context
 - Auto-update check activity and results
 - Token acquisition and refresh events
@@ -96,13 +96,13 @@ grep "BookloreSync.*ERROR" {your_koreader_installation}/plugins/bookloresync.kop
 grep "BookloreSync.*session" {your_koreader_installation}/plugins/bookloresync.koplugin/logs/booklore-YYYY-MM-DD.log
 
 # API calls
-grep "BookloreSync.*POST\|GET\|PUT" {your_koreader_installation}/plugins/bookloresync.koplugin/logs/booklore-YYYY-MM-DD.log
+grep -E "BookloreSync.*(POST|GET|PUT)" {your_koreader_installation}/plugins/bookloresync.koplugin/logs/booklore-YYYY-MM-DD.log
 
 # Sync attempts
-grep "BookloreSync.*sync\|pending" {your_koreader_installation}/plugins/bookloresync.koplugin/logs/booklore-YYYY-MM-DD.log
+grep -E "BookloreSync.*(sync|pending)" {your_koreader_installation}/plugins/bookloresync.koplugin/logs/booklore-YYYY-MM-DD.log
 
 # Update checks
-grep "BookloreSync.*update\|version" {your_koreader_installation}/crash.log
+grep -E "BookloreSync.*(update|version)" {your_koreader_installation}/crash.log
 ```
 
 ---

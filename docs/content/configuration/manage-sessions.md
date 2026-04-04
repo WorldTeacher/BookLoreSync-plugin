@@ -79,7 +79,7 @@ Permanently discards items from the pending upload queues. The label shows the c
 
 Tapping the entry opens a dialog listing only the queue types that currently have items, each pre-selected. Tap a type to toggle its checkbox, then tap **Clear Selected** to delete the checked queues. Tap **Cancel** to close without making any changes.
 
-The four queue types are:
+The five queue types are:
 
 | Type | Table cleared |
 |------|--------------|

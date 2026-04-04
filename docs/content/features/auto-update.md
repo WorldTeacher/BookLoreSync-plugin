@@ -40,9 +40,12 @@ If **Use Dev Builds** is enabled, startup auto-check for stable releases is skip
 
 Tap **Check for Updates** in the About & Updates menu to trigger an immediate check regardless of the daily schedule.
 
-The check queries:
+The manual check source depends on **Use Dev Builds**:
 
-```
+- If **Use Dev Builds** is enabled, the plugin checks the direct URL from `dev-build.location`.
+- If **Use Dev Builds** is disabled, the plugin checks the stable releases endpoint:
+
+```text
 GET https://api.github.com/repos/WorldTeacher/BookloreSync-plugin/releases/latest
 ```
 

@@ -426,9 +426,33 @@ function Settings:configureProgressDecimalPlaces(parent)
                     callback = function()
                         local input_value = tonumber(input_dialog:getInputText())
                         if input_value and input_value >= 0 and input_value <= 5 and input_value == math.floor(input_value) then
+                            local ok_save, save_result = pcall(function()
+                                return parent.settings:saveSetting("progress_decimal_places", input_value)
+                            end)
+                            if not ok_save or save_result == false then
+                                UIManager:close(input_dialog)
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Failed to save setting: %1"), tostring(save_result)),
+                                    timeout = 3,
+                                })
+                                return
+                            end
+
+                            local ok_flush, flush_err = pcall(function()
+                                if parent.settings.flush then
+                                    parent.settings:flush()
+                                end
+                            end)
+                            if not ok_flush then
+                                UIManager:close(input_dialog)
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Failed to persist setting: %1"), tostring(flush_err)),
+                                    timeout = 3,
+                                })
+                                return
+                            end
+
                             parent.progress_decimal_places = input_value
-                            parent.settings:saveSetting("progress_decimal_places", parent.progress_decimal_places)
-                            parent.settings:flush()
                             UIManager:close(input_dialog)
                             UIManager:show(InfoMessage:new{
                                 text = T(_("Progress decimal places set to %1"), tostring(parent.progress_decimal_places)),

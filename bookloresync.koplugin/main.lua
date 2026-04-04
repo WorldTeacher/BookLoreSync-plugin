@@ -29,7 +29,23 @@ local HardcoverClient = require("hardcover_api_client")
 local Updater = require("booklore_updater")
 local FileLogger = require("booklore_file_logger")
 local MetadataExtractor = require("booklore_metadata_extractor")
-local Branding = require("booklore_branding")
+local ok_branding, Branding = pcall(require, "booklore_branding")
+if not ok_branding or type(Branding) ~= "table" then
+    Branding = {
+        apply = function(text)
+            return text
+        end,
+        normalizeDisplayName = function(value)
+            return (type(value) == "string" and value ~= "") and value or "Booklore"
+        end,
+        normalizeShortcutName = function(display_name)
+            local base = (type(display_name) == "string" and display_name ~= "") and display_name or "Booklore"
+            return base .. "Sync"
+        end,
+        saveGlobalNames = function()
+        end,
+    }
+end
 local logger = require("logger")
 local random = require("random")
 

@@ -40,7 +40,7 @@ end
 function Branding.normalizeDisplayName(value)
     local normalized = trim(value) or DEFAULT_DISPLAY_NAME
     local lower = normalized:lower()
-    if #lower > 4 and lower:sub(-4) == "sync" then
+    if #lower >= 4 and lower:sub(-4) == "sync" then
         local without_sync = normalized:sub(1, #normalized - 4)
         without_sync = without_sync:gsub("[%s_-]+$", "")
         return trim(without_sync) or DEFAULT_DISPLAY_NAME

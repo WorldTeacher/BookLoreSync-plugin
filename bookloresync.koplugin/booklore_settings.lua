@@ -11,10 +11,54 @@ local InputDialog = require("ui/widget/inputdialog")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local json = require("json")
+local Branding = require("booklore_branding")
 local T = require("ffi/util").template
-local _ = require("gettext")
+local gettext = require("gettext")
+local _raw = gettext
+local function _(text)
+    return Branding.apply(_raw(text))
+end
 
 local Settings = {}
+
+---Settings:configureDisplayName.
+function Settings:configureDisplayName(parent)
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title = _("Plugin Name"),
+        input = parent.brand_display_name or "",
+        input_hint = _("Booklore"),
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    callback = function()
+                        UIManager:close(input_dialog)
+                    end,
+                },
+                {
+                    text = _("Save"),
+                    is_enter_default = true,
+                    callback = function()
+                        parent.brand_display_name = Branding.normalizeDisplayName(input_dialog:getInputText())
+                        parent.brand_shortcut_name = Branding.normalizeShortcutName(nil, parent.brand_display_name)
+                        parent.settings:saveSetting("booklore_brand_display_name", parent.brand_display_name)
+                        parent.settings:flush()
+                        Branding.saveGlobalNames(parent.brand_display_name, parent.brand_shortcut_name)
+
+                        UIManager:close(input_dialog)
+                        UIManager:show(InfoMessage:new{
+                            text = _("Display name saved"),
+                            timeout = 2,
+                        })
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
+end
 
 ---Settings:configureServerUrl.
 function Settings:configureServerUrl(parent)
@@ -831,6 +875,14 @@ function Settings:buildPreferencesMenu(parent)
                 keep_menu_open = true,
                 callback = function()
                     self:exportSettings(parent)
+                end,
+            },
+            {
+                text = _("Plugin Name"),
+                help_text = _("Set your custom plugin name. Exclude 'Sync' - the plugin adds it automatically for shortcuts."),
+                keep_menu_open = true,
+                callback = function()
+                    self:configureDisplayName(parent)
                 end,
             },
         },

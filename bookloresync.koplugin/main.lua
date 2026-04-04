@@ -29,10 +29,15 @@ local HardcoverClient = require("hardcover_api_client")
 local Updater = require("booklore_updater")
 local FileLogger = require("booklore_file_logger")
 local MetadataExtractor = require("booklore_metadata_extractor")
+local Branding = require("booklore_branding")
 local logger = require("logger")
 local random = require("random")
 
-local _ = require("gettext")
+local gettext = require("gettext")
+local _raw = gettext
+local function _(text)
+    return Branding.apply(_raw(text))
+end
 local T = require("ffi/util").template
 local ffi = require("ffi")
 local ffiutil = require("ffi/util")
@@ -308,6 +313,10 @@ function BookloreSync:init()
     self.server_url = self.settings:readSetting("server_url") or ""
     self.username   = self.settings:readSetting("username")   or ""
     self.password   = self.settings:readSetting("password")   or ""
+
+    self.brand_display_name = Branding.normalizeDisplayName(self.settings:readSetting("booklore_brand_display_name"))
+    self.brand_shortcut_name = Branding.normalizeShortcutName(nil, self.brand_display_name)
+    Branding.saveGlobalNames(self.brand_display_name, self.brand_shortcut_name)
 
     self.is_enabled      = self.settings:readSetting("is_enabled")      or false
     self.log_to_file     = self.settings:readSetting("log_to_file")     or false

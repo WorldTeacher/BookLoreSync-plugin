@@ -48,27 +48,27 @@ function Branding.normalizeDisplayName(value)
     return normalized
 end
 
-function Branding.normalizeShortcutName(value, display_name)
+function Branding.normalizeShortcutName(display_name)
     return Branding.normalizeDisplayName(display_name) .. "Sync"
 end
 
-function Branding.getNames(display_name, shortcut_name)
+function Branding.getNames(display_name)
     local resolved_display = Branding.normalizeDisplayName(display_name or read_global_setting(DISPLAY_KEY))
-    local resolved_shortcut = Branding.normalizeShortcutName(nil, resolved_display)
+    local resolved_shortcut = Branding.normalizeShortcutName(resolved_display)
     return resolved_display, resolved_shortcut
 end
 
-function Branding.saveGlobalNames(display_name, shortcut_name)
+function Branding.saveGlobalNames(display_name)
     local resolved_display = Branding.normalizeDisplayName(display_name)
     write_global_setting(DISPLAY_KEY, resolved_display)
 end
 
-function Branding.apply(text, display_name, shortcut_name)
+function Branding.apply(text, display_name)
     if type(text) ~= "string" then
         return text
     end
 
-    local resolved_display, resolved_shortcut = Branding.getNames(display_name, shortcut_name)
+    local resolved_display, resolved_shortcut = Branding.getNames(display_name)
 
     -- Use placeholders to avoid re-replacing parts of already-replaced text.
     local mark_space = "\1BRAND_SPACE\1"

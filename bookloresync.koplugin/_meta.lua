@@ -1,5 +1,12 @@
 local _raw = require("gettext")
-local Branding = require("booklore_branding")
+local ok_branding, Branding = pcall(require, "booklore_branding")
+if not ok_branding or type(Branding) ~= "table" then
+    Branding = {
+        apply = function(text)
+            return text
+        end,
+    }
+end
 
 local function _(text)
     return Branding.apply(_raw(text))

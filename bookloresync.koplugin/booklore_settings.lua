@@ -41,10 +41,14 @@ function Settings:configureDisplayName(parent)
                     is_enter_default = true,
                     callback = function()
                         parent.brand_display_name = Branding.normalizeDisplayName(input_dialog:getInputText())
-                        parent.brand_shortcut_name = Branding.normalizeShortcutName(nil, parent.brand_display_name)
+                        parent.brand_shortcut_name = Branding.normalizeShortcutName(parent.brand_display_name)
+                        -- Persist to plugin settings DB and mirror to global reader settings.
+                        -- Plugin DB is the source of truth for this plugin; global storage lets
+                        -- branding apply very early (e.g. metadata/UI string rendering) before
+                        -- plugin settings are fully initialized.
                         parent.settings:saveSetting("booklore_brand_display_name", parent.brand_display_name)
                         parent.settings:flush()
-                        Branding.saveGlobalNames(parent.brand_display_name, parent.brand_shortcut_name)
+                        Branding.saveGlobalNames(parent.brand_display_name)
 
                         UIManager:close(input_dialog)
                         UIManager:show(InfoMessage:new{

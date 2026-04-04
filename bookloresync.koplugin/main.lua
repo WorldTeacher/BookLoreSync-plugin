@@ -315,8 +315,8 @@ function BookloreSync:init()
     self.password   = self.settings:readSetting("password")   or ""
 
     self.brand_display_name = Branding.normalizeDisplayName(self.settings:readSetting("booklore_brand_display_name"))
-    self.brand_shortcut_name = Branding.normalizeShortcutName(nil, self.brand_display_name)
-    Branding.saveGlobalNames(self.brand_display_name, self.brand_shortcut_name)
+    self.brand_shortcut_name = Branding.normalizeShortcutName(self.brand_display_name)
+    Branding.saveGlobalNames(self.brand_display_name)
 
     self.is_enabled      = self.settings:readSetting("is_enabled")      or false
     self.log_to_file     = self.settings:readSetting("log_to_file")     or false

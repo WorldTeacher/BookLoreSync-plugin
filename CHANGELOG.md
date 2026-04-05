@@ -1,3 +1,10 @@
+## [4.0.1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.0.0...4.0.1) (2026-04-05)
+
+
+### Bug Fixes
+
+* **menu:** restructure main menu items for improved organization and clarity ([ef1b7d1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/ef1b7d137510b419e668d108dcc038871c1e05e0))
+
 # [4.0.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.8.4...4.0.0) (2026-04-05)
 
 

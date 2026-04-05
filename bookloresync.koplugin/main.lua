@@ -3024,6 +3024,12 @@ end
 
 ---BookloreSync:addToMainMenu.
 function BookloreSync:addToMainMenu(menu_items)
+    local function showSectionHelp(title, body)
+        UIManager:show(InfoMessage:new{
+            text = T(_("%1\n\n%2"), title, body),
+        })
+    end
+
     local base_menu = {}
     
     table.insert(base_menu, {
@@ -3043,7 +3049,14 @@ function BookloreSync:addToMainMenu(menu_items)
         end,
     })
     
-    table.insert(base_menu, Settings:buildAuthMenu(self))
+    local auth_menu = Settings:buildAuthMenu(self)
+    auth_menu.hold_callback = function()
+        showSectionHelp(
+            _("Connection Setup"),
+            _("Set server URL, KOReader credentials, Booklore credentials, and run connection tests.")
+        )
+    end
+    table.insert(base_menu, auth_menu)
 
     local session_validation_menu = {
         text = _("Reading Sessions"),
@@ -3476,6 +3489,12 @@ function BookloreSync:addToMainMenu(menu_items)
     table.insert(base_menu, {
         text = _("Sync Behavior"),
         sub_item_table = sync_behavior_items,
+        hold_callback = function()
+            showSectionHelp(
+                _("Sync Behavior"),
+                _("Choose automatic/manual/custom sync mode and configure WiFi prompting behavior.")
+            )
+        end,
     })
 
     table.insert(base_menu, {
@@ -3486,6 +3505,12 @@ function BookloreSync:addToMainMenu(menu_items)
             Settings:buildRatingMenu(self),
             annotations_and_bookmarks_menu,
         },
+        hold_callback = function()
+            showSectionHelp(
+                _("What to Sync"),
+                _("Configure reading session rules, progress sync, rating sync, annotations, and bookmarks.")
+            )
+        end,
     })
     table.insert(base_menu, {
         text = _("Shelf Downloads"),
@@ -3709,6 +3734,12 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
         },
+        hold_callback = function()
+            showSectionHelp(
+                _("Shelf Downloads"),
+                _("Configure Booklore shelf download sync, storage location, file naming, and cleanup behavior.")
+            )
+        end,
     })
 
     table.insert(base_menu, {
@@ -3889,6 +3920,12 @@ function BookloreSync:addToMainMenu(menu_items)
                 },
             },
         },
+        hold_callback = function()
+            showSectionHelp(
+                _("Sync & Cache"),
+                _("Sync pending items now, inspect queue/cache, match unmatched books, and clear local data.")
+            )
+        end,
     })
 
     local import_matching_items = {
@@ -3974,6 +4011,12 @@ function BookloreSync:addToMainMenu(menu_items)
     local import_matching_menu = {
         text = _("Import & Matching"),
         sub_item_table = import_matching_items,
+        hold_callback = function()
+            showSectionHelp(
+                _("Import & Matching"),
+                _("Import historical KOReader sessions and match them to Booklore books for upload.")
+            )
+        end,
     }
 
     local integrations_menu = {
@@ -3981,9 +4024,21 @@ function BookloreSync:addToMainMenu(menu_items)
         sub_item_table = {
             hardcover_menu,
         },
+        hold_callback = function()
+            showSectionHelp(
+                _("Integrations"),
+                _("Configure external integrations. Currently includes Hardcover integration.")
+            )
+        end,
     }
 
     local appearance_diagnostics_menu = Settings:buildPreferencesMenu(self)
+    appearance_diagnostics_menu.hold_callback = function()
+        showSectionHelp(
+            _("Appearance & Diagnostics"),
+            _("Configure silent mode, log-to-file diagnostics, settings export, and plugin naming.")
+        )
+    end
 
     table.insert(base_menu, import_matching_menu)
     table.insert(base_menu, integrations_menu)
@@ -4034,6 +4089,12 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
         },
+        hold_callback = function()
+            showSectionHelp(
+                _("About & Updates"),
+                _("View plugin version details and manage update checks, channels, and update cache.")
+            )
+        end,
     })
 
     menu_items.booklore_sync = {

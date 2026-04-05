@@ -14,7 +14,7 @@ hide_page_list = true
   <a class="section-card" href="authentication/">
     <div class="section-card__icon">🔑</div>
     <div class="section-card__body">
-      <div class="section-card__title">Authentication</div>
+      <div class="section-card__title">Connection Setup</div>
       <div class="section-card__desc">Configure your BookLore server URL and login credentials.</div>
     </div>
   </a>
@@ -22,15 +22,15 @@ hide_page_list = true
   <a class="section-card" href="session-tracking/">
     <div class="section-card__icon">⚙️</div>
     <div class="section-card__body">
-      <div class="section-card__title">Sync Settings</div>
-      <div class="section-card__desc">Configure session detection, ratings, annotations, and sync triggers.</div>
+      <div class="section-card__title">What to Sync</div>
+      <div class="section-card__desc">Configure reading sessions, progress sync, ratings, annotations, and bookmarks.</div>
     </div>
   </a>
 
   <a class="section-card" href="manage-sessions/">
     <div class="section-card__icon">🗂️</div>
     <div class="section-card__body">
-      <div class="section-card__title">Manage Sessions</div>
+      <div class="section-card__title">Sync & Cache</div>
       <div class="section-card__desc">Manually sync pending data, inspect queue state, resolve unmatched books, and clear local caches.</div>
     </div>
   </a>
@@ -38,7 +38,7 @@ hide_page_list = true
   <a class="section-card" href="import-history/">
     <div class="section-card__icon">📥</div>
     <div class="section-card__body">
-      <div class="section-card__title">Import Reading History</div>
+      <div class="section-card__title">Import & Matching</div>
       <div class="section-card__desc">Extract and match historical reading sessions from KOReader's statistics database.</div>
     </div>
   </a>
@@ -54,8 +54,8 @@ hide_page_list = true
   <a class="section-card" href="preferences/">
     <div class="section-card__icon">🔧</div>
     <div class="section-card__body">
-      <div class="section-card__title">Preferences</div>
-      <div class="section-card__desc">Configure notifications, logging, and WiFi behaviour.</div>
+      <div class="section-card__title">Appearance & Diagnostics</div>
+      <div class="section-card__desc">Configure notifications, logging, export, and plugin naming.</div>
     </div>
   </a>
 

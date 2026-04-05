@@ -1,14 +1,14 @@
 +++
-title = "Authentication"
+title = "Connection Setup"
 description = "Configure your BookLore server URL and login credentials."
 weight = 1
 +++
 
-# Authentication
+# Connection Setup
 
-The authentication settings are found at:
+Connection settings are found at:
 
-**Tools → BookLore Sync → Authentication**
+**Tools → BookLore Sync → Connection Setup**
 
 ![Koreader Auth Settings](../../getting-started/koreader-settings-auth.png)
 

@@ -1,14 +1,14 @@
 +++
-title = "Manage Sessions"
-description = "Manually sync pending data, inspect queue state, resolve unmatched books, and clear local caches."
+title = "Sync & Cache"
+description = "Sync pending data, inspect queue state, resolve unmatched books, and clear local caches."
 weight = 3
 +++
 
-# Manage Sessions
+# Sync & Cache
 
-Found at: **Tools → BookLore Sync → Manage Sessions**
+Found at: **Tools → BookLore Sync → Sync & Cache**
 
-This menu contains five actions: Sync Pending Now, View Details, Match Unmatched Books, Clear Pending, and Clear Cache.
+This menu contains five primary actions: Sync Pending Now, View Pending Sessions, Match Unmatched Books, Clear Pending, and Clear Cache.
 
 ---
 
@@ -27,7 +27,7 @@ When complete, a summary toast shows how many items were synced and how many fai
 
 ---
 
-## View Details
+## View Pending Sessions
 
 ![View details for sessions](../view_details.png)
 Displays a read-only summary of the current local database state. No data is modified.
@@ -99,7 +99,7 @@ Already-synced sessions in `historical_sessions` and book–ID mappings in `book
 
 Additional reset and rematch tools are available in:
 
-**Tools → BookLore Sync → Advanced**
+**Tools → BookLore Sync → Sync & Cache → Advanced**
 
 - **Re-match All Books in Cache** resets all stored book IDs and re-resolves them from the server. Use this when the server library was rebuilt and IDs changed.
 - **Clear...** opens a selective clear dialog for synced-history tables:

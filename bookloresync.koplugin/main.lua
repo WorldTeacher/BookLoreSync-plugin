@@ -3514,7 +3514,7 @@ function BookloreSync:addToMainMenu(menu_items)
         end,
     }
 
-    local shelf_downloads_menu = {
+    local shelf_sync_menu = {
         text = _("Shelf Sync"),
         sub_item_table = {
             {
@@ -3933,7 +3933,7 @@ function BookloreSync:addToMainMenu(menu_items)
     table.insert(base_menu, what_to_sync_menu)
     table.insert(base_menu, sync_behavior_menu)
     table.insert(base_menu, sync_cache_menu)
-    table.insert(base_menu, shelf_downloads_menu)
+    table.insert(base_menu, shelf_sync_menu)
 
     local import_matching_items = {
         {

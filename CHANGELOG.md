@@ -1,3 +1,43 @@
+# [4.0.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.8.4...4.0.0) (2026-04-05)
+
+
+### Bug Fixes
+
+* **api_client:** enhance error handling and logging for getBookFileSize method ([0d11984](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/0d11984956aded452ad623589416e3007792707c))
+* **api_client:** enhance progress update validation for timestamp and percentage ([26e1bce](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/26e1bce035e09fc318e9c0a98dd7926134bc9c8a))
+* **api_client:** simplify logging methods by removing redundant checks ([2f9877d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/2f9877d95537bb1c9a9a950155fe4f73d9f9de4a))
+* **branding:** handle missing branding module gracefully and provide default implementations ([a78a175](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a78a1752319de49765a5c913097a3d0241b899a0))
+* **branding:** improve branding functionality by handling missing branding module and simplifying function signatures ([6e7daa9](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/6e7daa9dc447c36447929174537a310774de110a))
+* **branding:** improve display name handling and use unique placeholders in apply function ([f6eb230](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/f6eb23035b74f89be000ac8275b920cdfafff60a))
+* **ci:** remove unnecessary release rules from workflow ([b52224c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/b52224cc5b543581315e13d2b35def5435038df1))
+* **ci:** update pipeline rules for main branch and document changes ([64e5f21](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/64e5f21cf9f384c565349359ccf2c687906b8a92))
+* **ci:** update quotes for tag condition in workflow rules ([4fe7c8f](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/4fe7c8fe9065899cd38ad9a8d84e6fdf4121c077))
+* **ci:** update version generation to support override from CI environment ([dcb7d91](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/dcb7d919d9e6fa01784cae58159bd8b433716d2c))
+* **database:** update schema version and modify pending progress handling ([23ff94a](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/23ff94a59758e34e6b6d8ae38aea5c2bac5420d8))
+* **koreader:** update plugin name to 'bookloresync' to allow plugin to be disabled ([ccb7c7a](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/ccb7c7a25fb73704a589e04297c1471fa504b52e)), closes [#33](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/issues/33)
+* **settings:** enhance error handling for saving progress decimal places ([abe46cd](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/abe46cd3cde3b5b5ebe8d01f32f13855cf1b333b))
+* **settings:** improve error handling for saving settings ([6864d05](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/6864d05c8da32a1404f3f2142642850aedba6c73))
+* **settings:** streamline input handling for minimum duration and pages configuration ([f60295b](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/f60295b2db793ce3c9119ecfc4a38aa09d359da6))
+* **updater:** improve user file restoration error handling ([18594fc](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/18594fcb987ed8021e06d8dce6651220142b2a6e))
+
+
+### Features
+
+* **advanced:** add data management options for clearing synced history and re-matching books ([767e55f](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/767e55fe24788227a667a46b6b8a2cfe8e94ba79))
+* **branding:** implement branding functionality for customizable display names ([2e36507](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/2e3650717e8d824e6b7529faca25b6aff7105ab7))
+* **database:** add function to delete pending ratings by book_cache_id ([f31975e](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/f31975e7b06078630aa5e7119953c327df3ee50c))
+* **database:** add functions to count pending and synced annotations and bookmarks for a specific book ([e90238b](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/e90238be0bd97f357ae6d9aa155aca2a55c9a651))
+* **database:** add shelf state caching for delta-based sync ([690f65d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/690f65df4a804b2582a5b1cf0ce7c194789816e3))
+* **localization:** update German translations for improved clarity and accuracy ([7976e82](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/7976e82e380c5119934a53a8ca5c8583ac8af6f1))
+* **progress sync:** Implement KOReader progress sync functionality ([330051a](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/330051a2ba044684fd6faf5451dd31d440089439))
+* **storage:** implement disk space check and file size retrieval before downloads ([f876a36](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/f876a3669a17afddfddfbe294d99e65a92d2be64))
+* **updater:** add user file preservation and restoration during updates ([8cca0e7](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/8cca0e7276a3d2f74e209e0646710923e8d883e5))
+
+
+### BREAKING CHANGES
+
+* **settings:** prep for V4.0.0
+
 ## [3.8.4](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/3.8.3...3.8.4) (2026-03-16)
 
 

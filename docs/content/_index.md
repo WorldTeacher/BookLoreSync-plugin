@@ -4,7 +4,7 @@ description = "Official documentation for the BookLore Sync KOReader plugin."
 sort_by = "weight"
 +++
 
-> Note: `BookLore Sync` / `BookloreSync` is the legacy plugin naming used across older UI labels and docs. You can rename how the plugin appears in KOReader via **Tools -> BookLore Sync -> Preferences -> Plugin Name**.
+> Note: `BookLore Sync` / `BookloreSync` is the legacy plugin naming used across older UI labels and docs. You can rename how the plugin appears in KOReader via **Tools -> BookLore Sync -> Appearance & Diagnostics -> Plugin Name**.
 
 <div class="section-cards">
 
@@ -49,4 +49,3 @@ sort_by = "weight"
   </a>
 
 </div>
-

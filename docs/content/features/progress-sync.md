@@ -33,7 +33,7 @@ The synced payload includes:
 
 Go to:
 
-**Tools → BookLore Sync → Sync Settings → Progress Sync**
+**Tools → BookLore Sync → What to Sync → Progress Sync**
 
 Enable **Automatically keep documents in sync**.
 
@@ -111,7 +111,7 @@ Progress updates are stored in the local pending queue and are synced as part of
 - In queue summaries, progress items are shown as **`P`**.
 - Failed progress uploads remain queued and retry on future sync runs.
 
-Use **Manage Sessions → View Details** to inspect pending and synced progress counts.
+Use **Sync & Cache → View Pending Sessions** to inspect pending and synced progress counts.
 
 ---
 

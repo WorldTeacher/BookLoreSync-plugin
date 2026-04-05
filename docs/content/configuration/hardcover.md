@@ -6,7 +6,7 @@ weight = 5
 
 # Hardcover
 
-Found at: **Tools → BookLore Sync → Hardcover**
+Found at: **Tools → BookLore Sync → Integrations → Hardcover**
 
 Manages the connection between the plugin and your [Hardcover](https://hardcover.app) account. This menu has two items: loading your API token and fetching book IDs.
 

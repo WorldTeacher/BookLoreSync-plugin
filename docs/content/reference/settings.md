@@ -60,11 +60,11 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `sync_mode` | string | *(derived)* | High-level sync mode: `"automatic"` (sync on suspend + WiFi enabled), `"manual"` (queue only; sync via **Manage Sessions → Sync Pending Now**), or `"custom"` (manual configuration of the two flags below). Derived from `manual_sync_only` and `force_push_session_on_suspend`/`connect_network_on_suspend` on first run; saved explicitly after that. |
-| `manual_sync_only` | boolean | `false` | When `true`, sessions are queued but not auto-uploaded; requires manual **Manage Sessions → Sync Pending Now**. Set automatically when `sync_mode` is `"manual"`. |
+| `sync_mode` | string | *(derived)* | High-level sync mode: `"automatic"` (sync on suspend + WiFi enabled), `"manual"` (queue only; sync via **Sync & Cache → Sync Pending Now**), or `"custom"` (manual configuration of the two flags below). Derived from `manual_sync_only` and `force_push_session_on_suspend`/`connect_network_on_suspend` on first run; saved explicitly after that. |
+| `manual_sync_only` | boolean | `false` | When `true`, sessions are queued but not auto-uploaded; requires manual **Sync & Cache → Sync Pending Now**. Set automatically when `sync_mode` is `"manual"`. |
 | `force_push_session_on_suspend` | boolean | `false` | When `true`, triggers `syncPendingSessions` on device suspend. Set automatically when `sync_mode` is `"automatic"`; also available as a custom toggle when `sync_mode` is `"custom"`. |
-| `connect_network_on_suspend` | boolean | `false` | When `true`, enables WiFi before syncing on suspend (works in conjunction with `force_push_session_on_suspend`). Set automatically when `sync_mode` is `"automatic"`; also available as a custom toggle when `sync_mode` is `"custom"`. |
-| `ask_wifi_enable` | boolean | `false` | When `true`, shows a confirmation dialog before enabling WiFi for a sync |
+| `connect_network_on_suspend` | boolean | `false` | When `true`, enables WiFi before syncing on suspend (works with `force_push_session_on_suspend`). Set automatically when `sync_mode` is `"automatic"`; also available as a custom toggle when `sync_mode` is `"custom"`. |
+| `ask_wifi_enable` | boolean | `false` | When `true`, shows a confirmation dialog before enabling WiFi for a sync. In the UI this toggle is disabled while `sync_mode` is `"manual"`. |
 
 ---
 

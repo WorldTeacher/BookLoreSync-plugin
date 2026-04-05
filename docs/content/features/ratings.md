@@ -14,8 +14,8 @@ Rating sync pushes your book ratings from KOReader to your BookLore library. Opt
 
 Rating sync requires:
 
-- The **BookLore account credentials** to be configured (for Bearer token authentication). See [Authentication](@/configuration/authentication.md).
-- **Enable rating sync** toggled on in **Settings → Sync Settings → Rating Sync**.
+- The **BookLore account credentials** to be configured (for Bearer token authentication). See [Connection Setup](@/configuration/authentication.md).
+- **Enable rating sync** toggled on in **Settings → What to Sync → Rating**.
 
 ---
 
@@ -61,15 +61,15 @@ The plugin can sync ratings to your [Hardcover](https://hardcover.app) account i
 ### Setup
 
 1. Create a file named **`hardcover.token`** in the plugin folder and paste your Hardcover API token into it (get it from **hardcover.app → Profile → API**).
-2. Tap **Tools → BookLore Sync → Hardcover → Configure Hardcover Account** to load the token.
-3. Run **Tools → BookLore Sync → Hardcover → Fetch Hardcover Book IDs** to populate Hardcover IDs for your matched books.
-4. Toggle on **Hardcover rating sync** in **Sync Settings → Rating Sync**. This toggle is only available when **Enable rating sync** is also on.
+2. Tap **Tools → BookLore Sync → Integrations → Hardcover → Configure Hardcover Account** to load the token.
+3. Run **Tools → BookLore Sync → Integrations → Hardcover → Fetch Hardcover Book IDs** to populate Hardcover IDs for your matched books.
+4. Toggle on **Hardcover rating sync** in **What to Sync → Rating**. This toggle is only available when **Enable rating sync** is also on.
 
 See [Hardcover configuration](@/configuration/hardcover.md) for full setup details.
 
 ### Fetch Hardcover Book IDs
 
-Before ratings can sync, each book needs a Hardcover ID stored locally. Run **Tools → BookLore Sync → Hardcover → Fetch Hardcover Book IDs** to populate these. The process runs in three stages:
+Before ratings can sync, each book needs a Hardcover ID stored locally. Run **Tools → BookLore Sync → Integrations → Hardcover → Fetch Hardcover Book IDs** to populate these. The process runs in three stages:
 
 1. **BookLore metadata** - pulls `hardcover_id` from BookLore for each matched book and stores it locally.
 2. **ISBN search** - for books without an ID from stage 1, queries the Hardcover GraphQL API by ISBN-13.
@@ -105,6 +105,6 @@ If a rating upload fails (e.g., a network error), the rating is added to the `pe
 
 To stop rating sync, toggle off **Enable rating sync** in:
 
-**Tools → BookLore Sync → Sync Settings → Rating Sync → Enable rating sync**
+**Tools → BookLore Sync → What to Sync → Rating → Enable rating sync**
 
 Pending ratings already in the queue will not be uploaded after disabling.

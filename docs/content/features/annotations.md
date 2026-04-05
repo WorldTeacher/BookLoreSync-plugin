@@ -16,7 +16,7 @@ The annotations sync feature uploads highlights and notes you make in KOReader t
 
 Annotation sync requires:
 
-- The **BookLore account credentials** configured for Bearer token authentication. See [Authentication](@/configuration/authentication.md).
+- The **BookLore account credentials** configured for Bearer token authentication. See [Connection Setup](@/configuration/authentication.md).
 - **Sync highlights and notes** toggled on in **Settings → Annotations**.
 
 ---
@@ -118,7 +118,7 @@ In addition to the normal session-end trigger, annotations and bookmarks are **a
 
 The plugin captures annotations at suspend time by reading directly from KOReader's in-memory `ReaderAnnotation` module. Because KOReader only flushes annotation data to the `.sdr` sidecar *after* the document is closed - not on suspend - reading from disk at that point would return stale or incomplete data. The in-memory read avoids this race condition entirely.
 
-> **Note:** The suspend path only queues annotations; it does not attempt a network upload on its own. If **Force push on suspend** is enabled (see [Sync Settings](@/configuration/session-tracking.md)), the pending queue will be uploaded at the same time.
+> **Note:** The suspend path only queues annotations; it does not attempt a network upload on its own. If **Force push on suspend** is enabled (see [What to Sync](@/configuration/session-tracking.md)), the pending queue will be uploaded at the same time.
 
 ### Upload on read complete
 
@@ -148,7 +148,7 @@ Bookmark sync is triggered at the same time as annotation sync (after a qualifyi
 
 To enable bookmark sync, toggle on **Sync bookmarks** in:
 
-**Tools → BookLore Sync → Sync Settings → Annotations Sync → Sync bookmarks**
+**Tools → BookLore Sync → What to Sync → Annotations & Bookmarks → Sync bookmarks**
 
 ---
 
@@ -166,4 +166,4 @@ On each sync, only annotations not found in this table are uploaded. This preven
 
 If an annotation upload fails, it is stored in the `pending_annotations` table and retried on the next sync trigger. You can see the count of pending annotations in:
 
-**Tools → BookLore Sync → Manage Sessions → View Details**
+**Tools → BookLore Sync → Sync & Cache → View Pending Sessions**

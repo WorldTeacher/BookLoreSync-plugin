@@ -28,7 +28,7 @@ Behind the scenes, the plugin immediately:
 
 By default, sessions shorter than **30 seconds** are discarded. Read a few pages to ensure the session clears the validation threshold.
 
-You can adjust this threshold later in **Settings → Sync Settings → Session Settings → Minimum Duration**.
+You can adjust this threshold later in **Settings → What to Sync → Reading Sessions → Minimum Duration**.
 
 ---
 
@@ -75,14 +75,14 @@ Open your BookLore web interface and navigate to the book you just read. The rea
 
 If the session did not appear, check whether it is still queued:
 
-**Tools → BookLore Sync → Manage Sessions → View Details**
+**Tools → BookLore Sync → Sync & Cache → View Pending Sessions**
 
 This shows the details of the database. You can manually trigger a sync from:
 
-**Tools → BookLore Sync → Sync Pending Now**
+**Tools → BookLore Sync → Sync & Cache → Sync Pending Now**
 
 If sessions remain stuck in the queue, see [Troubleshooting → Common Issues](@/troubleshooting/common-issues.md).
 
 ---
 
-To set up ratings, highlights, and notes sync, continue to [Configuration → Sync Settings](@/configuration/session-tracking.md).
+To set up ratings, highlights, and notes sync, continue to [Configuration → What to Sync](@/configuration/session-tracking.md).

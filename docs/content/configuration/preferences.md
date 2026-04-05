@@ -1,14 +1,14 @@
 +++
-title = "Preferences"
-description = "Configure notifications, logging, and WiFi behaviour."
+title = "Appearance & Diagnostics"
+description = "Configure notifications, logging, export, and plugin naming."
 weight = 4
 +++
 
-# Preferences
+# Appearance & Diagnostics
 
-The preferences settings are found at:
+These settings are found at:
 
-**Tools → BookLore Sync → Preferences**
+**Tools → BookLore Sync → Appearance & Diagnostics**
 
 ---
 
@@ -47,26 +47,13 @@ Enable this setting when investigating an issue and share the log file when repo
 
 ---
 
-## Ask Before Enabling WiFi
-
-**Default:** Off
-
-When enabled, the plugin prompts for confirmation before turning on WiFi for any sync operation. The prompt shows the action that requires WiFi (for example, "sync sessions" or "upload annotation"). Two options are presented:
-
-- **Enable** - turns on WiFi and proceeds with the action.
-- **Skip** - leaves WiFi off; the action is deferred and data remains in the pending queue for the next sync opportunity.
-
-When disabled, the plugin enables WiFi automatically without prompting whenever a sync requires it.
-
----
-
 ## Plugin Name (Branding)
 
 **Default:** `Booklore`
 
 Lets you rename how the plugin is labeled in KOReader UI text. The setting is available in:
 
-**Tools -> BookLore Sync -> Preferences -> Plugin Name**
+**Tools -> BookLore Sync -> Appearance & Diagnostics -> Plugin Name**
 
 Behavior details:
 

@@ -44,7 +44,7 @@ For more detailed diagnostics, the plugin can write its own log file with daily 
 
 Go to:
 
-**Tools → BookLore Sync → Preferences → Debug logging**
+**Tools → BookLore Sync → Appearance & Diagnostics → Log to file**
 
 Toggle it on. The plugin will begin writing to:
 
@@ -69,7 +69,7 @@ When file logging is enabled, the log includes:
 
 ### Disabling file logging
 
-Toggle **Debug logging** off in the same menu. The current log file is closed cleanly.
+Toggle **Log to file** off in the same menu. The current log file is closed cleanly.
 
 ---
 

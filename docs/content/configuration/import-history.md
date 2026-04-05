@@ -41,7 +41,7 @@ The process runs in two phases:
 
    Once confirmed, the sessions for that book are uploaded immediately.
 
-Requires BookLore credentials and server URL to be configured. See [Authentication](@/configuration/authentication.md).
+Requires BookLore credentials and server URL to be configured. See [Connection Setup](@/configuration/authentication.md).
 
 ---
 
@@ -93,4 +93,4 @@ For each unmatched book an input dialog is shown, pre-filled with the book's cac
 
 After a match is confirmed the book's `book_id` is written to the local cache and any pending sessions for that book are synced automatically.
 
-Requires BookLore credentials and server URL to be configured. See [Authentication](@/configuration/authentication.md).
+Requires BookLore credentials and server URL to be configured. See [Connection Setup](@/configuration/authentication.md).

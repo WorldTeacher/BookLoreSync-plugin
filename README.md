@@ -42,7 +42,7 @@
 2. **Restart KOReader** (complete restart, not sleep mode)
 
 3. **Configure:**
-   - Go to **Tools → BookLore Sync → Authentication**
+   - Go to **Tools → BookLore Sync → Connection Setup**
    - Enter server URL, username, and password
    - Tap **Test Connection** to verify
 

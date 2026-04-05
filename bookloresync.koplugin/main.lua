@@ -3032,7 +3032,7 @@ function BookloreSync:addToMainMenu(menu_items)
 
     local base_menu = {}
     
-    table.insert(base_menu, {
+    local enable_sync_menu = {
         text = _("Enable Sync"),
         help_text = _("Enable or disable automatic syncing of reading sessions to Booklore server. When disabled, no sessions will be tracked or synced."),
         checked_func = function()
@@ -3047,7 +3047,7 @@ function BookloreSync:addToMainMenu(menu_items)
                 timeout = 2,
             })
         end,
-    })
+    }
     
     local auth_menu = Settings:buildAuthMenu(self)
     auth_menu.hold_callback = function()
@@ -3056,6 +3056,7 @@ function BookloreSync:addToMainMenu(menu_items)
             _("Set server URL, KOReader credentials, Booklore credentials, and run connection tests.")
         )
     end
+    table.insert(base_menu, enable_sync_menu)
     table.insert(base_menu, auth_menu)
 
     local session_validation_menu = {
@@ -3486,7 +3487,7 @@ function BookloreSync:addToMainMenu(menu_items)
         end,
     })
 
-    table.insert(base_menu, {
+    local sync_behavior_menu = {
         text = _("Sync Behavior"),
         sub_item_table = sync_behavior_items,
         hold_callback = function()
@@ -3495,9 +3496,9 @@ function BookloreSync:addToMainMenu(menu_items)
                 _("Choose automatic/manual/custom sync mode and configure WiFi prompting behavior.")
             )
         end,
-    })
+    }
 
-    table.insert(base_menu, {
+    local what_to_sync_menu = {
         text = _("What to Sync"),
         sub_item_table = {
             session_validation_menu,
@@ -3511,9 +3512,10 @@ function BookloreSync:addToMainMenu(menu_items)
                 _("Configure reading session rules, progress sync, rating sync, annotations, and bookmarks.")
             )
         end,
-    })
-    table.insert(base_menu, {
-        text = _("Shelf Downloads"),
+    }
+
+    local shelf_sync_menu = {
+        text = _("Shelf Sync"),
         sub_item_table = {
             {
                 text = _("Sync from Booklore Shelf"),
@@ -3736,13 +3738,13 @@ function BookloreSync:addToMainMenu(menu_items)
         },
         hold_callback = function()
             showSectionHelp(
-                _("Shelf Downloads"),
-                _("Configure Booklore shelf download sync, storage location, file naming, and cleanup behavior.")
+                _("Shelf Sync"),
+                _("Configure two-way Booklore shelf sync, storage location, file naming, and cleanup behavior.")
             )
         end,
-    })
+    }
 
-    table.insert(base_menu, {
+    local sync_cache_menu = {
         text = _("Sync & Cache"),
         sub_item_table = {
             {
@@ -3926,7 +3928,12 @@ function BookloreSync:addToMainMenu(menu_items)
                 _("Sync pending items now, inspect queue/cache, match unmatched books, and clear local data.")
             )
         end,
-    })
+    }
+
+    table.insert(base_menu, what_to_sync_menu)
+    table.insert(base_menu, sync_behavior_menu)
+    table.insert(base_menu, sync_cache_menu)
+    table.insert(base_menu, shelf_sync_menu)
 
     local import_matching_items = {
         {

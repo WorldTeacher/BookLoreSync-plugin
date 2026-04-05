@@ -12,6 +12,12 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 ## Unreleased
 
+- No unreleased changes yet.
+
+---
+
+## 4.0.0 (2026-04-05)
+
 ### Features
 
 - **KOReader progress sync:** Added document-position sync with pull-on-open/resume, push-on-open/close, optional periodic page-turn updates, configurable forward/backward conflict strategies, and progress queue processing in `Sync Pending Now`.
@@ -26,6 +32,11 @@ All notable changes to the BookLore Sync plugin are documented here.
 - **Settings input handling:** Minimum duration and minimum pages inputs now use streamlined validation/error handling.
 - **Session management UX:** Pending/synced summaries now include progress queue/history counts where relevant.
 - **Plugin naming alignment:** Internal/release naming was aligned to `bookloresync` to match KOReader plugin expectations.
+- **Settings menu organization:** Reordered top-level settings and renamed key sections for task-first navigation (**Enable Sync**, **Connection Setup**, **What to Sync**, **Sync Behavior**, **Sync & Cache**, **Shelf Sync**, **Import & Matching**, **Integrations**, **Appearance & Diagnostics**, **About & Updates**).
+
+### Documentation
+
+- **Required for this PR:** Updated docs and menu-path references to match the reorganized settings structure and labels.
 
 ### Bug Fixes
 

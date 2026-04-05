@@ -1655,10 +1655,6 @@ msgstr "Synchronisierungsverhalten"
 msgid "What to Sync"
 msgstr "Was synchronisieren"
 
-#: bookloresync.koplugin/main.lua:3490
-msgid "Shelf Downloads"
-msgstr "Regal-Downloads"
-
 #: bookloresync.koplugin/main.lua:3714
 msgid "Sync & Cache"
 msgstr "Sync & Cache"
@@ -1708,8 +1704,8 @@ msgid "Configure reading session rules, progress sync, rating sync, annotations,
 msgstr "Lesesitzungsregeln, Fortschrittssynchronisierung, Bewertungs-Sync, Anmerkungen und Lesezeichen konfigurieren."
 
 #: bookloresync.koplugin/main.lua:3027
-msgid "Configure Booklore shelf download sync, storage location, file naming, and cleanup behavior."
-msgstr "Booklore-Regal-Download-Sync, Speicherort, Dateibenennung und Bereinigungsverhalten konfigurieren."
+msgid "Configure two-way Booklore shelf sync, storage location, file naming, and cleanup behavior."
+msgstr "Zweiwege-Booklore-Regalsynchronisierung, Speicherort, Dateibenennung und Bereinigungsverhalten konfigurieren."
 
 #: bookloresync.koplugin/main.lua:3027
 msgid "Sync pending items now, inspect queue/cache, match unmatched books, and clear local data."

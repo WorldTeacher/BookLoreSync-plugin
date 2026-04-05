@@ -72,7 +72,7 @@ If the device is offline at the time of deletion, the removal is queued and retr
 
 ## Prerequisites
 
-- **BookLore credentials** configured (Bearer token authentication). See [Authentication](@/configuration/authentication.md).
+- **BookLore credentials** configured (Bearer token authentication). See [Connection Setup](@/configuration/authentication.md).
 - Sufficient local storage in the download directory.
 
 > **Note:** If no shelf with the configured name exists in BookLore, the plugin creates it automatically on the first sync. By default the shelf is created as **public**.

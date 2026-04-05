@@ -59,7 +59,7 @@ Controls how many decimal places are included in the progress percentage **sent 
 
 ## Rating Sync
 
-Requires **BookLore account credentials** to be configured. See [Authentication](@/configuration/authentication.md).
+Requires **BookLore account credentials** to be configured. See [Connection Setup](@/configuration/authentication.md).
 
 ### Enable rating sync
 
@@ -96,7 +96,7 @@ Requires **Enable rating sync** to be on. Hardcover account setup (API token and
 
 > **Note:** In-book EPUB CFI annotation positioning is only supported for EPUB files. For PDF files, a mock CFI placeholder is used. Annotation sync is not supported for CBZ/CBR formats.
 
-Requires **BookLore account credentials** to be configured. See [Authentication](@/configuration/authentication.md).
+Requires **BookLore account credentials** to be configured. See [Connection Setup](@/configuration/authentication.md).
 
 ### Sync highlights and notes
 

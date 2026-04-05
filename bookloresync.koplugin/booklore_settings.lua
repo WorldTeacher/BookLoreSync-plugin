@@ -537,7 +537,7 @@ end
 ---Settings:buildAuthMenu.
 function Settings:buildAuthMenu(parent)
     return {
-        text = _("Authentication"),
+        text = _("Connection Setup"),
         sub_item_table = {
             {
                 text = _("Server URL"),
@@ -880,7 +880,7 @@ end
 ---Settings:buildPreferencesMenu.
 function Settings:buildPreferencesMenu(parent)
     return {
-        text = _("Preferences"),
+        text = _("Appearance & Diagnostics"),
         sub_item_table = {
             {
                 text = _("Silent mode"),
@@ -930,24 +930,6 @@ function Settings:buildPreferencesMenu(parent)
                     
                     UIManager:show(InfoMessage:new{
                         text = parent.log_to_file and _("File logging enabled") or _("File logging disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("Ask to enable WiFi"),
-                help_text = _("When enabled, the plugin will ask for your permission before turning on WiFi for syncing. On confirm, the action proceeds; on skip, syncs are deferred (queued for the next opportunity) and lookups are skipped."),
-                checked_func = function()
-                    return parent.ask_wifi_enable
-                end,
-                callback = function()
-                    parent.ask_wifi_enable = not parent.ask_wifi_enable
-                    parent.settings:saveSetting("ask_wifi_enable", parent.ask_wifi_enable)
-                    parent.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = parent.ask_wifi_enable
-                            and _("Ask to enable WiFi: on")
-                            or  _("Ask to enable WiFi: off"),
                         timeout = 2,
                     })
                 end,

@@ -1,14 +1,14 @@
 +++
-title = "Preferences"
-description = "Configure notifications, logging, and WiFi behaviour."
+title = "Appearance & Diagnostics"
+description = "Configure notifications, logging, export, and plugin naming."
 weight = 4
 +++
 
-# Preferences
+# Appearance & Diagnostics
 
-The preferences settings are found at:
+These settings are found at:
 
-**Tools → BookLore Sync → Preferences**
+**Tools → BookLore Sync → Appearance & Diagnostics**
 
 ---
 
@@ -47,28 +47,27 @@ Enable this setting when investigating an issue and share the log file when repo
 
 ---
 
-## Secure Logs
+## Plugin Name (Branding)
 
-**Default:** Off
+**Default:** `Booklore`
 
-When enabled, all URLs are redacted from log output and replaced with `[URL REDACTED]`.
+Lets you rename how the plugin is labeled in KOReader UI text. The setting is available in:
 
-This is useful when you want to share a log file for debugging purposes but do not want to expose your server address or any path information.
+**Tools -> BookLore Sync -> Appearance & Diagnostics -> Plugin Name**
 
-Enable **Debug Logging** and **Secure Logs** together before capturing a log to share publicly.
+Behavior details:
 
----
+- The value is trimmed and normalized before saving.
+- If the name ends with `Sync`, that suffix is removed automatically to avoid duplicate naming.
+- The plugin also computes a shortcut-style label as `<DisplayName>Sync` for places that use the compact form.
+- If branding cannot be applied globally, the value is still saved locally and you'll see an error message with details.
 
-## Ask Before Enabling WiFi
+Examples:
 
-**Default:** Off
+- `MyLibrary` -> display name `MyLibrary`, shortcut name `MyLibrarySync`
+- `MyLibrarySync` -> display name `MyLibrary`, shortcut name `MyLibrarySync`
 
-When enabled, the plugin prompts for confirmation before turning on WiFi for any sync operation. The prompt shows the action that requires WiFi (for example, "sync sessions" or "upload annotation"). Two options are presented:
-
-- **Enable** - turns on WiFi and proceeds with the action.
-- **Skip** - leaves WiFi off; the action is deferred and data remains in the pending queue for the next sync opportunity.
-
-When disabled, the plugin enables WiFi automatically without prompting whenever a sync requires it.
+Branding affects plugin-provided labels and messages; it does not rename unrelated KOReader UI text from other plugins.
 
 ---
 

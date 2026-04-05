@@ -9,7 +9,7 @@ include:
       - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
         when: always
       - when: never
-  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola@1.0"
+  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola@1.1"
     inputs:
       lint-disabled: true
       lychee-enabled: false
@@ -18,7 +18,7 @@ include:
       - changes:
           - docs/**/*
   # Zola template (GitLab Pages variant)
-  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola-pages@1.0"
+  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola-pages@1.1"
     rules:
       - changes:
           - docs/**/*
@@ -43,6 +43,57 @@ variables:
 # (define the variables below in your GitLab group/project variables)
 # GITLAB_TOKEN: A GitLab 'project access token' or 'personal access token' with `api`, `read_repository` and `write repository` scopes.
 # SEMREL_GPG_SIGNKEY: Path to the GPG signkey exported with `gpg --armor --export-secret-key`.
+
+build-koplugin-artifact:
+  stage: build
+  image: alpine:latest
+  rules:
+    # Always build plugin artifacts for MR pipelines (detached/merged-result)
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # And for direct pushes to develop
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"'
+  before_script:
+    - apk add --no-cache zip bash git gettext curl
+  script:
+    - echo "Generating version information"
+    - export PLUGIN_VERSION="dev-build-$(date -u +%Y%m%d%H%M%S)"
+    - VERSION_OVERRIDE="$PLUGIN_VERSION" bash generate-version.sh
+
+    - echo "Compiling gettext translations"
+    - |
+      find "$CI_PROJECT_DIR/bookloresync.koplugin/locale" -name "*.po" | while read po; do
+        mo="${po%.po}.mo"
+        echo "Compiling $po -> $mo"
+        msgfmt "$po" -o "$mo"
+      done
+
+    - echo "Creating koplugin archive"
+    - cd "$CI_PROJECT_DIR"
+    - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip"
+
+    - ls -lah "$CI_PROJECT_DIR/bookloresync.koplugin.zip"
+
+    # Upload to package registry as debug-assets/develop for automated testing
+    - echo "Uploading build to package registry as debug-assets"
+    - |
+      PACKAGE_NAME="debug-assets"
+      PACKAGE_VERSION="develop"
+      PACKAGE_FILE="latest-develop.zip"
+      UPLOAD_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${PACKAGE_VERSION}/${PACKAGE_FILE}"
+
+      echo "Upload URL: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${PACKAGE_NAME}/${PACKAGE_VERSION}/${PACKAGE_FILE}"
+
+      curl --fail-with-body -L --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+           --upload-file "$CI_PROJECT_DIR/bookloresync.koplugin.zip" \
+           "$UPLOAD_URL"
+
+      echo "Package uploaded successfully"
+
+  artifacts:
+    name: "bookloresync-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - bookloresync.koplugin.zip
+    expire_in: 10 days
 
 zip-koplugin-release:
   stage: publish

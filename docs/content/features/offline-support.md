@@ -94,7 +94,7 @@ Pending sessions are synced automatically in these situations:
 | **Session end** | Sync attempted after every valid session (if not in Manual Sync Only mode) |
 | **Device resume** | Deferred background sync 15 seconds after device wakes from sleep |
 | **Network connected** | Immediate sync when network becomes available (if a wake sync was pending) |
-| **Manual Sync Now** | Triggered by **Tools → BookLore Sync → Sync Now** |
+| **Manual Sync Now** | Triggered by **Tools → BookLore Sync → Sync & Cache → Sync Pending Now** |
 | **Dispatcher action** | `SyncBooklorePending` can be assigned to a button or gesture |
 
 ---
@@ -111,7 +111,7 @@ If the **Ask before enabling WiFi** setting is on, the plugin will show a confir
 
 This prompt appears before any sync attempt that would require enabling WiFi, including session-end syncs, wake syncs, and manually triggered syncs.
 
-To configure this, see **Tools → BookLore Sync → Sync Settings → Sync Triggers → Ask before enabling WiFi**.
+To configure this, see **Tools → BookLore Sync → Sync Behavior → Ask to enable WiFi**.
 
 ---
 
@@ -139,7 +139,7 @@ Pending deletions are processed alongside pending sessions on every sync trigger
 
 To see how many sessions are waiting:
 
-**Tools → BookLore Sync → Manage Sessions → View Details**
+**Tools → BookLore Sync → Sync & Cache → View Pending Sessions**
 
 To view the raw data:
 
@@ -154,6 +154,6 @@ sqlite3 {your_koreader_installation}/settings/booklore-sync.sqlite \
 
 To discard all pending sessions:
 
-**Tools → BookLore Sync → Manage Sessions → Clear Pending**
+**Tools → BookLore Sync → Sync & Cache → Clear Pending**
 
 > **Warning:** This permanently deletes all queued sessions. They will not be uploaded to BookLore. Only use this to remove test data or sessions you do not want.

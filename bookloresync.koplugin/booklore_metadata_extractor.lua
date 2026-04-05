@@ -21,42 +21,46 @@ local BookloreMetadataExtractor = {}
 
 --[[--
 Initialize the metadata extractor
-
-@param secure_logs Enable secure logging (default: false)
 --]]
+---BookloreMetadataExtractor:new.
 function BookloreMetadataExtractor:new(o)
     o = o or {}
     setmetatable(o, self)
     self.__index = self
-    self.secure_logs = o.secure_logs or false
     return o
 end
 
 --[[--
-Log message with secure logging support
+Log message using plugin logger
 
 @param level Log level (info, warn, err, dbg)
 @param ... Log arguments
 --]]
+---BookloreMetadataExtractor:log.
 function BookloreMetadataExtractor:log(level, ...)
-    local args = {...}
-    if self.secure_logs then
-        -- Redact file paths in secure mode
-        for i = 1, #args do
-            if type(args[i]) == "string" then
-                args[i] = args[i]:gsub("/[^%s]+", "[PATH REDACTED]")
-            end
+    if not self.plugin then
+        -- Fallback to native logger if plugin not available
+        if level == "info" then
+            logger.info("MetadataExtractor:", ...)
+        elseif level == "warn" then
+            logger.warn("MetadataExtractor:", ...)
+        elseif level == "err" then
+            logger.err("MetadataExtractor:", ...)
+        elseif level == "dbg" then
+            logger.dbg("MetadataExtractor:", ...)
         end
+        return
     end
     
+    -- Use plugin logger (handles redaction automatically)
     if level == "info" then
-        logger.info("MetadataExtractor:", table.unpack(args))
+        self.plugin:logInfo("MetadataExtractor:", ...)
     elseif level == "warn" then
-        logger.warn("MetadataExtractor:", table.unpack(args))
+        self.plugin:logWarn("MetadataExtractor:", ...)
     elseif level == "err" then
-        logger.err("MetadataExtractor:", table.unpack(args))
+        self.plugin:logErr("MetadataExtractor:", ...)
     elseif level == "dbg" then
-        logger.dbg("MetadataExtractor:", table.unpack(args))
+        self.plugin:logDbg("MetadataExtractor:", ...)
     end
 end
 
@@ -66,6 +70,7 @@ Load DocSettings for a document
 @param doc_path Full path to the document file
 @return DocSettings object or nil if not found
 --]]
+---BookloreMetadataExtractor:loadDocSettings.
 function BookloreMetadataExtractor:loadDocSettings(doc_path)
     if not doc_path then
         self:log("warn", "No document path provided")
@@ -89,6 +94,7 @@ KOReader stores rating in summary.rating field (1-5 stars)
 @param doc_path Full path to the document file
 @return number|nil Rating (1-5) or nil if not set
 --]]
+---BookloreMetadataExtractor:getRating.
 function BookloreMetadataExtractor:getRating(doc_path)
     local doc_settings = self:loadDocSettings(doc_path)
     if not doc_settings then
@@ -114,6 +120,7 @@ Possible values: "complete", "reading", "on_hold", "abandoned"
 @param doc_path Full path to the document file
 @return string|nil Status or nil if not set
 --]]
+---BookloreMetadataExtractor:getStatus.
 function BookloreMetadataExtractor:getStatus(doc_path)
     local doc_settings = self:loadDocSettings(doc_path)
     if not doc_settings then
@@ -135,6 +142,7 @@ Get modified date for a document
 @param doc_path Full path to the document file
 @return string|nil Date string (YYYY-MM-DD) or nil if not set
 --]]
+---BookloreMetadataExtractor:getModified.
 function BookloreMetadataExtractor:getModified(doc_path)
     local doc_settings = self:loadDocSettings(doc_path)
     if not doc_settings then
@@ -161,6 +169,7 @@ added during the current session but not yet written to disk.
 @param doc_settings DocSettings object (already opened by the caller)
 @return table Array of highlights, empty table if nil or no annotations
 --]]
+---BookloreMetadataExtractor:getHighlightsFromDocSettings.
 function BookloreMetadataExtractor:getHighlightsFromDocSettings(doc_settings)
     if not doc_settings then
         return {}
@@ -210,6 +219,7 @@ Each highlight contains:
 @param doc_path Full path to the document file
 @return table Array of highlights, empty table if none
 --]]
+---BookloreMetadataExtractor:getHighlights.
 function BookloreMetadataExtractor:getHighlights(doc_path)
     local doc_settings = self:loadDocSettings(doc_path)
     if not doc_settings then
@@ -251,6 +261,7 @@ Returns only annotations that have notes attached
 @param doc_path Full path to the document file
 @return table Array of notes, empty table if none
 --]]
+---BookloreMetadataExtractor:getNotes.
 function BookloreMetadataExtractor:getNotes(doc_path)
     local doc_settings = self:loadDocSettings(doc_path)
     if not doc_settings then
@@ -287,6 +298,7 @@ onCloseDocument time, before KOReader flushes to the .sdr sidecar).
 @param doc_settings DocSettings object (already opened by the caller)
 @return table Array of bookmarks, empty table if nil or none
 --]]
+---BookloreMetadataExtractor:getBookmarksFromDocSettings.
 function BookloreMetadataExtractor:getBookmarksFromDocSettings(doc_settings)
     if not doc_settings then
         return {}
@@ -330,6 +342,7 @@ Each bookmark contains:
 @param doc_path Full path to the document file
 @return table Array of bookmarks, empty table if none
 --]]
+---BookloreMetadataExtractor:getBookmarks.
 function BookloreMetadataExtractor:getBookmarks(doc_path)
     local doc_settings = self:loadDocSettings(doc_path)
     if not doc_settings then
@@ -367,6 +380,7 @@ Get reading progress percentage
 @param doc_path Full path to the document file
 @return number|nil Progress (0.0-1.0) or nil if not available
 --]]
+---BookloreMetadataExtractor:getProgress.
 function BookloreMetadataExtractor:getProgress(doc_path)
     local doc_settings = self:loadDocSettings(doc_path)
     if not doc_settings then
@@ -394,6 +408,7 @@ Returns the stats field which contains:
 @param doc_path Full path to the document file
 @return table|nil Stats table or nil if not available
 --]]
+---BookloreMetadataExtractor:getStats.
 function BookloreMetadataExtractor:getStats(doc_path)
     local doc_settings = self:loadDocSettings(doc_path)
     if not doc_settings then
@@ -415,6 +430,7 @@ Get last reading position
 @param doc_path Full path to the document file
 @return string|nil xpointer or page position
 --]]
+---BookloreMetadataExtractor:getLastPosition.
 function BookloreMetadataExtractor:getLastPosition(doc_path)
     local doc_settings = self:loadDocSettings(doc_path)
     if not doc_settings then
@@ -451,6 +467,7 @@ Returns comprehensive metadata including:
 @param doc_path Full path to the document file
 @return table Metadata table (fields may be nil)
 --]]
+---BookloreMetadataExtractor:getAllMetadata.
 function BookloreMetadataExtractor:getAllMetadata(doc_path)
     if not doc_path then
         self:log("warn", "No document path provided")
@@ -487,6 +504,7 @@ Count highlights and notes
 @param doc_path Full path to the document file
 @return table {highlights: number, notes: number, bookmarks: number}
 --]]
+---BookloreMetadataExtractor:getCounts.
 function BookloreMetadataExtractor:getCounts(doc_path)
     local doc_settings = self:loadDocSettings(doc_path)
     if not doc_settings then
@@ -522,6 +540,7 @@ Update or set rating for a document
 @param rating Rating value (1-5)
 @return boolean Success status
 --]]
+---BookloreMetadataExtractor:setRating.
 function BookloreMetadataExtractor:setRating(doc_path, rating)
     if not doc_path then
         self:log("warn", "No document path provided")
@@ -555,6 +574,7 @@ Update or set reading status for a document
 @param status Status value ("complete", "reading", "on_hold", "abandoned")
 @return boolean Success status
 --]]
+---BookloreMetadataExtractor:setStatus.
 function BookloreMetadataExtractor:setStatus(doc_path, status)
     if not doc_path then
         self:log("warn", "No document path provided")

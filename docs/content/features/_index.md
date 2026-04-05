@@ -59,6 +59,14 @@ hide_page_list = true
     </div>
   </a>
 
+  <a class="section-card" href="progress-sync/">
+    <div class="section-card__icon">📍</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Progress Sync</div>
+      <div class="section-card__desc">Syncing KOReader document position with BookLore for cross-device resume.</div>
+    </div>
+  </a>
+
   <a class="section-card" href="auto-update/">
     <div class="section-card__icon">🔄</div>
     <div class="section-card__body">

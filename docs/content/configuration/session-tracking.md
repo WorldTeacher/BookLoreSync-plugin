@@ -1,18 +1,18 @@
 +++
-title = "Sync Settings"
-description = "Configure session detection, ratings, annotations, and sync triggers."
+title = "What to Sync"
+description = "Configure reading sessions, progress sync, ratings, annotations, and bookmarks."
 weight = 2
 +++
 
-# Sync Settings
+# What to Sync
 
-Found at: **Tools → BookLore Sync → Sync Settings**
+Found at: **Tools → BookLore Sync → What to Sync**
 
-This menu contains four sections: Session Settings, Rating Sync, Annotations Sync, and Sync Triggers.
+This menu contains four sections: Reading Sessions, Progress Sync, Rating Sync, and Annotations & Bookmarks.
 
 ---
 
-## Session Settings
+## Reading Sessions
 
 ### Detection Mode
 
@@ -92,13 +92,13 @@ Requires **Enable rating sync** to be on. Hardcover account setup (API token and
 
 ---
 
-## Annotations Sync
+## Annotations & Bookmarks
 
 > **Note:** In-book EPUB CFI annotation positioning is only supported for EPUB files. For PDF files, a mock CFI placeholder is used. Annotation sync is not supported for CBZ/CBR formats.
 
 Requires **BookLore account credentials** to be configured. See [Authentication](@/configuration/authentication.md).
 
-### Enable highlights and notes sync
+### Sync highlights and notes
 
 Toggle on to upload KOReader highlights and notes to BookLore at the end of qualifying reading sessions.
 
@@ -122,10 +122,10 @@ Bookmarks are deduplicated via the `synced_bookmarks` table and uploaded to `POS
 
 | Option | Behaviour |
 |--------|-----------|
-| **Upload on session end** | Annotations are checked and queued after every qualifying reading session. Only new annotations are processed. Whether they upload immediately or are cached depends on your **Sync Triggers** setting (see below). |
+| **Upload on session end** | Annotations are checked and queued after every qualifying reading session. Only new annotations are processed. Whether they upload immediately or are cached depends on your **Sync Behavior** setting. |
 | **Upload on read complete** | Annotations are only queued when progress reaches 99% or more. |
 
-> **Note:** When **Sync Triggers** is set to **Manual only (cache everything)**, annotations are always cached locally regardless of this setting. They will only upload when you manually trigger a sync via **Manage Sessions → Sync Pending Now** or the `SyncBooklorePending` dispatcher action.
+> **Note:** When **Sync Behavior** is set to **Manual only (cache everything)**, annotations are always cached locally regardless of this setting. They will only upload when you manually trigger a sync via **Sync & Cache → Sync Pending Now** or the `SyncBooklorePending` dispatcher action.
 
 ### Highlight colours
 
@@ -145,17 +145,15 @@ KOReader named colours are mapped to BookLore hex values:
 
 ---
 
-## Sync Triggers
+## Related: Sync Behavior
 
-Controls when the plugin attempts to upload pending data.
+Sync mode and upload timing are configured separately in:
 
-| Option | Behaviour |
-|--------|-----------|
-| **Automatic (sync on suspend + WiFi)** | Syncs when the device suspends. Automatically enables WiFi and waits for a connection before uploading. |
-| **Manual only (cache everything)** | Never syncs automatically. All sessions, ratings, and annotations are queued locally until you trigger a manual sync via **Manage Sessions → Sync Pending Now** or the `SyncBooklorePending` dispatcher action. |
-| **Custom** | Enables individual toggles for auto-sync on suspend and connect WiFi on suspend independently. |
+**Tools → BookLore Sync → Sync Behavior**
 
-The **Custom** option exposes two additional toggles:
+See **Sync Behavior** in the settings menu for:
 
-- **Auto-sync on suspend** - upload the current session and all pending items when the device suspends.
-- **Connect WiFi on suspend** - automatically enable WiFi and wait up to 15 seconds for a connection when the device suspends.
+- Automatic / Manual / Custom mode
+- Auto-sync on suspend
+- Connect WiFi on suspend
+- Ask to enable WiFi

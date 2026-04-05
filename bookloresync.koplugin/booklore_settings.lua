@@ -11,11 +11,115 @@ local InputDialog = require("ui/widget/inputdialog")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local json = require("json")
+local ok_branding, Branding = pcall(require, "booklore_branding")
+if not ok_branding or type(Branding) ~= "table" then
+    Branding = {
+        apply = function(text)
+            return text
+        end,
+        normalizeDisplayName = function(value)
+            return (type(value) == "string" and value ~= "") and value or "Booklore"
+        end,
+        normalizeShortcutName = function(display_name)
+            local base = (type(display_name) == "string" and display_name ~= "") and display_name or "Booklore"
+            return base .. "Sync"
+        end,
+        saveGlobalNames = function()
+        end,
+    }
+end
 local T = require("ffi/util").template
-local _ = require("gettext")
+local gettext = require("gettext")
+local _raw = gettext
+local function _(text)
+    return Branding.apply(_raw(text))
+end
 
 local Settings = {}
 
+---Settings:configureDisplayName.
+function Settings:configureDisplayName(parent)
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title = _("Plugin Name"),
+        input = parent.brand_display_name or "",
+        input_hint = _("Booklore"),
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    callback = function()
+                        UIManager:close(input_dialog)
+                    end,
+                },
+                {
+                    text = _("Save"),
+                    is_enter_default = true,
+                    callback = function()
+                        local previous_display = parent.brand_display_name
+                        local previous_shortcut = parent.brand_shortcut_name
+                        local new_display = Branding.normalizeDisplayName(input_dialog:getInputText())
+                        local new_shortcut = Branding.normalizeShortcutName(new_display)
+
+                        local ok_save, save_result = pcall(function()
+                            return parent.settings:saveSetting("booklore_brand_display_name", new_display)
+                        end)
+                        if not ok_save or save_result == false then
+                            local save_detail = ok_save and save_result or save_result
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Failed to save plugin name: %1"), tostring(save_detail)),
+                                timeout = 3,
+                            })
+                            return
+                        end
+
+                        local ok_flush, flush_err = pcall(function()
+                            if parent.settings.flush then
+                                parent.settings:flush()
+                            end
+                        end)
+                        if not ok_flush then
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Failed to persist plugin name: %1"), tostring(flush_err)),
+                                timeout = 3,
+                            })
+                            return
+                        end
+
+                        parent.brand_display_name = new_display
+                        parent.brand_shortcut_name = new_shortcut
+                        -- Persist to plugin settings DB and mirror to global reader settings.
+                        -- Plugin DB is the source of truth for this plugin; global storage lets
+                        -- branding apply very early (e.g. metadata/UI string rendering) before
+                        -- plugin settings are fully initialized.
+                        local ok_global, global_err = pcall(function()
+                            Branding.saveGlobalNames(parent.brand_display_name)
+                        end)
+                        if not ok_global then
+                            parent.brand_display_name = previous_display
+                            parent.brand_shortcut_name = previous_shortcut
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Saved locally but failed to apply global branding: %1"), tostring(global_err)),
+                                timeout = 3,
+                            })
+                            return
+                        end
+
+                        UIManager:close(input_dialog)
+                        UIManager:show(InfoMessage:new{
+                            text = _("Display name saved"),
+                            timeout = 2,
+                        })
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
+end
+
+---Settings:configureServerUrl.
 function Settings:configureServerUrl(parent)
     local input_dialog
     input_dialog = InputDialog:new{
@@ -39,7 +143,7 @@ function Settings:configureServerUrl(parent)
                         parent.settings:flush()
 
                         if parent.api then
-                            parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
+                            parent.api:init(parent.server_url, parent.username, parent.password, parent.db)
                         end
 
                         UIManager:close(input_dialog)
@@ -57,6 +161,7 @@ function Settings:configureServerUrl(parent)
 end
 
 -- Chained dialog: Username → Next → Password → Save
+---Settings:configureConnection.
 function Settings:configureConnection(parent)
     local username_input
     username_input = InputDialog:new{
@@ -103,7 +208,7 @@ function Settings:configureConnection(parent)
                                             parent.settings:flush()
 
                                             if parent.api then
-                                                parent.api:init(parent.server_url, parent.username, parent.password, parent.db, parent.secure_logs)
+                                                parent.api:init(parent.server_url, parent.username, parent.password, parent.db)
                                             end
 
                                             UIManager:close(password_input)
@@ -128,6 +233,7 @@ function Settings:configureConnection(parent)
 end
 
 -- Chained dialog: Booklore Username → Next → Password → Save
+---Settings:configureBookloreAccount.
 function Settings:configureBookloreAccount(parent)
     local username_input
     username_input = InputDialog:new{
@@ -194,6 +300,7 @@ function Settings:configureBookloreAccount(parent)
     username_input:onShowKeyboard()
 end
 
+---Settings:configureMinDuration.
 function Settings:configureMinDuration(parent)
     local input_dialog
     input_dialog = InputDialog:new{
@@ -213,16 +320,23 @@ function Settings:configureMinDuration(parent)
                     text = _("Save"),
                     is_enter_default = true,
                     callback = function()
-                        local input_value = tonumber(input_dialog:getInputText())
-                        if input_value and input_value > 0 then
-                            parent.min_duration = input_value
-                            parent.settings:saveSetting("min_duration", parent.min_duration)
-                            parent.settings:flush()
-                            UIManager:close(input_dialog)
-                            UIManager:show(InfoMessage:new{
-                                text = T(_("Minimum duration set to %1 seconds"), tostring(parent.min_duration)),
-                                timeout = 2,
-                            })
+                        local new_value = tonumber(input_dialog:getInputText())
+                        if new_value and new_value > 0 then
+                            local success = parent.settings:saveSetting("min_duration", new_value)
+                            if success ~= false then
+                                parent.min_duration = new_value
+                                parent.settings:flush()
+                                UIManager:close(input_dialog)
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Minimum duration set to %1 seconds"), tostring(parent.min_duration)),
+                                    timeout = 2,
+                                })
+                            else
+                                UIManager:show(InfoMessage:new{
+                                    text = _("Failed to save setting. Check logs for details."),
+                                    timeout = 3,
+                                })
+                            end
                         else
                             UIManager:show(InfoMessage:new{
                                 text = _("Please enter a valid number greater than 0"),
@@ -238,6 +352,7 @@ function Settings:configureMinDuration(parent)
     input_dialog:onShowKeyboard()
 end
 
+---Settings:configureMinPages.
 function Settings:configureMinPages(parent)
     local input_dialog
     input_dialog = InputDialog:new{
@@ -257,16 +372,23 @@ function Settings:configureMinPages(parent)
                     text = _("Save"),
                     is_enter_default = true,
                     callback = function()
-                        local input_value = tonumber(input_dialog:getInputText())
-                        if input_value and input_value > 0 and input_value == math.floor(input_value) then
-                            parent.min_pages = input_value
-                            parent.settings:saveSetting("min_pages", parent.min_pages)
-                            parent.settings:flush()
-                            UIManager:close(input_dialog)
-                            UIManager:show(InfoMessage:new{
-                                text = T(_("Minimum pages set to %1"), tostring(parent.min_pages)),
-                                timeout = 2,
-                            })
+                        local new_value = tonumber(input_dialog:getInputText())
+                        if new_value and new_value > 0 and new_value == math.floor(new_value) then
+                            local success = parent.settings:saveSetting("min_pages", new_value)
+                            if success ~= false then
+                                parent.min_pages = new_value
+                                parent.settings:flush()
+                                UIManager:close(input_dialog)
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Minimum pages set to %1"), tostring(parent.min_pages)),
+                                    timeout = 2,
+                                })
+                            else
+                                UIManager:show(InfoMessage:new{
+                                    text = _("Failed to save setting. Check logs for details."),
+                                    timeout = 3,
+                                })
+                            end
                         else
                             UIManager:show(InfoMessage:new{
                                 text = _("Please enter a valid integer greater than 0"),
@@ -282,6 +404,7 @@ function Settings:configureMinPages(parent)
     input_dialog:onShowKeyboard()
 end
 
+---Settings:configureProgressDecimalPlaces.
 function Settings:configureProgressDecimalPlaces(parent)
     local input_dialog
     input_dialog = InputDialog:new{
@@ -303,9 +426,33 @@ function Settings:configureProgressDecimalPlaces(parent)
                     callback = function()
                         local input_value = tonumber(input_dialog:getInputText())
                         if input_value and input_value >= 0 and input_value <= 5 and input_value == math.floor(input_value) then
+                            local ok_save, save_result = pcall(function()
+                                return parent.settings:saveSetting("progress_decimal_places", input_value)
+                            end)
+                            if not ok_save or save_result == false then
+                                UIManager:close(input_dialog)
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Failed to save setting: %1"), tostring(save_result)),
+                                    timeout = 3,
+                                })
+                                return
+                            end
+
+                            local ok_flush, flush_err = pcall(function()
+                                if parent.settings.flush then
+                                    parent.settings:flush()
+                                end
+                            end)
+                            if not ok_flush then
+                                UIManager:close(input_dialog)
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Failed to persist setting: %1"), tostring(flush_err)),
+                                    timeout = 3,
+                                })
+                                return
+                            end
+
                             parent.progress_decimal_places = input_value
-                            parent.settings:saveSetting("progress_decimal_places", parent.progress_decimal_places)
-                            parent.settings:flush()
                             UIManager:close(input_dialog)
                             UIManager:show(InfoMessage:new{
                                 text = T(_("Progress decimal places set to %1"), tostring(parent.progress_decimal_places)),
@@ -326,6 +473,7 @@ function Settings:configureProgressDecimalPlaces(parent)
     input_dialog:onShowKeyboard()
 end
 
+---Settings:showVersion.
 function Settings:showVersion(parent)
     local version_info = require("plugin_version")
     local meta_info = require("_meta")
@@ -343,6 +491,7 @@ function Settings:showVersion(parent)
     })
 end
 
+---Settings:configureHardcoverToken.
 function Settings:configureHardcoverToken(parent)
     local token_file = (parent.plugin_dir or "") .. "/hardcover.token"
 
@@ -385,9 +534,10 @@ function Settings:configureHardcoverToken(parent)
     })
 end
 
+---Settings:buildAuthMenu.
 function Settings:buildAuthMenu(parent)
     return {
-        text = _("Authentication"),
+        text = _("Connection Setup"),
         sub_item_table = {
             {
                 text = _("Server URL"),
@@ -427,6 +577,7 @@ function Settings:buildAuthMenu(parent)
     }
 end
 
+---Settings:buildRatingMenu.
 function Settings:buildRatingMenu(parent)
     return {
         text = _("Rating"),
@@ -516,6 +667,7 @@ function Settings:buildRatingMenu(parent)
     }
 end
 
+---Settings:buildAnnotationsMenu.
 function Settings:buildAnnotationsMenu(parent)
     return {
         text = _("Annotations"),
@@ -647,6 +799,7 @@ function Settings:buildAnnotationsMenu(parent)
     }
 end
 
+---Settings:buildBookmarksMenu.
 function Settings:buildBookmarksMenu(parent)
     return {
         text = _("Bookmarks"),
@@ -674,12 +827,12 @@ function Settings:buildBookmarksMenu(parent)
     }
 end
 
+---Settings:exportSettings.
 function Settings:exportSettings(parent)
     local export_data = {
         is_enabled                    = parent.is_enabled,
         silent_messages               = parent.silent_messages,
         log_to_file                   = parent.log_to_file,
-        secure_logs                   = parent.secure_logs,
         min_duration                  = parent.min_duration,
         min_pages                     = parent.min_pages,
         session_detection_mode        = parent.session_detection_mode,
@@ -724,9 +877,10 @@ function Settings:exportSettings(parent)
     })
 end
 
+---Settings:buildPreferencesMenu.
 function Settings:buildPreferencesMenu(parent)
     return {
-        text = _("Preferences"),
+        text = _("Appearance & Diagnostics"),
         sub_item_table = {
             {
                 text = _("Silent mode"),
@@ -745,8 +899,8 @@ function Settings:buildPreferencesMenu(parent)
                 end,
             },
             {
-                text = _("Debug logging"),
-                help_text = _("Enable detailed logging to files for debugging purposes. Logs are saved daily to the plugin's logs directory. The last 3 log files are kept automatically."),
+                text = _("Log to file"),
+                help_text = _("Enable detailed logging to files for debugging purposes. Logs are saved daily to the plugin's logs directory with URLs automatically redacted. The last 3 log files are kept automatically."),
                 checked_func = function()
                     return parent.log_to_file
                 end,
@@ -775,41 +929,7 @@ function Settings:buildPreferencesMenu(parent)
                     end
                     
                     UIManager:show(InfoMessage:new{
-                        text = parent.log_to_file and _("Debug logging enabled") or _("Debug logging disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("Secure logs"),
-                help_text = _("Redact URLs from logs to protect sensitive information. When enabled, all URLs in log messages will be replaced with [URL REDACTED] so logs can be safely shared."),
-                checked_func = function()
-                    return parent.secure_logs
-                end,
-                callback = function()
-                    parent.secure_logs = not parent.secure_logs
-                    parent.settings:saveSetting("secure_logs", parent.secure_logs)
-                    parent.settings:flush()
-                UIManager:show(InfoMessage:new{
-                    text = parent.secure_logs and _("Secure logging enabled") or _("Secure logging disabled"),
-                    timeout = 2,
-                })
-                end,
-            },
-            {
-                text = _("Ask to enable WiFi"),
-                help_text = _("When enabled, the plugin will ask for your permission before turning on WiFi for syncing. On confirm, the action proceeds; on skip, syncs are deferred (queued for the next opportunity) and lookups are skipped."),
-                checked_func = function()
-                    return parent.ask_wifi_enable
-                end,
-                callback = function()
-                    parent.ask_wifi_enable = not parent.ask_wifi_enable
-                    parent.settings:saveSetting("ask_wifi_enable", parent.ask_wifi_enable)
-                    parent.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = parent.ask_wifi_enable
-                            and _("Ask to enable WiFi: on")
-                            or  _("Ask to enable WiFi: off"),
+                        text = parent.log_to_file and _("File logging enabled") or _("File logging disabled"),
                         timeout = 2,
                     })
                 end,
@@ -820,6 +940,14 @@ function Settings:buildPreferencesMenu(parent)
                 keep_menu_open = true,
                 callback = function()
                     self:exportSettings(parent)
+                end,
+            },
+            {
+                text = _("Plugin Name"),
+                help_text = _("Set your custom plugin name. Exclude 'Sync' - the plugin adds it automatically for shortcuts."),
+                keep_menu_open = true,
+                callback = function()
+                    self:configureDisplayName(parent)
                 end,
             },
         },

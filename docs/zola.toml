@@ -16,4 +16,3 @@ insert_anchor_links = "left"
 mode = "docs"
 gitlab = "https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin"
 show_theme_toggle = true
-

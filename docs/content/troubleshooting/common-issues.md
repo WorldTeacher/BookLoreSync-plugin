@@ -50,8 +50,8 @@ The plugin uses two separate credential sets with different authentication schem
 
 | Credential set | Used for | Auth scheme | Menu path |
 |----------------|----------|-------------|-----------|
-| **KOReader Account** | Session sync, book lookup (MD5 hash endpoint) | HTTP Basic (MD5-hashed password) | Settings → Authentication → Configure KOReader Account |
-| **BookLore Account** | Ratings, annotations, bookmarks, book search, shelf sync | Bearer token (username + plain password) | Settings → Authentication → Configure BookLore Account |
+| **KOReader Account** | Session sync, book lookup (MD5 hash endpoint) | HTTP Basic (MD5-hashed password) | Settings → Connection Setup → Configure KOReader Account |
+| **BookLore Account** | Ratings, annotations, bookmarks, book search, shelf sync | Bearer token (username + plain password) | Settings → Connection Setup → Configure BookLore Account |
 
 If sessions sync but annotations or ratings do not, the **BookLore Account** credentials are likely missing or wrong. If nothing syncs, check the **KOReader Account** credentials first.
 
@@ -71,7 +71,7 @@ Open **Tools → BookLore Sync** and confirm the plugin is enabled. If the toggl
 
 **Check 2 - View pending count:**
 
-**Tools → BookLore Sync → Manage Sessions → View Details**
+**Tools → BookLore Sync → Sync & Cache → View Pending Sessions**
 
 If the pending count is rising, sessions are being saved but not uploaded. Move on to Check 3.
 
@@ -79,7 +79,7 @@ If the pending count stays at 0, sessions may be failing validation. Move on to 
 
 **Check 3 - Try a manual sync:**
 
-**Tools → BookLore Sync → Sync Now**
+**Tools → BookLore Sync → Sync & Cache → Sync Pending Now**
 
 If this also fails, check the KOReader log for network errors:
 
@@ -93,13 +93,13 @@ Sessions are discarded silently if they fail validation. If you are reading for 
 
 Check your thresholds:
 
-**Tools → BookLore Sync → Sync Settings → Session Settings → Minimum Duration**
+**Tools → BookLore Sync → What to Sync → Reading Sessions → Minimum Duration**
 
 **Check 5 - Manual Sync Only mode:**
 
-If **Manual Sync Only** is enabled, sessions will accumulate in the queue until you tap **Sync Now** manually.
+If **Manual Sync Only** is enabled, sessions will accumulate in the queue until you trigger **Sync Pending Now** manually.
 
-**Tools → BookLore Sync → Preferences** → confirm Manual Sync Only is off.
+**Tools → BookLore Sync → Sync Behavior** → confirm **Manual only (cache everything)** is off.
 
 ---
 
@@ -139,7 +139,7 @@ If you see *"No match found based on hash"* (without "or ISBN"), no ISBN was fou
 
 Extended features (ratings, annotations) use Bearer token authentication via the **BookLore Account** credentials. Make sure these are configured:
 
-**Settings → Authentication → Configure BookLore Account**
+**Settings → Connection Setup → Configure BookLore Account**
 
 **Check 2 - Format compatibility:**
 

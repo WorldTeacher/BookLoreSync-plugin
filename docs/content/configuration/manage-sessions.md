@@ -1,25 +1,25 @@
 +++
-title = "Manage Sessions"
-description = "Manually sync pending data, inspect queue state, resolve unmatched books, and clear local caches."
+title = "Sync & Cache"
+description = "Sync pending data, inspect queue state, resolve unmatched books, and clear local caches."
 weight = 3
 +++
 
-# Manage Sessions
+# Sync & Cache
 
-Found at: **Tools → BookLore Sync → Manage Sessions**
+Found at: **Tools → BookLore Sync → Sync & Cache**
 
-This menu contains five actions: Sync Pending Now, View Details, Match Unmatched Books, Clear Pending, and Clear Cache.
+This menu contains five primary actions: Sync Pending Now, View Pending Sessions, Match Unmatched Books, Clear Pending, and Clear Cache.
 
 ---
 
 ## Sync Pending Now
 
 ![Sync menu with pending entries](../sync_menu.png)
-Immediately uploads all pending sessions, ratings, annotations, and bookmarks to the server.
+Immediately uploads all pending sessions, ratings, annotations, bookmarks, and progress updates to the server.
 
-The label shows the current queue sizes when items are waiting - for example **Sync Pending Now (3S, 1A, 2R, 1B)** means 3 sessions, 1 annotation, 2 ratings, and 1 bookmark are queued. Only non-zero counts are shown. The entry is greyed out when all queues are empty.
+The label shows the current queue sizes when items are waiting - for example **Sync Pending Now (3S, 1A, 2R, 1B, 4P)** means 3 sessions, 1 annotation, 2 ratings, 1 bookmark, and 4 progress updates are queued. Only non-zero counts are shown. The entry is greyed out when all queues are empty.
 
-Uploads proceed in order: book IDs are resolved first, then ratings, then annotations, then bookmarks, then sessions. Sessions are sent in a batch of up to 100 at a time. Any session whose BookLore book ID is not yet known is resolved against the server first; if resolution fails, that session is skipped and retried next time.
+Uploads proceed in order: book IDs are resolved first, then ratings, then annotations, then bookmarks, then progress updates, then sessions. Sessions are sent in a batch of up to 100 at a time. Any session whose BookLore book ID is not yet known is resolved against the server first; if resolution fails, that session is skipped and retried next time.
 
 When complete, a summary toast shows how many items were synced and how many failed.
 
@@ -27,7 +27,7 @@ When complete, a summary toast shows how many items were synced and how many fai
 
 ---
 
-## View Details
+## View Pending Sessions
 
 ![View details for sessions](../view_details.png)
 Displays a read-only summary of the current local database state. No data is modified.
@@ -35,7 +35,8 @@ Displays a read-only summary of the current local database state. No data is mod
 | Section | What it shows |
 |---------|--------------|
 | Book cache | Total books seen, how many have a resolved BookLore ID (matched), and how many do not (unmatched) |
-| Pending uploads | Count of sessions, annotations, ratings, and bookmarks waiting to be sent to the server |
+| Pending uploads | Count of sessions, annotations, ratings, bookmarks, and progress updates waiting to be sent to the server |
+| Progress history | Count of already-synced progress rows stored locally |
 
 The dialog stays open until you tap to dismiss it.
 
@@ -74,11 +75,11 @@ When a match is confirmed, the plugin immediately uploads any pending items for 
 ## Clear Pending
 
 ![Clear pending dialog](../clear_pending.png)
-Permanently discards items from the pending upload queues. The label shows the current queue sizes when items are waiting - for example **Clear Pending... (3S, 1A, 2R, 1B)** means 3 sessions, 1 annotation, 2 ratings, and 1 bookmark are queued. Only non-zero counts are shown. The entry is greyed out when all queues are empty.
+Permanently discards items from the pending upload queues. The label shows the current queue sizes when items are waiting - for example **Clear Pending... (3S, 1A, 2R, 1B, 4P)** means 3 sessions, 1 annotation, 2 ratings, 1 bookmark, and 4 progress updates are queued. Only non-zero counts are shown. The entry is greyed out when all queues are empty.
 
 Tapping the entry opens a dialog listing only the queue types that currently have items, each pre-selected. Tap a type to toggle its checkbox, then tap **Clear Selected** to delete the checked queues. Tap **Cancel** to close without making any changes.
 
-The four queue types are:
+The five queue types are:
 
 | Type | Table cleared |
 |------|--------------|
@@ -86,10 +87,29 @@ The four queue types are:
 | Annotations | `pending_annotations` |
 | Ratings | `pending_ratings` |
 | Bookmarks | `pending_bookmarks` |
+| Progress | `pending_koreader_progress` |
 
 Already-synced sessions in `historical_sessions` and book–ID mappings in `book_cache` are not affected.
 
 > **Warning:** Cleared items are permanently deleted and will not be uploaded to BookLore. There is no undo. Use this only to discard data you are sure you do not want - for example, test sessions from initial setup.
+
+---
+
+## Advanced data reset
+
+Additional reset and rematch tools are available in:
+
+**Tools → BookLore Sync → Sync & Cache → Advanced**
+
+- **Re-match All Books in Cache** resets all stored book IDs and re-resolves them from the server. Use this when the server library was rebuilt and IDs changed.
+- **Clear...** opens a selective clear dialog for synced-history tables:
+  - Historical sessions
+  - Synced annotations
+  - Synced bookmarks
+  - Rating sync history
+  - Synced progress
+
+This advanced clear dialog removes **synced history records** only. Pending queues (including pending progress) are cleared from **Clear Pending**.
 
 ---
 

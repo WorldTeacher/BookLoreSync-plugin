@@ -14,31 +14,26 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 ### Features
 
-- **Hardcover rating sync:** Ratings can now be synced to [Hardcover](https://hardcover.app) in addition to BookLore. Configure your Hardcover API token and enable the toggle in **Settings → Sync Settings → Rating Sync → Hardcover rating sync**. Falls back to title/author search if no cached Hardcover ID is found.
-- **Bookmark sync:** KOReader position bookmarks (without text selection) are now synced to BookLore via `POST /api/v1/bookmarks`. Enable in **Settings → Sync Settings → Annotations Sync → Sync bookmarks**.
-- **Shelf sync:** Pull books from a named BookLore shelf directly to your device. Configure in **Settings → Sync Settings → Shelf Sync**. New settings: `booklore_shelf_name`, `download_dir`, `auto_sync_shelf_on_resume`, `delete_removed_shelf_books`.
-- **Per-book tracking toggle:** Long-press any book in the file manager to enable or disable session tracking for that book individually without affecting the rest of your library.
-- **WiFi confirmation prompt:** New `ask_wifi_enable` setting. When enabled, a confirmation dialog is shown before the plugin attempts to enable WiFi for a sync.
-- **Book deletion sync:** Deleting a book via the file manager now sends a delete request to BookLore. Deletions are queued in `pending_deletions` and retried if offline.
-- **Annotations destination "Both":** A new notes destination option sends annotations to both in-book (EPUB CFI) and BookLore note destinations simultaneously.
-- **PDF mock CFI:** Annotations from PDF files can now be sent to the "In book" destination using a placeholder CFI, enabling BookLore to accept them without errors.
-- **File manager long-press actions:** Long-pressing a book in the file manager now offers quick-access menu items: **Sync Annotations**, **Match Book**, **Sync Rating**, and **Enable/Disable Tracking**.
-- **Manual Sync Only feedback:** Closing a book in Manual Sync Only mode shows a queued-count notification (sessions and annotations). An "invalid session" (too short, no progress) shows a brief "Session not saved: criteria not met" message when Silent Mode is off.
-- **Resume cooldown and deferred sync:** Auto-sync on resume is rate-limited to once every 5 minutes. A background sync is scheduled to fire 15 seconds after resume to give the network time to reconnect. If the network connects before the timer fires, the sync triggers immediately.
-- **Export Settings:** Plugin configuration can be exported to a JSON file for backup or sharing. Sensitive fields (server URL, username, password) are excluded. Available under **Settings → Preferences → Export Settings**.
-- **Test connection hash probe:** The Test Connection action now also probes the `by-hash` endpoint to verify full API access, not just server reachability.
+- **KOReader progress sync:** Added document-position sync with pull-on-open/resume, push-on-open/close, optional periodic page-turn updates, configurable forward/backward conflict strategies, and progress queue processing in `Sync Pending Now`.
+- **Updater file preservation:** Auto-update now preserves and restores user-specific files across installs (`hardcover.token`, `dev-build.location`).
+- **Shelf sync storage guard:** Added pre-download free-space checks with configurable minimum free space (`min_free_space_mb`, default `500 MB`).
+- **Shelf delta cache management:** Added shelf state caching for delta-based syncs plus **Force full re-sync** to clear cached shelf state and run a full pass.
+- **Advanced data tools:** Added **Re-match All Books in Cache** and selective **Clear Synced History** options (historical sessions, synced annotations, synced bookmarks, rating sync history, synced progress).
+- **Per-book tools expanded:** File manager long-press menu now includes additional diagnostic actions (**Show Stored Data**, **Extract from Sidecar**) alongside sync/match/tracking actions.
+
+### Improvements
+
+- **Settings input handling:** Minimum duration and minimum pages inputs now use streamlined validation/error handling.
+- **Session management UX:** Pending/synced summaries now include progress queue/history counts where relevant.
+- **Plugin naming alignment:** Internal/release naming was aligned to `bookloresync` to match KOReader plugin expectations.
 
 ### Bug Fixes
 
-- **Book menu:** Improved error handling in `setBookTracking` and `isBookTrackingEnabled` for books with missing cache entries.
-- **Shelf sync:** Fixed download directory detection using KOReader's `home_dir` setting.
-- **Sync popup:** Synced and skipped counts are now shown correctly for all item types, not only sessions.
-- **Hardcover:** Fixed server URL reference used when fetching Hardcover book metadata.
-- **Menu:** Hardcover menu item text corrected for the "Fetch Hardcover Book IDs" action.
+- **Updater restore reliability:** Improved error handling during restoration of preserved user files after update.
 
 ### Breaking changes
 
-- Database schema updated (migration runs automatically on first startup after update). New additions: `tracking_enabled` column in `book_cache`, `pending_deletions` table, `synced_bookmarks` table, `hardcover_id` column in `book_cache`.
+- Database schema updated to **v24** (migration runs automatically on first startup after update). Additions include progress-sync tables/history and new management helpers used by advanced clear/rematch flows.
 
 ---
 

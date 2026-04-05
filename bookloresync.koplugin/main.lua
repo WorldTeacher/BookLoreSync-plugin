@@ -7,8 +7,10 @@ Syncs reading sessions to Booklore server via REST API.
 --]]--
 
 local DataStorage = require("datastorage")
+local Device = require("device")
 local Dispatcher = require("dispatcher")
 local FileManager = require("apps/filemanager/filemanager")
+local Event = require("ui/event")
 local EventListener = require("ui/widget/eventlistener")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
@@ -27,16 +29,48 @@ local HardcoverClient = require("hardcover_api_client")
 local Updater = require("booklore_updater")
 local FileLogger = require("booklore_file_logger")
 local MetadataExtractor = require("booklore_metadata_extractor")
+local ok_branding, Branding = pcall(require, "booklore_branding")
+if not ok_branding or type(Branding) ~= "table" then
+    Branding = {
+        apply = function(text)
+            return text
+        end,
+        normalizeDisplayName = function(value)
+            return (type(value) == "string" and value ~= "") and value or "Booklore"
+        end,
+        normalizeShortcutName = function(display_name)
+            local base = Branding.normalizeDisplayName(display_name)
+            local core = base:gsub("[%s_-]*[Ss][Yy][Nn][Cc]$", "")
+            if core == "" then
+                core = "Booklore"
+            end
+            return core .. "Sync"
+        end,
+        getNames = function(display_name)
+            local resolved_display = Branding.normalizeDisplayName(display_name)
+            local resolved_shortcut = Branding.normalizeShortcutName(resolved_display)
+            return resolved_display, resolved_shortcut
+        end,
+        saveGlobalNames = function()
+        end,
+    }
+end
 local logger = require("logger")
+local random = require("random")
 
-local _ = require("gettext")
+local gettext = require("gettext")
+local _raw = gettext
+local function _(text)
+    return Branding.apply(_raw(text))
+end
 local T = require("ffi/util").template
+local ffi = require("ffi")
 local ffiutil = require("ffi/util")
 local strbuf  = require("string.buffer")
 local Trapper = require("ui/trapper")
 
 local BookloreSync = WidgetContainer:extend{
-    name = "booklore",
+    name = "bookloresync",
     is_doc_only = false,
 }
 
@@ -50,69 +84,74 @@ Redact URLs from log message for secure logging
 @param message The log message that may contain URLs
 @return string Message with URLs redacted
 --]]
+---redactUrls.
 local function redactUrls(message)
     if type(message) ~= "string" then
         message = tostring(message)
     end
-    -- Match http:// or https:// URLs and replace them with [URL REDACTED]
-    return message:gsub("https?://[^%s]+", "[URL REDACTED]")
+    -- Match http:// or https:// URLs and replace them with [REDACTED_URL]
+    return message:gsub("https?://[^%s]+", "[REDACTED_URL]")
 end
 
--- Secure logger wrappers
+-- Plugin logger wrappers - writes only to file logger
+---BookloreSync:logInfo.
 function BookloreSync:logInfo(...)
     local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    for i = 1, #args do
+        args[i] = redactUrls(args[i])
     end
-    logger.info(table.unpack(args))
     
     if self.log_to_file and self.file_logger then
         self.file_logger:write("INFO", table.unpack(args))
     end
 end
 
+---BookloreSync:logWarn.
 function BookloreSync:logWarn(...)
     local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    for i = 1, #args do
+        args[i] = redactUrls(args[i])
     end
-    logger.warn(table.unpack(args))
+    
     if self.log_to_file and self.file_logger then
         self.file_logger:write("WARN", table.unpack(args))
     end
 end
 
+---BookloreSync:logErr.
 function BookloreSync:logErr(...)
     local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    for i = 1, #args do
+        args[i] = redactUrls(args[i])
     end
-    logger.err(table.unpack(args))
+    
     if self.log_to_file and self.file_logger then
         self.file_logger:write("ERROR", table.unpack(args))
     end
 end
 
+---BookloreSync:logDbg.
 function BookloreSync:logDbg(...)
     local args = {...}
-    if self.secure_logs then
-        for i = 1, #args do
-            args[i] = redactUrls(args[i])
-        end
+    for i = 1, #args do
+        args[i] = redactUrls(args[i])
     end
-    logger.dbg(table.unpack(args))
+    
     if self.log_to_file and self.file_logger then
         self.file_logger:write("DEBUG", table.unpack(args))
+    else
+        -- Silent fallback to native logger if file logger not initialized
+        logger.dbg(table.unpack(args))
     end
 end
 
 local BATCH_UPLOAD_SIZE = 100  -- max sessions per batch upload
+local PROGRESS_API_DEBOUNCE_SECONDS = 25
+local PROGRESS_SYNC_STRATEGY = {
+    SILENT = "silent",
+    PROMPT = "prompt",
+    DISABLE = "disable",
+}
 
 --[[--
 
@@ -127,25 +166,82 @@ changes.  Writes are committed immediately to SQLite; flush() is a no-op.
 local DbSettings = {}
 DbSettings.__index = DbSettings
 
+---DbSettings:new.
 function DbSettings:new(db)
     local o = { _db = db }
     setmetatable(o, self)
     return o
 end
 
+---DbSettings:readSetting.
 function DbSettings:readSetting(key)
     return self._db:getPluginSetting(key)
 end
 
+---DbSettings:saveSetting.
 function DbSettings:saveSetting(key, value)
-    self._db:savePluginSetting(key, value)
+    local success = self._db:savePluginSetting(key, value)
+    if not success then
+        logger.err("BookloreSync: Failed to save setting:", key)
+    end
+    return success
 end
 
 -- No-op: SQLite writes are atomic and immediate, no flush needed.
+---DbSettings:flush.
 function DbSettings:flush()
 end
 
+--[[--
+Read the configured development-build download URL.
+
+The URL is sourced from a plain text file in the plugin root:
+  dev-build.location
+
+The first non-empty line is used. The value must start with http:// or https://.
+
+@return string|nil url
+@return string|nil error_message
+--]]
+---BookloreSync:getDevBuildDownloadURL.
+function BookloreSync:getDevBuildDownloadURL()
+    if not self.plugin_dir or self.plugin_dir == "" then
+        return nil, _("Plugin directory is not available")
+    end
+
+    local location_path = self.plugin_dir .. "/dev-build.location"
+    local fh = io.open(location_path, "r")
+    if not fh then
+        return nil, T(_("Missing dev-build.location file:\n%1"), location_path)
+    end
+
+    local url = nil
+    for line in fh:lines() do
+        local trimmed = line:match("^%s*(.-)%s*$")
+        if trimmed and trimmed ~= "" then
+            url = trimmed
+            break
+        end
+    end
+    fh:close()
+
+    if not url then
+        return nil, _("dev-build.location is empty")
+    end
+
+    if not url:match("^https?://") then
+        return nil, _("dev-build.location must contain an http(s) URL")
+    end
+
+    return url, nil
+end
+
+---BookloreSync:init.
 function BookloreSync:init()
+    if G_reader_settings:hasNot("device_id") then
+        G_reader_settings:saveSetting("device_id", random.uuid())
+    end
+
     -- Load plugin-specific translations into KOReader's global gettext singleton.
     -- KOReader uses a single shared gettext instance (textdomain "koreader"), so
     -- we patch in our own .mo file by calling loadMO() directly.  This must be
@@ -174,36 +270,20 @@ function BookloreSync:init()
     end
 
     -- Bootstrap phase: open the legacy LuaSettings file so that settings needed
-    -- before the database is ready (log_to_file, secure_logs) can be read.
+    -- before the database is ready (log_to_file) can be read.
     -- Once the database has been initialised and migration 10 has run, self.settings
     -- is replaced with a DbSettings wrapper so all subsequent reads and writes go
     -- directly to SQLite.  The LuaSettings file is deleted by the migration hook.
     local bootstrap_settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/booklore.lua")
     self.settings = bootstrap_settings
 
-    -- Read the two settings required before the DB is ready
-    self.log_to_file  = self.settings:readSetting("log_to_file")  or false
-    self.secure_logs  = self.settings:readSetting("secure_logs")  or false
-
-    -- Initialize file logger if enabled (needs log_to_file / secure_logs)
-    if self.log_to_file then
-        self.file_logger = FileLogger:new()
-        local logger_ok = self.file_logger:init()
-        if logger_ok then
-            self:logInfo("BookloreSync: File logging initialized")
-        else
-            self:logErr("BookloreSync: Failed to initialize file logger")
-            self.file_logger = nil
-        end
-    end
-
     -- Initialize SQLite database (runs migrations, including migration 10 which
     -- copies booklore.lua → plugin_settings and deletes the source file)
-    self.db = Database:new()
+    self.db = Database:new(self)
     local db_initialized = self.db:init()
 
     if not db_initialized then
-        self:logErr("BookloreSync: Failed to initialize database")
+        logger.err("BookloreSync: Failed to initialize database")
         UIManager:show(InfoMessage:new{
             text = _("Failed to initialize Booklore database"),
             timeout = 3,
@@ -220,12 +300,12 @@ function BookloreSync:init()
 
         if old_db_file then
             old_db_file:close()
-            self:logInfo("BookloreSync: Found old database, checking if migration needed")
+            logger.info("BookloreSync: Found old database, checking if migration needed")
 
             -- Check if database is empty (needs migration)
             local stats = self.db:getBookCacheStats()
             if stats.total == 0 then
-                self:logInfo("BookloreSync: Database is empty, migrating from LuaSettings")
+                logger.info("BookloreSync: Database is empty, migrating from LuaSettings")
 
                 local ok, err = pcall(function()
                     local local_db = LuaSettings:open(old_db_path)
@@ -245,7 +325,7 @@ function BookloreSync:init()
                 end)
 
                 if not ok then
-                    self:logErr("BookloreSync: Migration failed:", err)
+                    logger.err("BookloreSync: Migration failed:", err)
                     UIManager:show(InfoMessage:new{
                         text = _("Failed to migrate old data. Check logs."),
                         timeout = 3,
@@ -259,15 +339,64 @@ function BookloreSync:init()
     self.username   = self.settings:readSetting("username")   or ""
     self.password   = self.settings:readSetting("password")   or ""
 
+    local local_brand_display = self.settings:readSetting("booklore_brand_display_name")
+    self.brand_display_name, self.brand_shortcut_name = Branding.getNames(local_brand_display)
+    if local_brand_display and local_brand_display ~= "" then
+        Branding.saveGlobalNames(self.brand_display_name)
+    end
+
     self.is_enabled      = self.settings:readSetting("is_enabled")      or false
     self.log_to_file     = self.settings:readSetting("log_to_file")     or false
     self.silent_messages = self.settings:readSetting("silent_messages") or false
-    self.secure_logs     = self.settings:readSetting("secure_logs")     or false
 
     self.min_duration             = self.settings:readSetting("min_duration")             or 30
     self.min_pages                = self.settings:readSetting("min_pages")                or 5
     self.session_detection_mode   = self.settings:readSetting("session_detection_mode")   or "duration" -- "duration" or "pages"
     self.progress_decimal_places  = self.settings:readSetting("progress_decimal_places")  or 2
+
+    -- KOReader progress sync settings
+    self.progress_sync_enabled = self.settings:readSetting("progress_sync_enabled")
+    if self.progress_sync_enabled == nil then
+        self.progress_sync_enabled = false
+    end
+    self.progress_sync_trigger = self.settings:readSetting("progress_sync_trigger") or "book_open_close"
+    self.progress_sync_interval_pages = tonumber(self.settings:readSetting("progress_sync_interval_pages")) or 10
+    self.progress_sync_page_updates_enabled = self.settings:readSetting("progress_sync_page_updates_enabled")
+    if self.progress_sync_page_updates_enabled == nil then
+        self.progress_sync_page_updates_enabled = true
+    end
+    if self.progress_sync_interval_pages < 1 then
+        self.progress_sync_interval_pages = 1
+    end
+    if not self.progress_sync_page_updates_enabled then
+        self.progress_sync_trigger = "book_open_close"
+    else
+        self.progress_sync_trigger = "each_n_pages"
+    end
+    self.progress_sync_set_read_on_rating = self.settings:readSetting("progress_sync_set_read_on_rating")
+    if self.progress_sync_set_read_on_rating == nil then
+        -- Backward-compat migration from previous experimental option name.
+        self.progress_sync_set_read_on_rating = self.settings:readSetting("progress_sync_set_on_rating_manual")
+    end
+    if self.progress_sync_set_read_on_rating == nil then
+        self.progress_sync_set_read_on_rating = false
+    end
+    self.progress_sync_last_push_ts = 0
+    self.progress_sync_page_counter = 0
+    self.progress_sync_last_page = -1
+    self.progress_sync_last_page_turn_timestamp = 0
+    self.progress_sync_ignore_next_page_event = false
+    self.progress_sync_device_id = G_reader_settings:readSetting("device_id")
+    self.progress_pull_on_open = self.settings:readSetting("progress_pull_on_open")
+    if self.progress_pull_on_open == nil then
+        self.progress_pull_on_open = true
+    end
+    self.progress_pull_on_resume = self.settings:readSetting("progress_pull_on_resume")
+    if self.progress_pull_on_resume == nil then
+        self.progress_pull_on_resume = true
+    end
+    self.progress_sync_forward_strategy = self.settings:readSetting("progress_sync_forward_strategy") or PROGRESS_SYNC_STRATEGY.PROMPT
+    self.progress_sync_backward_strategy = self.settings:readSetting("progress_sync_backward_strategy") or PROGRESS_SYNC_STRATEGY.DISABLE
 
     self.force_push_session_on_suspend = self.settings:readSetting("force_push_session_on_suspend") or false
     self.connect_network_on_suspend    = self.settings:readSetting("connect_network_on_suspend")    or false
@@ -295,6 +424,10 @@ function BookloreSync:init()
     self.delete_sdr_on_book_delete   = self.settings:readSetting("delete_sdr_on_book_delete")
     if self.delete_sdr_on_book_delete == nil then
         self.delete_sdr_on_book_delete = false  -- Default disabled for safety
+    end
+    self.min_free_space_mb = self.settings:readSetting("min_free_space_mb")
+    if self.min_free_space_mb == nil then
+        self.min_free_space_mb = 500  -- Default: 500MB minimum free space
     end
 
     -- Resume/wake-sync state (not persisted - reset each session)
@@ -333,16 +466,28 @@ function BookloreSync:init()
     if self.db then
         self.db:cleanupExpiredTokens()
     end
-    
-    self.api = APIClient:new()
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
 
-    self.hc_api = HardcoverClient:new({ db = self.db })
+    -- Initialize file logger if enabled (needs log_to_file / secure_logs)
+    if self.log_to_file then
+        self.file_logger = FileLogger:new()
+        local logger_ok = self.file_logger:init()
+        if logger_ok then
+            self:logInfo("BookloreSync: File logging initialized")
+        else
+            self:logErr("BookloreSync: Failed to initialize file logger")
+            self.file_logger = nil
+        end
+    end
+
+    self.api = APIClient:new(self)
+    self.api:init(self.server_url, self.username, self.password, self.db)
+
+    self.hc_api = HardcoverClient:new({ db = self.db, plugin = self })
     
-    self.metadata_extractor = MetadataExtractor:new({secure_logs = self.secure_logs})
+    self.metadata_extractor = MetadataExtractor:new({plugin = self})
     self:logInfo("BookloreSync: Metadata extractor initialized")
     
-    self.updater = Updater:new()
+    self.updater = Updater:new(self)
     
     local source = debug.getinfo(1, "S").source
     local plugin_dir = source:match("@(.*)/")
@@ -357,6 +502,11 @@ function BookloreSync:init()
     self.auto_update_check = self.settings:readSetting("auto_update_check")
     if self.auto_update_check == nil then
         self.auto_update_check = true  -- Default enabled
+    end
+
+    self.use_dev_builds = self.settings:readSetting("use_dev_builds")
+    if self.use_dev_builds == nil then
+        self.use_dev_builds = false
     end
     
     self.last_update_check = self.settings:readSetting("last_update_check") or 0
@@ -377,7 +527,8 @@ function BookloreSync:init()
     -- the live instance; Lua's __index chain finds the entry on the class table.
     -- Registration must be unconditional - init() is always called from the reader
     -- context where self.ui.file_chooser is nil.
-    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions", function(file, is_file, _book_props)
+    -- Row 1: primary actions
+    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row1", function(file, is_file, _book_props)
         if not is_file then return nil end
         return {
             {
@@ -396,6 +547,34 @@ function BookloreSync:init()
                     self:fileDialogMatchBook(file)
                 end,
             },
+        }
+    end)
+    -- Row 2: data actions
+    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row2", function(file, is_file, _book_props)
+        if not is_file then return nil end
+        return {
+            {
+                text = _("Show Stored Data"),
+                callback = function()
+                    local fc = FileManager.instance and FileManager.instance.file_chooser
+                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
+                    self:fileDialogShowStoredData(file)
+                end,
+            },
+            {
+                text = _("Extract from Sidecar"),
+                callback = function()
+                    local fc = FileManager.instance and FileManager.instance.file_chooser
+                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
+                    self:fileDialogExtractFromSidecar(file)
+                end,
+            },
+        }
+    end)
+    -- Row 3: tracking toggle (full width)
+    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row3", function(file, is_file, _book_props)
+        if not is_file then return nil end
+        return {
             {
                 text_func = function()
                     if self.db and not self.db:isBookTrackingEnabled(file) then
@@ -464,8 +643,11 @@ function BookloreSync:init()
     end
 end
 
+---BookloreSync:onExit.
 function BookloreSync:onExit()
-    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions")
+    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row1")
+    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row2")
+    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row3")
 
     if self.db then
         self.db:close()
@@ -476,6 +658,7 @@ function BookloreSync:onExit()
     end
 end
 
+---BookloreSync:registerDispatcherActions.
 function BookloreSync:registerDispatcherActions()
     Dispatcher:registerAction("booklore_toggle_sync", {
         category = "none",
@@ -513,6 +696,7 @@ function BookloreSync:registerDispatcherActions()
     })
 end
 
+---BookloreSync:onSyncBookloreShelf.
 function BookloreSync:onSyncBookloreShelf()
     if not (self.booklore_username and self.booklore_username ~= "" and
             self.booklore_password and self.booklore_password ~= "") then
@@ -528,17 +712,20 @@ function BookloreSync:onSyncBookloreShelf()
     return true
 end
 
+---BookloreSync:onToggleBookloreSync.
 function BookloreSync:onToggleBookloreSync()
     self:toggleSync()
     return true
 end
 
+---BookloreSync:onSyncBooklorePending.
 function BookloreSync:onSyncBooklorePending()
     local sessions    = tonumber(self.db and self.db:getPendingSessionCount())    or 0
     local annotations = tonumber(self.db and self.db:getPendingAnnotationCount()) or 0
     local ratings     = tonumber(self.db and self.db:getPendingRatingCount())     or 0
     local bookmarks   = tonumber(self.db and self.db:getPendingBookmarkCount())   or 0
-    local pending_count = sessions + annotations + ratings + bookmarks
+    local progress    = tonumber(self.db and self.db:getPendingKoreaderProgressCount()) or 0
+    local pending_count = sessions + annotations + ratings + bookmarks + progress
     if pending_count > 0 and self.is_enabled then
         self:_requestWifi(_("sync pending items"), function()
             self:syncPendingSessions()
@@ -559,16 +746,19 @@ function BookloreSync:onSyncBooklorePending()
     return true
 end
 
+---BookloreSync:onTestBookloreConnection.
 function BookloreSync:onTestBookloreConnection()
     self:testConnection()
     return true
 end
 
+---BookloreSync:onToggleBookloreManualSyncOnly.
 function BookloreSync:onToggleBookloreManualSyncOnly()
     self:toggleManualSyncOnly()
     return true
 end
 
+---BookloreSync:toggleSync.
 function BookloreSync:toggleSync()
     self.is_enabled = not self.is_enabled
     self.settings:saveSetting("is_enabled", self.is_enabled)
@@ -579,6 +769,7 @@ function BookloreSync:toggleSync()
     })
 end
 
+---BookloreSync:toggleManualSyncOnly.
 function BookloreSync:toggleManualSyncOnly()
     self.manual_sync_only = not self.manual_sync_only
     self.settings:saveSetting("manual_sync_only", self.manual_sync_only)
@@ -601,6 +792,7 @@ function BookloreSync:toggleManualSyncOnly()
     })
 end
 
+---BookloreSync:setSyncMode.
 function BookloreSync:setSyncMode(mode)
     self.sync_mode = mode
     self.settings:saveSetting("sync_mode", mode)
@@ -626,6 +818,7 @@ function BookloreSync:setSyncMode(mode)
     self.settings:flush()
 end
 
+---BookloreSync:viewSessionDetails.
 function BookloreSync:viewSessionDetails()
     if not self.db then
         UIManager:show(InfoMessage:new{
@@ -640,6 +833,8 @@ function BookloreSync:viewSessionDetails()
     local annotations = tonumber(self.db:getPendingAnnotationCount()) or 0
     local ratings     = tonumber(self.db:getPendingRatingCount())     or 0
     local bookmarks   = tonumber(self.db:getPendingBookmarkCount())   or 0
+    local progress    = tonumber(self.db:getPendingKoreaderProgressCount()) or 0
+    local synced_progress = tonumber(self.db:getSyncedKoreaderProgressCount()) or 0
 
     local total     = tonumber(stats.total)     or 0
     local matched   = tonumber(stats.matched)   or 0
@@ -654,8 +849,12 @@ function BookloreSync:viewSessionDetails()
             "  Sessions: %4\n" ..
             "  Annotations: %5\n" ..
             "  Ratings: %6\n" ..
-            "  Bookmarks: %7"
-        ), total, matched, unmatched, sessions, annotations, ratings, bookmarks),
+            "  Bookmarks: %7\n" ..
+            "  Progress: %8\n" ..
+            "\n" ..
+            "Progress history\n" ..
+            "  Synced progress rows: %9"
+        ), total, matched, unmatched, sessions, annotations, ratings, bookmarks, progress, synced_progress),
     })
 end
 
@@ -665,6 +864,7 @@ Recursively delete a directory and all its contents.
 @param path  Absolute path to the directory to remove.
 @return true on success, false + error string on failure.
 --]]
+---BookloreSync:_deleteDirRecursive.
 function BookloreSync:_deleteDirRecursive(path)
     if not path or path == "" or path == "/" then
         return false, "invalid path"
@@ -694,6 +894,67 @@ function BookloreSync:_deleteDirRecursive(path)
 end
 
 --[[--
+Get available disk space for a given path.
+
+Uses POSIX statvfs to check filesystem statistics.
+
+@param path  Absolute path to check (file or directory)
+@return number  Available bytes on success
+@return nil, string  nil + error message on failure
+--]]
+---BookloreSync:getAvailableSpace.
+function BookloreSync:getAvailableSpace(path)
+    if not path or path == "" then
+        return nil, "Invalid path"
+    end
+
+    -- Define statvfs structure and function if not already defined
+    local ok, _ = pcall(function()
+        ffi.cdef[[
+            struct statvfs {
+                unsigned long f_bsize;    /* Filesystem block size */
+                unsigned long f_frsize;   /* Fragment size */
+                uint64_t      f_blocks;   /* Size of fs in f_frsize units */
+                uint64_t      f_bfree;    /* Number of free blocks */
+                uint64_t      f_bavail;   /* Number of free blocks for unprivileged users */
+                uint64_t      f_files;    /* Number of inodes */
+                uint64_t      f_ffree;    /* Number of free inodes */
+                uint64_t      f_favail;   /* Number of free inodes for unprivileged users */
+                unsigned long f_fsid;     /* Filesystem ID */
+                unsigned long f_flag;     /* Mount flags */
+                unsigned long f_namemax;  /* Maximum filename length */
+            };
+            int statvfs(const char *path, struct statvfs *buf);
+        ]]
+    end)
+    
+    if not ok then
+        -- statvfs already defined, this is fine
+    end
+
+    -- Create buffer for statvfs structure
+    local buf = ffi.new("struct statvfs")
+    
+    -- Call statvfs
+    local result = ffi.C.statvfs(path, buf)
+    
+    if result ~= 0 then
+        local err_msg = "statvfs failed for path: " .. path
+        self:logErr("BookloreSync: getAvailableSpace -", err_msg)
+        return nil, err_msg
+    end
+
+    -- Calculate available bytes: f_bavail * f_frsize
+    -- f_bavail is the number of blocks available to non-root users
+    -- f_frsize is the fragment size (fundamental block size)
+    local available_bytes = tonumber(buf.f_bavail) * tonumber(buf.f_frsize)
+    
+    self:logDbg("BookloreSync: getAvailableSpace - path:", path, "available:", available_bytes, "bytes")
+    
+    return available_bytes
+end
+
+--[[--
 Find all .sdr sidecar directories that exist on disk for a given document path.
 
 KOReader supports three sidecar storage locations:
@@ -707,6 +968,7 @@ they can all be removed.  The configured preferred location is listed first.
 @param doc_path  Absolute path to the document file.
 @return          Table of existing sidecar dir paths (may be empty), preferred location first.
 --]]
+---BookloreSync:getSdrPaths.
 function BookloreSync:getSdrPaths(doc_path)
     if not doc_path or doc_path == "" then return {} end
 
@@ -716,6 +978,7 @@ function BookloreSync:getSdrPaths(doc_path)
     if ok_ds and DocSettings and DocSettings.getSidecarDir then
         -- Check all three locations; force_location=nil for the first call so
         -- DocSettings reads G_reader_settings and returns the preferred path.
+        ---addIfDir.
         local function addIfDir(sdr)
             if sdr and sdr ~= "" and lfs.attributes(sdr, "mode") == "directory" then
                 for _, existing in ipairs(found) do
@@ -758,6 +1021,7 @@ forced location argument so it reads G_reader_settings directly, identical to
 how KOReader itself resolves the path.  This is correct on first open and on
 all three storage modes ("doc", "dir", "hash").
 --]]
+---BookloreSync:detectBookMetadataLocation.
 function BookloreSync:detectBookMetadataLocation()
     if not self.ui or not self.ui.document or not self.ui.document.file then
         return
@@ -832,6 +1096,7 @@ Called silently at the end of a session when rating_sync_mode == "koreader_scale
                                   onCloseDocument, where the sidecar has not yet been
                                   flushed by KOReader.
 --]]
+---BookloreSync:syncKOReaderRating.
 function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
     if not doc_path or not book_id then
         self:logWarn("BookloreSync: syncKOReaderRating called with missing arguments")
@@ -871,6 +1136,12 @@ function BookloreSync:syncKOReaderRating(doc_path, book_id, live_rating)
     local rating_scaled = math.floor(rating_1_5) * 2  -- 1-5 → 2,4,6,8,10
     -- Clamp to valid range just in case
     rating_scaled = math.max(1, math.min(10, rating_scaled))
+
+    -- Optional behavior: when a rating is present, mark book as read for
+    -- progress sync by queuing a forced 100% progress state.
+    local cached_for_hash = self.db:getBookByFilePath(doc_path)
+    local forced_hash = cached_for_hash and cached_for_hash.file_hash or nil
+    self:queueReadProgressOnRating(doc_path, forced_hash)
 
     self:logInfo("BookloreSync: Syncing KOReader rating", rating_1_5, "-> scaled:", rating_scaled, "for book_id:", book_id)
 
@@ -941,6 +1212,7 @@ progress reached >= 99%.
 @param doc_path  string  Full path to the document
 @param book_id   number  Booklore book ID
 --]]
+---BookloreSync:showRatingDialog.
 function BookloreSync:showRatingDialog(doc_path, book_id)
     if not doc_path then
         self:logWarn("BookloreSync: showRatingDialog called without doc_path")
@@ -1002,54 +1274,108 @@ function BookloreSync:showRatingDialog(doc_path, book_id)
                             self.db:storeRating(bcid, value)
                         end
 
+                        -- Always queue into pending_ratings so the rating
+                        -- survives a failed or deferred network call and is
+                        -- visible to the "Sync Pending Now" path.  The queue
+                        -- entry is removed by syncPendingRatings on success.
+                        if bcid then
+                            self.db:addPendingRating(bcid, book_id, value)
+                        end
+
+                        -- Optional behavior: submitting a rating can force
+                        -- progress to be synced as "read" (100%).
+                        local forced_hash = nil
+                        local cached_row = self.db:getBookByFilePath(doc_path)
+                        if cached_row then
+                            forced_hash = cached_row.file_hash
+                        end
+                        self:queueReadProgressOnRating(doc_path, forced_hash)
+
                         if not book_id then
-                            -- book_id not yet known - store rating locally and queue
-                            -- it in pending_ratings (with nil book_id) so it is
-                            -- uploaded once the book is matched on the next sync.
-                            if bcid then
-                                self.db:addPendingRating(bcid, nil, value)
-                            end
+                            -- book_id not yet known - queued above with nil
+                            -- book_id; uploaded once the book is matched.
                             UIManager:show(InfoMessage:new{
                                 text = T(_("Rating %1/10 saved (will sync once book is matched)"), value),
                                 timeout = 2,
                             })
-                        -- Attempt to submit immediately if credentials are available
-                        elseif self.booklore_username ~= "" and self.booklore_password ~= "" then
-                            local ok, err = self.api:submitRating(
-                                book_id, value,
-                                self.booklore_username, self.booklore_password
-                            )
-                            if ok then
-                                if bcid then
-                                    self.db:markRatingSynced(bcid)
-                                    self.db:recordRatingSyncHistory(bcid, value, "success")
-                                end
-                                UIManager:show(InfoMessage:new{
-                                    text = T(_("Rating %1/10 saved and synced"), value),
-                                    timeout = 2,
-                                })
-                            else
-                                self:logWarn("BookloreSync: Rating submit failed:", err)
-                                -- Queue for retry on the next upload trigger
-                                if bcid then
-                                    self.db:addPendingRating(bcid, book_id, value)
-                                    self.db:recordRatingSyncHistory(bcid, value, "error", err)
-                                end
-                                UIManager:show(InfoMessage:new{
-                                    text = T(_("Rating %1/10 saved (will retry on next sync)"), value),
-                                    timeout = 2,
-                                })
-                            end
-                        else
-                            -- No credentials yet - the rating is stored locally;
-                            -- queue it so it is sent once credentials are configured.
-                            if bcid then
-                                self.db:addPendingRating(bcid, book_id, value)
-                            end
+                        elseif self.manual_sync_only then
+                            -- User chose "manual only" sync trigger - do not
+                            -- attempt any network call automatically.
+                            self:logInfo("BookloreSync: manual_sync_only - rating queued, skipping auto-upload")
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Rating %1/10 saved (use 'Sync Pending Now' to upload)"), value),
+                                timeout = 2,
+                            })
+                        elseif self.booklore_username == "" or self.booklore_password == "" then
+                            -- No credentials yet - rating stays in the queue.
                             UIManager:show(InfoMessage:new{
                                 text = T(_("Rating %1/10 saved (will retry on next sync)"), value),
                                 timeout = 2,
                             })
+                        else
+                            -- book_id known, not manual-only, credentials
+                            -- present - attempt an immediate upload, honouring
+                            -- the "ask to enable WiFi" setting via _requestWifi.
+                            local snap_bcid  = bcid
+                            local snap_value = value
+                            self:_requestWifi(_("upload rating"), function()
+                                local ok, err = self.api:submitRating(
+                                    book_id, snap_value,
+                                    self.booklore_username, self.booklore_password
+                                )
+                                if ok then
+                                    if snap_bcid then
+                                        self.db:markRatingSynced(snap_bcid)
+                                        self.db:recordRatingSyncHistory(snap_bcid, snap_value, "success")
+                                        -- Remove from pending queue now that it is synced.
+                                        self.db:deletePendingRatingByBookCacheId(snap_bcid)
+                                    end
+                                    UIManager:show(InfoMessage:new{
+                                        text = T(_("Rating %1/10 saved and synced"), snap_value),
+                                        timeout = 2,
+                                    })
+                                    -- Hardcover rating sync (in addition to Booklore).
+                                    if self.hardcover_rating_sync_enabled then
+                                        if not self.hardcover_token or self.hardcover_token == "" then
+                                            self:logWarn("BookloreSync: Hardcover rating sync enabled but no token configured - skipping")
+                                        else
+                                            local hc_id
+                                            if snap_bcid then
+                                                local cache_row = self.db:getBookCacheById(snap_bcid)
+                                                hc_id = cache_row and cache_row.hardcover_id
+                                            end
+                                            if hc_id then
+                                                self:logInfo("BookloreSync: Syncing rating to Hardcover - hardcover_id:", hc_id, "rating:", snap_value)
+                                                local hc_ok, hc_err = self.hc_api:submitRating(hc_id, snap_value, self.hardcover_token)
+                                                if hc_ok then
+                                                    self:logInfo("BookloreSync: Hardcover rating synced successfully")
+                                                else
+                                                    self:logWarn("BookloreSync: Hardcover rating sync failed:", tostring(hc_err))
+                                                end
+                                            else
+                                                self:logInfo("BookloreSync: Hardcover rating sync enabled but no hardcover_id found - skipping")
+                                            end
+                                        end
+                                    end
+                                else
+                                    self:logWarn("BookloreSync: Rating submit failed:", err)
+                                    -- Rating stays in pending_ratings (queued above); record failure.
+                                    if snap_bcid then
+                                        self.db:recordRatingSyncHistory(snap_bcid, snap_value, "error", err)
+                                    end
+                                    UIManager:show(InfoMessage:new{
+                                        text = T(_("Rating %1/10 saved (will retry on next sync)"), snap_value),
+                                        timeout = 2,
+                                    })
+                                end
+                            end, function()
+                                -- User declined WiFi prompt - rating stays queued.
+                                self:logInfo("BookloreSync: WiFi request declined - rating queued for later upload")
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Rating %1/10 saved (will sync when WiFi is available)"), value),
+                                    timeout = 2,
+                                })
+                            end)
                         end
                     end,
                 },
@@ -1101,6 +1427,7 @@ Falls back to yellow (#FFC107) for unknown names.
 @param color_name string  KOReader color name (e.g. "yellow")
 @return string hex color (e.g. "#FFC107")
 --]]
+---BookloreSync:colorToHex.
 function BookloreSync:colorToHex(color_name)
     if not color_name then return "#FFC107" end
     return KOREADER_COLOR_MAP[color_name:lower()] or "#FFC107"
@@ -1113,6 +1440,7 @@ Falls back to "highlight" for unknown names.
 @param drawer string  KOReader drawer name (e.g. "lighten")
 @return string Booklore style
 --]]
+---BookloreSync:drawerToStyle.
 function BookloreSync:drawerToStyle(drawer)
     if not drawer then return "highlight" end
     return KOREADER_STYLE_MAP[drawer:lower()] or "highlight"
@@ -1142,6 +1470,7 @@ nested markup by tracking nesting depth.
 @return number|nil  1-based ordinal among ALL direct-child elements, or nil
 @return string|nil  value of the `id` attribute on that element, or nil
 --]]
+---findNthElementOrdinal.
 local function findNthElementOrdinal(html_content, element_name, nth)
     element_name = element_name:lower()
     local depth    = 0
@@ -1196,6 +1525,7 @@ among the direct children of `html_content`.
 @param nth           number  1-based
 @return string|nil  inner HTML, or nil
 --]]
+---extractNthElementContent.
 local function extractNthElementContent(html_content, element_name, nth)
     element_name = element_name:lower()
     local depth   = 0
@@ -1253,6 +1583,7 @@ is open.
 @return table|nil  Array of href strings, 1-indexed = DocFragment index.
                    Returns nil on any read/parse failure.
 --]]
+---BookloreSync:buildEpubSpineMap.
 function BookloreSync:buildEpubSpineMap(document)
     if not document or not document.getDocumentFileContent then
         return nil
@@ -1336,6 +1667,7 @@ attribute, e.g. `/4[myid]`.
                       .spine_step  number  (the /6/N part)
                     Returns nil on any parse failure.
 --]]
+---BookloreSync:xpointerToCfiPath.
 function BookloreSync:xpointerToCfiPath(xpointer, spine, document, html_cache)
     if not xpointer or not spine or not document then return nil end
     html_cache = html_cache or {}
@@ -1478,6 +1810,7 @@ This gives Booklore enough information to identify the approximate location
 @param page  number  1-based page number
 @return string       Synthetic CFI string
 --]]
+---BookloreSync:buildMockPdfCfi.
 function BookloreSync:buildMockPdfCfi(page)
     local page_num = tonumber(page) or 1
     -- Even step: page 1 → /2, page 2 → /4, etc.
@@ -1502,6 +1835,7 @@ including the last shared element step), and `start-relative` /
 @param html_cache table|nil
 @return string|nil  e.g. "epubcfi(/6/22!/4/16[myid]/1:0,/1:112)"
 --]]
+---BookloreSync:buildCfi.
 function BookloreSync:buildCfi(pos0, pos1, spine, document, html_cache)
     if not pos0 or not pos1 then return nil end
     if not spine or not document then
@@ -1518,6 +1852,7 @@ function BookloreSync:buildCfi(pos0, pos1, spine, document, html_cache)
     -- Build full intra-doc path strings (e.g. "/4/2/28[id]/1:0")
     -- steps are an array of strings like "/4", "/6[foo]", "/1", ":0"
     -- The spine prefix is "/6/<spine_step>!"
+    ---stepsToPath.
     local function stepsToPath(steps)
         local spine_prefix = "/6/" .. steps.spine_step .. "!"
         local inner = table.concat(steps)
@@ -1536,6 +1871,7 @@ function BookloreSync:buildCfi(pos0, pos1, spine, document, html_cache)
     -- shared path; from that index onward is the relative suffix for each.
 
     -- Normalise: include spine_step as the first logical step for comparison
+    ---buildStepList.
     local function buildStepList(steps)
         local list = { "/6/" .. steps.spine_step .. "!" }
         for _, s in ipairs(steps) do
@@ -1630,6 +1966,7 @@ PDF/CBZ highlights and notes → mock CFI (epubcfi(/6/<page*2>!/4/2/1:0,/1:0))
                                    so doc_settings.data["annotations"] is stale at close time.
                                    Passing self.ui.annotation.annotations directly avoids this race.
 --]]
+---BookloreSync:syncHighlightsAndNotes.
 function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_settings, live_annotations)
     if not doc_path then
         self:logWarn("BookloreSync: syncHighlightsAndNotes called without doc_path")
@@ -1775,6 +2112,7 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
             -- For EPUB: use the full xpointer-based CFI via buildCfi.
             -- For PDF: use a mock CFI anchored to the page number.
             -- For other formats: no CFI available.
+            ---resolveCfi.
             local function resolveCfi()
                 if is_epub and spine then
                     return self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
@@ -1975,6 +2313,7 @@ always in memory before use.
 
 @return string, string  username, password (may be "" if not configured)
 --]]
+---BookloreSync:_refreshCredentials.
 function BookloreSync:_refreshCredentials()
     if not self.db then return "", "" end
     local username = self.settings:readSetting("booklore_username") or ""
@@ -1984,6 +2323,7 @@ function BookloreSync:_refreshCredentials()
     return username, password
 end
 
+---BookloreSync:fileDialogSyncAnnotations.
 function BookloreSync:fileDialogSyncAnnotations(file_path)
     if not self.db then
         UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
@@ -2013,7 +2353,7 @@ function BookloreSync:fileDialogSyncAnnotations(file_path)
         return
     end
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     UIManager:show(InfoMessage:new{
         text = _("Booklore: syncing annotations…"),
@@ -2043,6 +2383,7 @@ end
 File manager long-press: Match a single book to Booklore.
 Uses the existing interactive book-cache matching flow but scoped to one book.
 --]]
+---BookloreSync:fileDialogMatchBook.
 function BookloreSync:fileDialogMatchBook(file_path)
     if not self.db then
         UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
@@ -2080,8 +2421,9 @@ end
 --[[--
 Internal: run the interactive match dialog for a single book_cache row.
 --]]
+---BookloreSync:_matchSingleBook.
 function BookloreSync:_matchSingleBook(book)
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     local search_term = book.title and book.title ~= "" and book.title
                         or book.file_path:match("([^/]+)$") or ""
@@ -2157,6 +2499,7 @@ the search runs.  Used from fileDialogMatchBook (long-press menu).
 
 @param book  table  Row from getBookByFilePath()
 --]]
+---BookloreSync:_matchSingleBookInteractive.
 function BookloreSync:_matchSingleBookInteractive(book)
     local default_term = (book.title and book.title ~= "") and book.title
                          or book.file_path:match("([^/]+)$") or ""
@@ -2277,6 +2620,7 @@ end
 --[[--
 File manager long-press: Sync the KOReader star rating for a single book.
 --]]
+---BookloreSync:fileDialogSyncRating.
 function BookloreSync:fileDialogSyncRating(file_path)
     if not self.db then
         UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
@@ -2302,7 +2646,7 @@ function BookloreSync:fileDialogSyncRating(file_path)
         return
     end
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     local mode = self.rating_sync_mode or "koreader_scaled"
 
@@ -2334,6 +2678,7 @@ then rating sync; a single combined InfoMessage reports the outcome.
 For "Both" with select_at_complete rating mode, the annotation result is shown
 first, then the rating InputDialog is opened afterwards.
 --]]
+---BookloreSync:_fileDialogBookloreSync.
 function BookloreSync:_fileDialogBookloreSync(file_path)
     if not self.db then
         UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
@@ -2390,6 +2735,7 @@ end
 --[[--
 Internal: run annotation sync and rating sync together and report a combined result.
 --]]
+---BookloreSync:_fileDialogSyncBoth.
 function BookloreSync:_fileDialogSyncBoth(file_path)
     -- ── Prerequisites ────────────────────────────────────────────────────
     local book = self.db:getBookByFilePath(file_path)
@@ -2406,7 +2752,7 @@ function BookloreSync:_fileDialogSyncBoth(file_path)
         return
     end
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     local book_cache_id = book.id
 
@@ -2482,6 +2828,7 @@ skipped by getPendingSessions until tracking is re-enabled.
 
 @param file_path string  Absolute path to the book file
 --]]
+---BookloreSync:fileDialogToggleTracking.
 function BookloreSync:fileDialogToggleTracking(file_path)
     if not self.db then
         UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised"), timeout = 2 })
@@ -2516,7 +2863,173 @@ function BookloreSync:fileDialogToggleTracking(file_path)
     end
 end
 
+--[[--
+Show stored data counts for the selected book.
+
+Displays a summary of synced and pending sessions, annotations, and bookmarks
+stored locally in the Booklore database for the given file.
+
+@param file_path string  Absolute path to the book file
+--]]
+---BookloreSync:fileDialogShowStoredData.
+function BookloreSync:fileDialogShowStoredData(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised"), timeout = 2 })
+        return
+    end
+
+    local book = self.db:getBookByFilePath(file_path)
+    if not book then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: no local record found for this book.\nOpen the book first to register it."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local book_cache_id = book.id
+
+    -- Sessions: koreader_book_id in historical_sessions == book_cache.id
+    local all_sessions = self.db:getHistoricalSessionsForBook(book_cache_id)
+    local total_sessions = #all_sessions
+    local synced_sessions = 0
+    for _, s in ipairs(all_sessions) do
+        if (tonumber(s.synced) or 0) == 1 then
+            synced_sessions = synced_sessions + 1
+        end
+    end
+    local unsynced_sessions = total_sessions - synced_sessions
+
+    -- Annotations
+    local synced_ann   = self.db:getSyncedAnnotationCountForBook(book_cache_id)
+    local pending_ann  = self.db:getPendingAnnotationCountForBook(book_cache_id)
+
+    -- Bookmarks
+    local synced_bm    = self.db:getSyncedBookmarkCountForBook(book_cache_id)
+    local pending_bm   = self.db:getPendingBookmarkCountForBook(book_cache_id)
+
+    local book_title = book.title or (file_path:match("([^/]+)$") or file_path):gsub("%.[^.]+$", "")
+    local is_matched = (book.book_id ~= nil)
+
+    local lines = {}
+    table.insert(lines, book_title)
+    table.insert(lines, string.rep("─", 40))
+    table.insert(lines, "")
+    if is_matched then
+        table.insert(lines, _("Server ID:") .. " " .. tostring(book.book_id))
+    else
+        table.insert(lines, _("Server ID:") .. " " .. _("(not matched)"))
+    end
+    table.insert(lines, "")
+    table.insert(lines, "── " .. _("Reading Sessions") .. " ──")
+    table.insert(lines, _("  Synced:  ") .. tostring(synced_sessions))
+    table.insert(lines, _("  Pending: ") .. tostring(unsynced_sessions))
+    table.insert(lines, _("  Total:   ") .. tostring(total_sessions))
+    table.insert(lines, "")
+    table.insert(lines, "── " .. _("Annotations") .. " ──")
+    table.insert(lines, _("  Synced:  ") .. tostring(synced_ann))
+    table.insert(lines, _("  Pending: ") .. tostring(pending_ann))
+    table.insert(lines, _("  Total:   ") .. tostring(synced_ann + pending_ann))
+    table.insert(lines, "")
+    table.insert(lines, "── " .. _("Bookmarks") .. " ──")
+    table.insert(lines, _("  Synced:  ") .. tostring(synced_bm))
+    table.insert(lines, _("  Pending: ") .. tostring(pending_bm))
+    table.insert(lines, _("  Total:   ") .. tostring(synced_bm + pending_bm))
+
+    local TextViewer = require("ui/widget/textviewer")
+    local Screen = require("device").screen
+    UIManager:show(TextViewer:new{
+        title = _("Stored Data"),
+        text = table.concat(lines, "\n"),
+        width = math.floor(Screen:getWidth() * 0.85),
+        height = math.floor(Screen:getHeight() * 0.7),
+    })
+end
+
+--[[--
+Extract annotations and bookmarks from the sidecar file and push them to Booklore.
+
+Reads the KOReader sidecar (.sdr) for the given book, shows detected counts, then
+(after confirmation) calls syncHighlightsAndNotes + syncBookmarks followed by the
+pending-queue flushes.
+
+For unmatched books the user is offered to match the book first before syncing.
+
+@param file_path string  Absolute path to the book file
+--]]
+---BookloreSync:fileDialogExtractFromSidecar.
+function BookloreSync:fileDialogExtractFromSidecar(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised"), timeout = 2 })
+        return
+    end
+
+    -- Read sidecar counts first (fast, no network)
+    local counts = self.metadata_extractor:getCounts(file_path)
+    local total_sidecar = (counts.highlights or 0) + (counts.notes or 0) + (counts.bookmarks or 0)
+
+    if total_sidecar == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: no annotations or bookmarks found in sidecar for this book."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local book = self.db:getBookByFilePath(file_path)
+
+    -- Book not yet in the local cache → create a stub so the user can match it
+    if not book then
+        local stem = (file_path:match("([^/\\]+)%.[^%.]+$") or file_path:match("([^/\\]+)$") or "Unknown")
+        self.db:saveBookCache(file_path, "", nil, stem, nil, nil, nil)
+        book = self.db:getBookByFilePath(file_path)
+    end
+
+    local counts_text = T(_("Highlights: %1\nNotes: %2\nBookmarks: %3"),
+        tostring(counts.highlights or 0),
+        tostring(counts.notes or 0),
+        tostring(counts.bookmarks or 0))
+
+    -- Book not matched to a Booklore server book → offer to match first
+    if not book or not book.book_id then
+        UIManager:show(ConfirmBox:new{
+            text = T(_("Sidecar data detected:\n\n%1\n\nThis book is not yet matched to Booklore.\nMatch it now to enable sync?"),
+                counts_text),
+            ok_text = _("Match Book"),
+            ok_callback = function()
+                self:fileDialogMatchBook(file_path)
+            end,
+        })
+        return
+    end
+
+    -- Book is matched → confirm then sync
+    local book_cache_id = book.id
+    local server_book_id = book.book_id
+
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Sidecar data detected:\n\n%1\n\nSync these to Booklore now?"), counts_text),
+        ok_text = _("Sync"),
+        ok_callback = function()
+            -- Sync annotations (highlights + notes)
+            self:syncHighlightsAndNotes(file_path, server_book_id, nil, nil, nil)
+            self:syncPendingAnnotations(false, book_cache_id)
+
+            -- Sync bookmarks
+            self:syncBookmarks(file_path, server_book_id, nil, nil, nil)
+            self:syncPendingBookmarks(false, book_cache_id)
+        end,
+    })
+end
+
+---BookloreSync:addToMainMenu.
 function BookloreSync:addToMainMenu(menu_items)
+    local function showSectionHelp(title, body)
+        UIManager:show(InfoMessage:new{
+            text = T(_("%1\n\n%2"), title, body),
+        })
+    end
+
     local base_menu = {}
     
     table.insert(base_menu, {
@@ -2536,205 +3049,486 @@ function BookloreSync:addToMainMenu(menu_items)
         end,
     })
     
-    table.insert(base_menu, Settings:buildAuthMenu(self))
-    
-    table.insert(base_menu, {
-        text = _("Sync Settings"),
+    local auth_menu = Settings:buildAuthMenu(self)
+    auth_menu.hold_callback = function()
+        showSectionHelp(
+            _("Connection Setup"),
+            _("Set server URL, KOReader credentials, Booklore credentials, and run connection tests.")
+        )
+    end
+    table.insert(base_menu, auth_menu)
+
+    local session_validation_menu = {
+        text = _("Reading Sessions"),
+        help_text = _("Configure how reading sessions are detected and recorded."),
         sub_item_table = {
-            -- Session Settings submenu
             {
-                text = _("Session Settings"),
-                help_text = _("Configure how reading sessions are detected and recorded."),
+                text = _("Detection Mode"),
+                help_text = _("Choose how sessions are validated: Duration-based (minimum seconds) or Pages-based (minimum pages read). Default is duration-based."),
                 sub_item_table = {
                     {
-                        text = _("Detection Mode"),
-                        help_text = _("Choose how sessions are validated: Duration-based (minimum seconds) or Pages-based (minimum pages read). Default is duration-based."),
-                        sub_item_table = {
-                            {
-                                text = _("Duration-based"),
-                                help_text = _("Sessions must last a minimum number of seconds. Good for general reading tracking."),
-                                checked_func = function()
-                                    return self.session_detection_mode == "duration"
-                                end,
-                                callback = function()
-                                    self.session_detection_mode = "duration"
-                                    self.settings:saveSetting("session_detection_mode", self.session_detection_mode)
-                                    self.settings:flush()
-                                    UIManager:show(InfoMessage:new{
-                                        text = _("Session detection set to duration-based"),
-                                        timeout = 2,
-                                    })
-                                end,
-                                keep_menu_open = true,
-                            },
-                            {
-                                text = _("Pages-based"),
-                                help_text = _("Sessions must include a minimum number of pages read. Better for avoiding accidental sessions."),
-                                checked_func = function()
-                                    return self.session_detection_mode == "pages"
-                                end,
-                                callback = function()
-                                    self.session_detection_mode = "pages"
-                                    self.settings:saveSetting("session_detection_mode", self.session_detection_mode)
-                                    self.settings:flush()
-                                    UIManager:show(InfoMessage:new{
-                                        text = _("Session detection set to pages-based"),
-                                        timeout = 2,
-                                    })
-                                end,
-                                keep_menu_open = true,
-                            },
-                        },
-                    },
-                    {
-                        text = _("Minimum Duration (seconds)"),
-                        help_text = _("Set the minimum number of seconds a reading session must last to be synced. Sessions shorter than this will be discarded. Default is 30 seconds. Only applies when using duration-based detection."),
-                        enabled_func = function()
+                        text = _("Duration-based"),
+                        help_text = _("Sessions must last a minimum number of seconds. Good for general reading tracking."),
+                        checked_func = function()
                             return self.session_detection_mode == "duration"
                         end,
-                        keep_menu_open = true,
                         callback = function()
-                            Settings:configureMinDuration(self)
+                            self.session_detection_mode = "duration"
+                            self.settings:saveSetting("session_detection_mode", self.session_detection_mode)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = _("Session detection set to duration-based"),
+                                timeout = 2,
+                            })
                         end,
+                        keep_menu_open = true,
                     },
                     {
-                        text = _("Minimum Pages Read"),
-                        help_text = _("Set the minimum number of pages that must be read in a session for it to be synced. Default is 1 page. Only applies when using pages-based detection."),
-                        enabled_func = function()
+                        text = _("Pages-based"),
+                        help_text = _("Sessions must include a minimum number of pages read. Better for avoiding accidental sessions."),
+                        checked_func = function()
                             return self.session_detection_mode == "pages"
                         end,
-                        keep_menu_open = true,
                         callback = function()
-                            Settings:configureMinPages(self)
+                            self.session_detection_mode = "pages"
+                            self.settings:saveSetting("session_detection_mode", self.session_detection_mode)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = _("Session detection set to pages-based"),
+                                timeout = 2,
+                            })
                         end,
-                    },
-                    {
-                        text = _("Progress Decimal Places"),
-                        help_text = _("Set the number of decimal places to use when reporting reading progress percentage (0-5). Higher precision may be useful for large books. Default is 2."),
                         keep_menu_open = true,
-                        callback = function()
-                            Settings:configureProgressDecimalPlaces(self)
-                        end,
                     },
                 },
             },
-
-            -- Rating submenu
-            Settings:buildRatingMenu(self),
-
-            -- Annotations submenu
-            Settings:buildAnnotationsMenu(self),
-
-            -- Bookmarks submenu
-            Settings:buildBookmarksMenu(self),
-
-            -- Sync Triggers submenu
             {
-                text = _("Sync Triggers"),
-                help_text = _("Choose when sessions are automatically synced to the server."),
-                sub_item_table = {
-                    {
-                        text = _("Automatic (sync on suspend + WiFi)"),
-                        help_text = _("Automatically sync sessions when device suspends. Enables WiFi and attempts connection before syncing."),
-                        checked_func = function()
-                            return self.sync_mode == "automatic"
-                        end,
-                        callback = function()
-                            self:setSyncMode("automatic")
-                            UIManager:show(InfoMessage:new{
-                                text = _("Sync mode set to Automatic"),
-                                timeout = 2,
-                            })
-                        end,
-                        keep_menu_open = true,
-                    },
-                    {
-                        text = _("Manual only (cache everything)"),
-                        help_text = _("Cache all sessions and prevent automatic syncing. Use 'Sync Pending Now' when ready to upload."),
-                        checked_func = function()
-                            return self.sync_mode == "manual"
-                        end,
-                        callback = function()
-                            self:setSyncMode("manual")
-                            UIManager:show(InfoMessage:new{
-                                text = _("Sync mode set to Manual only"),
-                                timeout = 2,
-                            })
-                        end,
-                        keep_menu_open = true,
-                    },
-                    {
-                        text = _("Custom"),
-                        help_text = _("Configure individual sync options manually."),
-                        checked_func = function()
-                            return self.sync_mode == "custom"
-                        end,
-                        callback = function()
-                            self:setSyncMode("custom")
-                            UIManager:show(InfoMessage:new{
-                                text = _("Sync mode set to Custom"),
-                                timeout = 2,
-                            })
-                        end,
-                        keep_menu_open = true,
-                    },
-                    {
-                        text = _("Custom Options:"),
-                        enabled_func = function()
-                            return self.sync_mode == "custom"
-                        end,
-                        enabled = false,
-                    },
-                    {
-                        text = _("  Auto-sync on suspend"),
-                        help_text = _("Automatically sync the current reading session and all pending sessions when the device suspends."),
-                        enabled_func = function()
-                            return self.sync_mode == "custom"
-                        end,
-                        checked_func = function()
-                            return self.force_push_session_on_suspend
-                        end,
-                        callback = function()
-                            self.force_push_session_on_suspend = not self.force_push_session_on_suspend
-                            self.settings:saveSetting("force_push_session_on_suspend", self.force_push_session_on_suspend)
-                            self.settings:flush()
-                            UIManager:show(InfoMessage:new{
-                                text = self.force_push_session_on_suspend and _("Auto-sync on suspend enabled") or _("Auto-sync on suspend disabled"),
-                                timeout = 2,
-                            })
-                        end,
-                    },
-                    {
-                        text = _("  Connect WiFi on suspend"),
-                        help_text = _("Automatically enable WiFi and attempt to connect when the device suspends. Waits up to 15 seconds for connection."),
-                        enabled_func = function()
-                            return self.sync_mode == "custom"
-                        end,
-                        checked_func = function()
-                            return self.connect_network_on_suspend
-                        end,
-                        callback = function()
-                            self.connect_network_on_suspend = not self.connect_network_on_suspend
-                            self.settings:saveSetting("connect_network_on_suspend", self.connect_network_on_suspend)
-                            self.settings:flush()
-                            UIManager:show(InfoMessage:new{
-                                text = self.connect_network_on_suspend and _("Connect WiFi on suspend enabled") or _("Connect WiFi on suspend disabled"),
-                                timeout = 2,
-                            })
-                        end,
-                    },
-                },
+                text = _("Minimum Duration (seconds)"),
+                help_text = _("Set the minimum number of seconds a reading session must last to be synced. Sessions shorter than this will be discarded. Default is 30 seconds. Only applies when using duration-based detection."),
+                enabled_func = function()
+                    return self.session_detection_mode == "duration"
+                end,
+                keep_menu_open = true,
+                callback = function()
+                    Settings:configureMinDuration(self)
+                end,
+            },
+            {
+                text = _("Minimum Pages Read"),
+                help_text = _("Set the minimum number of pages that must be read in a session for it to be synced. Default is 1 page. Only applies when using pages-based detection."),
+                enabled_func = function()
+                    return self.session_detection_mode == "pages"
+                end,
+                keep_menu_open = true,
+                callback = function()
+                    Settings:configureMinPages(self)
+                end,
+            },
+            {
+                text = _("Progress Decimal Places"),
+                help_text = _("Set the number of decimal places to use when reporting reading progress percentage (0-5). Higher precision may be useful for large books. Default is 2."),
+                keep_menu_open = true,
+                callback = function()
+                    Settings:configureProgressDecimalPlaces(self)
+                end,
             },
         },
+    }
+
+    local sync_mode_menu = {
+        text = _("Sync Mode"),
+        help_text = _("Choose when sessions are automatically synced to the server."),
+        sub_item_table = {
+            {
+                text = _("Automatic (sync on suspend + WiFi)"),
+                help_text = _("Automatically sync sessions when device suspends. Enables WiFi and attempts connection before syncing."),
+                checked_func = function()
+                    return self.sync_mode == "automatic"
+                end,
+                callback = function()
+                    self:setSyncMode("automatic")
+                    UIManager:show(InfoMessage:new{
+                        text = _("Sync mode set to Automatic"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("Manual only (cache everything)"),
+                help_text = _("Cache all sessions and prevent automatic syncing. Use 'Sync Pending Now' when ready to upload."),
+                checked_func = function()
+                    return self.sync_mode == "manual"
+                end,
+                callback = function()
+                    self:setSyncMode("manual")
+                    UIManager:show(InfoMessage:new{
+                        text = _("Sync mode set to Manual only"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("Custom"),
+                help_text = _("Configure individual sync options manually."),
+                checked_func = function()
+                    return self.sync_mode == "custom"
+                end,
+                callback = function()
+                    self:setSyncMode("custom")
+                    UIManager:show(InfoMessage:new{
+                        text = _("Sync mode set to Custom"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("Custom Options:"),
+                enabled_func = function()
+                    return self.sync_mode == "custom"
+                end,
+                enabled = false,
+            },
+            {
+                text = _("  Auto-sync on suspend"),
+                help_text = _("Automatically sync the current reading session and all pending sessions when the device suspends."),
+                enabled_func = function()
+                    return self.sync_mode == "custom"
+                end,
+                checked_func = function()
+                    return self.force_push_session_on_suspend
+                end,
+                callback = function()
+                    self.force_push_session_on_suspend = not self.force_push_session_on_suspend
+                    self.settings:saveSetting("force_push_session_on_suspend", self.force_push_session_on_suspend)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.force_push_session_on_suspend and _("Auto-sync on suspend enabled") or _("Auto-sync on suspend disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text = _("  Connect WiFi on suspend"),
+                help_text = _("Automatically enable WiFi and attempt to connect when the device suspends. Waits up to 15 seconds for connection."),
+                enabled_func = function()
+                    return self.sync_mode == "custom"
+                end,
+                checked_func = function()
+                    return self.connect_network_on_suspend
+                end,
+                callback = function()
+                    self.connect_network_on_suspend = not self.connect_network_on_suspend
+                    self.settings:saveSetting("connect_network_on_suspend", self.connect_network_on_suspend)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.connect_network_on_suspend and _("Connect WiFi on suspend enabled") or _("Connect WiFi on suspend disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+        },
+    }
+
+    local progress_sync_menu = {
+        text = _("Progress Sync"),
+        help_text = _("Configure KOReader document-position sync with Booklore."),
+        sub_item_table = {
+            {
+                text = _("Automatically keep documents in sync"),
+                help_text = _("Automatically keep document position in sync across devices."),
+                checked_func = function()
+                    return self.progress_sync_enabled
+                end,
+                callback = function()
+                    self.progress_sync_enabled = not self.progress_sync_enabled
+                    self.settings:saveSetting("progress_sync_enabled", self.progress_sync_enabled)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.progress_sync_enabled and _("Automatic document sync enabled") or _("Automatic document sync disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text = _("Pull progress on book open"),
+                help_text = _("When WiFi is already connected, check for remote progress when opening a book."),
+                checked_func = function()
+                    return self.progress_pull_on_open
+                end,
+                enabled_func = function()
+                    return self.progress_sync_enabled
+                end,
+                callback = function()
+                    self.progress_pull_on_open = not self.progress_pull_on_open
+                    self.settings:saveSetting("progress_pull_on_open", self.progress_pull_on_open)
+                    self.settings:flush()
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("Pull progress on resume"),
+                help_text = _("When WiFi is already connected, check for remote progress after wake/resume."),
+                checked_func = function()
+                    return self.progress_pull_on_resume
+                end,
+                enabled_func = function()
+                    return self.progress_sync_enabled
+                end,
+                callback = function()
+                    self.progress_pull_on_resume = not self.progress_pull_on_resume
+                    self.settings:saveSetting("progress_pull_on_resume", self.progress_pull_on_resume)
+                    self.settings:flush()
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("Sync behavior"),
+                help_text = _("Control how incoming progress updates are applied."),
+                enabled_func = function()
+                    return self.progress_sync_enabled
+                end,
+                sub_item_table = {
+                    {
+                        text_func = function()
+                            return T(_("Sync to a newer state (%1)"), self:getProgressStrategyName(self.progress_sync_forward_strategy))
+                        end,
+                        sub_item_table = {
+                            {
+                                text = _("Silently"),
+                                checked_func = function()
+                                    return self.progress_sync_forward_strategy == PROGRESS_SYNC_STRATEGY.SILENT
+                                end,
+                                callback = function()
+                                    self:setProgressSyncForwardStrategy(PROGRESS_SYNC_STRATEGY.SILENT)
+                                end,
+                            },
+                            {
+                                text = _("Prompt"),
+                                checked_func = function()
+                                    return self.progress_sync_forward_strategy == PROGRESS_SYNC_STRATEGY.PROMPT
+                                end,
+                                callback = function()
+                                    self:setProgressSyncForwardStrategy(PROGRESS_SYNC_STRATEGY.PROMPT)
+                                end,
+                            },
+                            {
+                                text = _("Disable"),
+                                checked_func = function()
+                                    return self.progress_sync_forward_strategy == PROGRESS_SYNC_STRATEGY.DISABLE
+                                end,
+                                callback = function()
+                                    self:setProgressSyncForwardStrategy(PROGRESS_SYNC_STRATEGY.DISABLE)
+                                end,
+                            },
+                        },
+                        keep_menu_open = true,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Sync to an older state (%1)"), self:getProgressStrategyName(self.progress_sync_backward_strategy))
+                        end,
+                        sub_item_table = {
+                            {
+                                text = _("Silently"),
+                                checked_func = function()
+                                    return self.progress_sync_backward_strategy == PROGRESS_SYNC_STRATEGY.SILENT
+                                end,
+                                callback = function()
+                                    self:setProgressSyncBackwardStrategy(PROGRESS_SYNC_STRATEGY.SILENT)
+                                end,
+                            },
+                            {
+                                text = _("Prompt"),
+                                checked_func = function()
+                                    return self.progress_sync_backward_strategy == PROGRESS_SYNC_STRATEGY.PROMPT
+                                end,
+                                callback = function()
+                                    self:setProgressSyncBackwardStrategy(PROGRESS_SYNC_STRATEGY.PROMPT)
+                                end,
+                            },
+                            {
+                                text = _("Disable"),
+                                checked_func = function()
+                                    return self.progress_sync_backward_strategy == PROGRESS_SYNC_STRATEGY.DISABLE
+                                end,
+                                callback = function()
+                                    self:setProgressSyncBackwardStrategy(PROGRESS_SYNC_STRATEGY.DISABLE)
+                                end,
+                            },
+                        },
+                        keep_menu_open = true,
+                    },
+                },
+                keep_menu_open = true,
+            },
+            {
+                text = _("Periodic page-turn updates"),
+                help_text = _("Enable or disable periodic page-turn progress updates. Book-open and book-close positions are always stored."),
+                checked_func = function()
+                    return self.progress_sync_page_updates_enabled
+                end,
+                enabled_func = function()
+                    return self.progress_sync_enabled
+                end,
+                keep_menu_open = true,
+                callback = function()
+                    self.progress_sync_page_updates_enabled = not self.progress_sync_page_updates_enabled
+                    self.progress_sync_trigger = self.progress_sync_page_updates_enabled and "each_n_pages" or "book_open_close"
+                    self.settings:saveSetting("progress_sync_page_updates_enabled", self.progress_sync_page_updates_enabled)
+                    self.settings:saveSetting("progress_sync_trigger", self.progress_sync_trigger)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.progress_sync_page_updates_enabled and _("Periodic page-turn updates enabled") or _("Periodic page-turn updates disabled"),
+                        timeout = 2,
+                    })
+                end,
+            },
+            {
+                text_func = function()
+                    return T(_("Periodically sync every # pages (%1)"), tostring(self.progress_sync_interval_pages or 1))
+                end,
+                help_text = _("How many page turns before a periodic sync update is queued. Minimum is 1 when periodic updates are enabled."),
+                enabled_func = function()
+                    return self.progress_sync_enabled and self.progress_sync_page_updates_enabled
+                end,
+                keep_menu_open = true,
+                callback = function()
+                    local SpinWidget = require("ui/widget/spinwidget")
+                    local widget = SpinWidget:new{
+                        text = _("This value determines how many page turns it takes to update book progress.\nMinimum value is 1."),
+                        value = self.progress_sync_interval_pages or 1,
+                        value_min = 1,
+                        value_max = 999,
+                        value_step = 1,
+                        value_hold_step = 10,
+                        ok_text = _("Set"),
+                        title_text = _("Number of pages before update"),
+                        default_value = 10,
+                        callback = function(spin)
+                            local n = math.floor(tonumber(spin.value) or 1)
+                            if n < 1 then n = 1 end
+                            self.progress_sync_interval_pages = n
+                            self.progress_sync_trigger = self.progress_sync_page_updates_enabled and "each_n_pages" or "book_open_close"
+                            self.settings:saveSetting("progress_sync_interval_pages", n)
+                            self.settings:saveSetting("progress_sync_trigger", self.progress_sync_trigger)
+                            self.settings:flush()
+                        end,
+                    }
+                    UIManager:show(widget)
+                end,
+            },
+            {
+                text = _("Set book to read on rating"),
+                help_text = _("When a rating is submitted, queue progress as 100% for sync, even if the real reading progress is lower."),
+                checked_func = function()
+                    return self.progress_sync_set_read_on_rating
+                end,
+                enabled_func = function()
+                    return self.progress_sync_enabled
+                end,
+                callback = function()
+                    self.progress_sync_set_read_on_rating = not self.progress_sync_set_read_on_rating
+                    self.settings:saveSetting("progress_sync_set_read_on_rating", self.progress_sync_set_read_on_rating)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.progress_sync_set_read_on_rating and _("Set book to read on rating enabled") or _("Set book to read on rating disabled"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+        },
+    }
+
+    local annotations_menu = Settings:buildAnnotationsMenu(self)
+    local bookmarks_menu = Settings:buildBookmarksMenu(self)
+    local annotations_and_bookmarks_menu = {
+        text = _("Annotations & Bookmarks"),
+        help_text = _("Configure syncing of highlights, notes, and bookmarks to Booklore."),
+        sub_item_table = {},
+    }
+    for i, item in ipairs(annotations_menu.sub_item_table or {}) do
+        table.insert(annotations_and_bookmarks_menu.sub_item_table, item)
+        if i == 1 and bookmarks_menu.sub_item_table and bookmarks_menu.sub_item_table[1] then
+            table.insert(annotations_and_bookmarks_menu.sub_item_table, bookmarks_menu.sub_item_table[1])
+        end
+    end
+    if #annotations_and_bookmarks_menu.sub_item_table == 0 and bookmarks_menu.sub_item_table and bookmarks_menu.sub_item_table[1] then
+        table.insert(annotations_and_bookmarks_menu.sub_item_table, bookmarks_menu.sub_item_table[1])
+    end
+
+    local sync_behavior_items = {}
+    for _, item in ipairs(sync_mode_menu.sub_item_table or {}) do
+        table.insert(sync_behavior_items, item)
+    end
+    table.insert(sync_behavior_items, {
+        text = _("Ask to enable WiFi"),
+        help_text = _("When enabled, the plugin will ask for your permission before turning on WiFi for syncing. On confirm, the action proceeds; on skip, syncs are deferred (queued for the next opportunity) and lookups are skipped."),
+        enabled_func = function()
+            return self.sync_mode ~= "manual"
+        end,
+        checked_func = function()
+            return self.ask_wifi_enable
+        end,
+        callback = function()
+            self.ask_wifi_enable = not self.ask_wifi_enable
+            self.settings:saveSetting("ask_wifi_enable", self.ask_wifi_enable)
+            self.settings:flush()
+            UIManager:show(InfoMessage:new{
+                text = self.ask_wifi_enable
+                    and _("Ask to enable WiFi: on")
+                    or  _("Ask to enable WiFi: off"),
+                timeout = 2,
+            })
+        end,
     })
 
     table.insert(base_menu, {
-        text = _("Shelf Sync"),
+        text = _("Sync Behavior"),
+        sub_item_table = sync_behavior_items,
+        hold_callback = function()
+            showSectionHelp(
+                _("Sync Behavior"),
+                _("Choose automatic/manual/custom sync mode and configure WiFi prompting behavior.")
+            )
+        end,
+    })
+
+    table.insert(base_menu, {
+        text = _("What to Sync"),
+        sub_item_table = {
+            session_validation_menu,
+            progress_sync_menu,
+            Settings:buildRatingMenu(self),
+            annotations_and_bookmarks_menu,
+        },
+        hold_callback = function()
+            showSectionHelp(
+                _("What to Sync"),
+                _("Configure reading session rules, progress sync, rating sync, annotations, and bookmarks.")
+            )
+        end,
+    })
+    table.insert(base_menu, {
+        text = _("Shelf Downloads"),
         sub_item_table = {
             {
                 text = _("Sync from Booklore Shelf"),
                 help_text = _("Download books from your Booklore shelf into the local download directory. Books already present are skipped."),
                 callback = function()
+                    self:onSyncBookloreShelf()
+                end,
+            },
+            {
+                text = _("Force full re-sync"),
+                help_text = _("Clear the cached shelf state and perform a full sync pass. Useful after manually deleting downloaded books so the plugin re-downloads them."),
+                callback = function()
+                    if self.db and self.shelf_id then
+                        self.db:clearShelfState(self.shelf_id)
+                    end
                     self:onSyncBookloreShelf()
                 end,
             },
@@ -2899,11 +3693,57 @@ function BookloreSync:addToMainMenu(menu_items)
                     dialog:onShowKeyboard()
                 end,
             },
+            {
+                text_func = function()
+                    return T(_("Minimum free space: %1 MB"), self.min_free_space_mb)
+                end,
+                help_text = _("Minimum free disk space (in MB) required before downloading books. Sync will stop if available space drops below this threshold. Default: 500 MB"),
+                keep_menu_open = true,
+                callback = function()
+                    local dialog
+                    dialog = InputDialog:new{
+                        title   = _("Minimum free space (MB)"),
+                        input   = tostring(self.min_free_space_mb),
+                        input_type = "number",
+                        buttons = {{
+                            {
+                                text     = _("Cancel"),
+                                callback = function() UIManager:close(dialog) end,
+                            },
+                            {
+                                text     = _("Save"),
+                                is_enter_default = true,
+                                callback = function()
+                                    local val = tonumber(dialog:getInputText())
+                                    if val and val >= 0 then
+                                        self.min_free_space_mb = val
+                                        self.settings:saveSetting("min_free_space_mb", val)
+                                        self.settings:flush()
+                                        UIManager:show(InfoMessage:new{
+                                            text = T(_("Minimum free space set to %1 MB"), val),
+                                            timeout = 2,
+                                        })
+                                    end
+                                    UIManager:close(dialog)
+                                end,
+                            },
+                        }},
+                    }
+                    UIManager:show(dialog)
+                    dialog:onShowKeyboard()
+                end,
+            },
         },
+        hold_callback = function()
+            showSectionHelp(
+                _("Shelf Downloads"),
+                _("Configure Booklore shelf download sync, storage location, file naming, and cleanup behavior.")
+            )
+        end,
     })
 
     table.insert(base_menu, {
-        text = _("Manage Sessions"),
+        text = _("Sync & Cache"),
         sub_item_table = {
             {
                 text_func = function()
@@ -2912,7 +3752,8 @@ function BookloreSync:addToMainMenu(menu_items)
                     local annotations  = tonumber(self.db:getPendingAnnotationCount())  or 0
                     local ratings      = tonumber(self.db:getPendingRatingCount())      or 0
                     local bookmarks    = tonumber(self.db:getPendingBookmarkCount())    or 0
-                    local total = sessions + annotations + ratings + bookmarks
+                    local progress     = tonumber(self.db:getPendingKoreaderProgressCount()) or 0
+                    local total = sessions + annotations + ratings + bookmarks + progress
                     if total == 0 then
                         return _("Sync Pending Now")
                     end
@@ -2921,16 +3762,18 @@ function BookloreSync:addToMainMenu(menu_items)
                     if annotations > 0 then table.insert(parts, T(_("%1 A"),  annotations)) end
                     if ratings     > 0 then table.insert(parts, T(_("%1 R"),  ratings))     end
                     if bookmarks   > 0 then table.insert(parts, T(_("%1 B"),  bookmarks))   end
+                    if progress    > 0 then table.insert(parts, T(_("%1 P"),  progress))    end
                     return T(_("Sync Pending Now (%1)"), table.concat(parts, ", "))
                 end,
-                help_text = _("Manually upload all pending items that failed to sync previously - reading sessions, annotations (highlights and notes), ratings, and bookmarks. Items are cached locally when the network is unavailable."),
+                help_text = _("Manually upload all pending items that failed to sync previously - reading sessions, annotations (highlights and notes), ratings, bookmarks, and progress. Items are cached locally when the network is unavailable."),
                 enabled_func = function()
                     if not self.db then return false end
                     local sessions     = tonumber(self.db:getPendingSessionCount())     or 0
                     local annotations  = tonumber(self.db:getPendingAnnotationCount())  or 0
                     local ratings      = tonumber(self.db:getPendingRatingCount())      or 0
                     local bookmarks    = tonumber(self.db:getPendingBookmarkCount())    or 0
-                    return (sessions + annotations + ratings + bookmarks) > 0
+                    local progress     = tonumber(self.db:getPendingKoreaderProgressCount()) or 0
+                    return (sessions + annotations + ratings + bookmarks + progress) > 0
                 end,
                 callback = function()
                     self:_requestWifi(_("sync pending items"), function()
@@ -2944,7 +3787,7 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("View Details"),
+                text = _("View Pending Sessions"),
                 help_text = _("Display statistics about the local cache: number of book hashes cached, file paths cached, and pending sessions."),
                 keep_menu_open = true,
                 callback = function()
@@ -3003,22 +3846,25 @@ function BookloreSync:addToMainMenu(menu_items)
                     local a = tonumber(self.db:getPendingAnnotationCount()) or 0
                     local r = tonumber(self.db:getPendingRatingCount())     or 0
                     local b = tonumber(self.db:getPendingBookmarkCount())   or 0
-                    if (s + a + r + b) == 0 then return _("Clear Pending...") end
+                    local p = tonumber(self.db:getPendingKoreaderProgressCount()) or 0
+                    if (s + a + r + b + p) == 0 then return _("Clear Pending...") end
                     local parts = {}
                     if s > 0 then table.insert(parts, T(_("%1 S"), s)) end
                     if a > 0 then table.insert(parts, T(_("%1 A"), a)) end
                     if r > 0 then table.insert(parts, T(_("%1 R"), r)) end
                     if b > 0 then table.insert(parts, T(_("%1 B"), b)) end
+                    if p > 0 then table.insert(parts, T(_("%1 P"), p)) end
                     return T(_("Clear Pending... (%1)"), table.concat(parts, ", "))
                 end,
-                help_text = _("Choose which types of pending items to delete from the local queue: sessions, annotations (highlights/notes), ratings, and/or bookmarks."),
+                help_text = _("Choose which types of pending items to delete from the local queue: sessions, annotations (highlights/notes), ratings, bookmarks, and/or progress."),
                 enabled_func = function()
                     if not self.db then return false end
                     local s = tonumber(self.db:getPendingSessionCount())    or 0
                     local a = tonumber(self.db:getPendingAnnotationCount()) or 0
                     local r = tonumber(self.db:getPendingRatingCount())     or 0
                     local b = tonumber(self.db:getPendingBookmarkCount())   or 0
-                    return (s + a + r + b) > 0
+                    local p = tonumber(self.db:getPendingKoreaderProgressCount()) or 0
+                    return (s + a + r + b + p) > 0
                 end,
                 callback = function()
                     self:showClearPendingDialog()
@@ -3044,70 +3890,102 @@ function BookloreSync:addToMainMenu(menu_items)
                     end
                 end,
             },
+            {
+                text = _("Advanced"),
+                help_text = _("Advanced data management options. Use with care."),
+                sub_item_table = {
+                    {
+                        text = _("Re-match All Books in Cache"),
+                        help_text = _("Run this when you re-created the library and all IDs have changed. Resets all stored book IDs and re-resolves them from the server."),
+                        callback = function()
+                            self:rematchAllBooksInCache()
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            if not self.db then return _("Clear...") end
+                            local hs = tonumber(self.db:getHistoricalSessionCount())  or 0
+                            local sa = tonumber(self.db:getSyncedAnnotationCount())   or 0
+                            local sb = tonumber(self.db:getSyncedBookmarkCount())     or 0
+                            local rh = tonumber(self.db:getRatingSyncHistoryCount())  or 0
+                            local sp = tonumber(self.db:getSyncedKoreaderProgressCount()) or 0
+                            if (hs + sa + sb + rh + sp) == 0 then return _("Clear...") end
+                            return T(_("Clear... (%1)"), hs + sa + sb + rh + sp)
+                        end,
+                        help_text = _("Clear historical sessions, synced annotation records, synced bookmark records, synced progress records, and/or rating sync history."),
+                        callback = function()
+                            self:showClearAdvancedDialog()
+                        end,
+                    },
+                },
+            },
         },
+        hold_callback = function()
+            showSectionHelp(
+                _("Sync & Cache"),
+                _("Sync pending items now, inspect queue/cache, match unmatched books, and clear local data.")
+            )
+        end,
     })
 
-    table.insert(base_menu, {
-        text = _("Import Reading History"),
-        sub_item_table = {
-            {
-                text = _("Extract Sessions from KOReader"),
-                help_text = _("One-time extraction of reading sessions from KOReader's statistics database. This reads page statistics and groups them into sessions. Run this first before matching."),
-                enabled_func = function()
-                    return self.is_enabled
-                end,
-                callback = function()
-                    self:copySessionsFromKOReader()
-                end,
-            },
-            {
-                text = _("Match Books with Booklore"),
-                help_text = _("Match extracted sessions with books on Booklore server. For each unmatched book, searches by title and lets you select the correct match. Matched sessions are automatically synced."),
-                enabled_func = function()
-                    return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
-                end,
-                callback = function()
-                    self:matchHistoricalData()
-                end,
-            },
-            {
-                text = _("View Match Statistics"),
-                help_text = _("Display statistics about historical sessions: total sessions extracted, matched sessions, unmatched sessions, and synced sessions."),
-                callback = function()
-                    self:viewMatchStatistics()
-                end,
-            },
-            {
-                text = _("Re-sync All Historical"),
-                help_text = _("Re-sync all previously synced historical sessions to the server. Sessions with invalid book IDs (404 errors) will be marked for re-matching."),
-                enabled_func = function()
-                    return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
-                end,
-                callback = function()
-                    self:resyncHistoricalData()
-                end,
-            },
-            {
-                text = _("Sync Re-matched Sessions"),
-                help_text = _("Sync sessions that were previously marked for re-matching (404 errors) and have now been matched to valid books."),
-                enabled_func = function()
-                    return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
-                end,
-                callback = function()
-                    self:syncRematchedSessions()
-                end,
-            },
-            {
-                text = _("Manual Matching"),
-                help_text = _("Manually search for and match a book to a Booklore entry."),
-                callback = function()
-                    self:manualMatching()
-                end,
-            },
+    local import_matching_items = {
+        {
+            text = _("Extract Historical Data"),
+            help_text = _("One-time extraction of reading sessions from KOReader's statistics database. This reads page statistics and groups them into sessions. Run this first before matching."),
+            enabled_func = function()
+                return self.is_enabled
+            end,
+            callback = function()
+                self:copySessionsFromKOReader()
+            end,
         },
-    })
-    
-    table.insert(base_menu, {
+        {
+            text = _("Match Historical Sessions"),
+            help_text = _("Match extracted sessions with books on Booklore server. For each unmatched book, searches by title and lets you select the correct match. Matched sessions are automatically synced."),
+            enabled_func = function()
+                return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
+            end,
+            callback = function()
+                self:matchHistoricalData()
+            end,
+        },
+        {
+            text = _("View Match Statistics"),
+            help_text = _("Display statistics about historical sessions: total sessions extracted, matched sessions, unmatched sessions, and synced sessions."),
+            callback = function()
+                self:viewMatchStatistics()
+            end,
+        },
+        {
+            text = _("Re-sync All Historical"),
+            help_text = _("Re-sync all previously synced historical sessions to the server. Sessions with invalid book IDs (404 errors) will be marked for re-matching."),
+            enabled_func = function()
+                return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
+            end,
+            callback = function()
+                self:resyncHistoricalData()
+            end,
+        },
+        {
+            text = _("Sync Re-matched Sessions"),
+            help_text = _("Sync sessions that were previously marked for re-matching (404 errors) and have now been matched to valid books."),
+            enabled_func = function()
+                return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
+            end,
+            callback = function()
+                self:syncRematchedSessions()
+            end,
+        },
+        {
+            text = _("Manual Matching"),
+            help_text = _("Manually search for and match a book to a Booklore entry."),
+            callback = function()
+                self:manualMatching()
+            end,
+        },
+    }
+
+    local hardcover_menu = {
         text = _("Hardcover"),
         help_text = _("Configure Hardcover.app integration and sync book metadata."),
         sub_item_table = {
@@ -3128,10 +4006,44 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
         },
-    })
+    }
 
-    table.insert(base_menu, Settings:buildPreferencesMenu(self))
-    
+    local import_matching_menu = {
+        text = _("Import & Matching"),
+        sub_item_table = import_matching_items,
+        hold_callback = function()
+            showSectionHelp(
+                _("Import & Matching"),
+                _("Import historical KOReader sessions and match them to Booklore books for upload.")
+            )
+        end,
+    }
+
+    local integrations_menu = {
+        text = _("Integrations"),
+        sub_item_table = {
+            hardcover_menu,
+        },
+        hold_callback = function()
+            showSectionHelp(
+                _("Integrations"),
+                _("Configure external integrations. Currently includes Hardcover integration.")
+            )
+        end,
+    }
+
+    local appearance_diagnostics_menu = Settings:buildPreferencesMenu(self)
+    appearance_diagnostics_menu.hold_callback = function()
+        showSectionHelp(
+            _("Appearance & Diagnostics"),
+            _("Configure silent mode, log-to-file diagnostics, settings export, and plugin naming.")
+        )
+    end
+
+    table.insert(base_menu, import_matching_menu)
+    table.insert(base_menu, integrations_menu)
+    table.insert(base_menu, appearance_diagnostics_menu)
+
     table.insert(base_menu, {
         text = self.update_available and _("About & Updates ⚠") or _("About & Updates"),
         sub_item_table = {
@@ -3159,6 +4071,16 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Use Dev Builds"),
+                help_text = _("Install development builds from dev-build.location in the plugin folder."),
+                checked_func = function()
+                    return self.use_dev_builds
+                end,
+                callback = function()
+                    self:toggleUseDevBuilds()
+                end,
+            },
+            {
                 text = _("Clear Update Cache"),
                 help_text = _("Force a fresh check by clearing cached release info"),
                 keep_menu_open = true,
@@ -3167,6 +4089,12 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
         },
+        hold_callback = function()
+            showSectionHelp(
+                _("About & Updates"),
+                _("View plugin version details and manage update checks, channels, and update cache.")
+            )
+        end,
     })
 
     menu_items.booklore_sync = {
@@ -3176,6 +4104,7 @@ function BookloreSync:addToMainMenu(menu_items)
     }
 end
 
+---BookloreSync:configureBookloreLogin.
 function BookloreSync:configureBookloreLogin()
     local username_input
     username_input = InputDialog:new{
@@ -3241,6 +4170,7 @@ function BookloreSync:configureBookloreLogin()
     username_input:onShowKeyboard()
 end
 
+---BookloreSync:testConnection.
 function BookloreSync:testConnection()
     UIManager:show(InfoMessage:new{
         text = _("Testing connection..."),
@@ -3260,7 +4190,7 @@ function BookloreSync:testConnection()
     local koreader_message = ""
     
     if self.username and self.username ~= "" and self.password and self.password ~= "" then
-        self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+        self.api:init(self.server_url, self.username, self.password, self.db)
         koreader_success, koreader_message = self.api:testAuth()
     else
         koreader_message = _("KOReader credentials not configured")
@@ -3339,6 +4269,7 @@ Format duration in seconds to a human-readable string
 @param duration_seconds Number of seconds
 @return string Formatted duration (e.g., "1h 5m 9s", "45m 30s", "15s")
 --]]
+---BookloreSync:formatDuration.
 function BookloreSync:formatDuration(duration_seconds)
     duration_seconds = tonumber(duration_seconds)
     
@@ -3375,6 +4306,7 @@ Validate if a session should be recorded based on detection mode
 @return boolean should_record
 @return string reason (if should_record is false)
 --]]
+---BookloreSync:validateSession.
 function BookloreSync:validateSession(duration_seconds, pages_read)
     if self.session_detection_mode == "pages" then
         if pages_read < self.min_pages then
@@ -3399,6 +4331,7 @@ Round progress to configured decimal places
 @param value Progress value to round
 @return number Rounded progress value
 --]]
+---BookloreSync:roundProgress.
 function BookloreSync:roundProgress(value)
     local multiplier = 10 ^ self.progress_decimal_places
     return math.floor(value * multiplier + 0.5) / multiplier
@@ -3413,6 +4346,7 @@ Rounding is applied later during API sync based on config.
 @return number progress (0-100) with maximum precision
 @return string location (page number or position)
 --]]
+---BookloreSync:getCurrentProgress.
 function BookloreSync:getCurrentProgress()
     if not self.ui or not self.ui.document then
         return 0, "0"
@@ -3449,11 +4383,445 @@ function BookloreSync:getCurrentProgress()
 end
 
 --[[--
+Round KOReader sync percentage ratio to 4 decimals.
+
+@param value number 0..1
+@return number rounded ratio
+--]]
+---BookloreSync:roundKoreaderSyncPercentage.
+function BookloreSync:roundKoreaderSyncPercentage(value)
+    local n = tonumber(value) or 0
+    if n < 0 then n = 0 end
+    if n > 1 then n = 1 end
+    return math.floor(n * 10000 + 0.5) / 10000
+end
+
+--[[--
+Get KOReader sync progress payload fields.
+
+Uses KOReader's own progress primitives (paging/rolling getLastProgress and
+getLastPercent) so `progress` is the canonical spline/xpointer for reflowable
+documents, while `percentage` is a 0..1 ratio rounded to four decimals.
+
+@return number percentage_ratio (0..1, rounded to 4 decimals)
+@return string progress_value (page/xpointer as expected by KOReader sync API)
+@return string location_value (legacy mirror kept for local DB compatibility)
+--]]
+---BookloreSync:getCurrentKoreaderSyncProgress.
+function BookloreSync:getCurrentKoreaderSyncProgress()
+    local fallback_pct, fallback_loc = self:getCurrentProgress() -- 0..100 + legacy location
+    local percentage_ratio = (tonumber(fallback_pct) or 0) / 100
+    local progress_value = tostring(fallback_loc or "0")
+
+    if self.ui and self.ui.document and self.ui.document.info and self.ui.document.info.has_pages then
+        if self.ui.paging then
+            if self.ui.paging.getLastPercent then
+                percentage_ratio = tonumber(self.ui.paging:getLastPercent()) or percentage_ratio
+            end
+            if self.ui.paging.getLastProgress then
+                progress_value = tostring(self.ui.paging:getLastProgress() or progress_value)
+            end
+        end
+    elseif self.ui and self.ui.rolling then
+        if self.ui.rolling.getLastPercent then
+            percentage_ratio = tonumber(self.ui.rolling:getLastPercent()) or percentage_ratio
+        end
+        if self.ui.rolling.getLastProgress then
+            progress_value = tostring(self.ui.rolling:getLastProgress() or progress_value)
+        end
+    end
+
+    percentage_ratio = self:roundKoreaderSyncPercentage(percentage_ratio)
+    return percentage_ratio, progress_value, progress_value
+end
+
+--[[--
+Get the current document hash for KOReader progress sync.
+
+Uses current_session hash when available, then DB cache, then computes hash.
+
+@return string|nil
+--]]
+---BookloreSync:getCurrentDocumentHashForProgress.
+function BookloreSync:getCurrentDocumentHashForProgress()
+    local file_path = self.ui and self.ui.document and self.ui.document.file or nil
+    if not file_path then
+        return nil
+    end
+
+    if self.current_session and self.current_session.file_hash and self.current_session.file_hash ~= "" then
+        return self.current_session.file_hash
+    end
+
+    local cached = self.db and self.db:getBookByFilePath(file_path) or nil
+    if cached and cached.file_hash and cached.file_hash ~= "" then
+        return cached.file_hash
+    end
+
+    local computed = self:calculateBookHash(file_path)
+    if computed and computed ~= "" then
+        if self.db then
+            local title = cached and cached.title or nil
+            local author = cached and cached.author or nil
+            self.db:saveBookCache(file_path, computed, cached and cached.book_id or nil, title, author, nil, nil)
+        end
+        return computed
+    end
+
+    return nil
+end
+
+--[[--
+Queue local KOReader progress into pending_koreader_progress.
+
+@return boolean queued
+--]]
+---BookloreSync:queueCurrentKoreaderProgress.
+function BookloreSync:queueCurrentKoreaderProgress()
+    if not self.progress_sync_enabled then
+        return false
+    end
+    if not self.db then
+        self:logWarn("BookloreSync: queueCurrentKoreaderProgress skipped - database not initialized")
+        return false
+    end
+
+    local file_path = self.ui and self.ui.document and self.ui.document.file or nil
+    if not file_path then
+        return false
+    end
+
+    local book_hash = self:getCurrentDocumentHashForProgress()
+    if not book_hash then
+        self:logWarn("BookloreSync: queueCurrentKoreaderProgress skipped - no book hash")
+        return false
+    end
+
+    local percentage_ratio, progress_value, location = self:getCurrentKoreaderSyncProgress()
+    local timestamp = os.time()
+
+    local book_cache_id = self.db:getBookCacheIdByFilePath(file_path)
+
+    local payload = {
+        book_cache_id = book_cache_id,
+        book_hash = book_hash,
+        progress = tostring(progress_value or "0"),
+        percentage = percentage_ratio,
+        location = tostring(location or "0"),
+        device = Device and Device.model or "KOReader",
+        device_id = self.progress_sync_device_id,
+        timestamp = timestamp,
+    }
+
+    local ok = self.db:addPendingKoreaderProgress(payload)
+    if ok then
+        self:logInfo("BookloreSync: Queued KOReader progress for hash:", book_hash, "percentage:", percentage_ratio)
+    else
+        self:logWarn("BookloreSync: Failed to queue KOReader progress for hash:", book_hash)
+    end
+    return ok
+end
+
+--[[--
+Queue a forced "read" progress state (100%) for the current book.
+
+Used by rating workflows when "set book to read on rating" is enabled.
+
+@param file_path string|nil
+@param book_hash string|nil
+@return boolean queued
+--]]
+---BookloreSync:queueReadProgressOnRating.
+function BookloreSync:queueReadProgressOnRating(file_path, book_hash)
+    if not self.progress_sync_enabled or not self.progress_sync_set_read_on_rating then
+        return false
+    end
+    if not self.db then
+        return false
+    end
+
+    local path = file_path or (self.ui and self.ui.document and self.ui.document.file) or nil
+    local hash = book_hash or self:getCurrentDocumentHashForProgress()
+    if not hash then
+        return false
+    end
+
+    local book_cache_id = path and self.db:getBookCacheIdByFilePath(path) or nil
+    local payload = {
+        book_cache_id = book_cache_id,
+        book_hash = hash,
+        progress = "100",
+        percentage = 1,
+        location = "100",
+        device = Device and Device.model or "KOReader",
+        device_id = self.progress_sync_device_id,
+        timestamp = os.time(),
+    }
+
+    local ok = self.db:addPendingKoreaderProgress(payload)
+    if ok then
+        self:logInfo("BookloreSync: Queued forced read progress (100%) on rating for hash:", hash)
+    end
+    return ok
+end
+
+---BookloreSync:getProgressStrategyName.
+function BookloreSync:getProgressStrategyName(strategy)
+    if strategy == PROGRESS_SYNC_STRATEGY.SILENT then
+        return _("Silently")
+    elseif strategy == PROGRESS_SYNC_STRATEGY.PROMPT then
+        return _("Prompt")
+    end
+    return _("Disable")
+end
+
+---BookloreSync:setProgressSyncForwardStrategy.
+function BookloreSync:setProgressSyncForwardStrategy(strategy)
+    self.progress_sync_forward_strategy = strategy
+    self.settings:saveSetting("progress_sync_forward_strategy", strategy)
+    self.settings:flush()
+end
+
+---BookloreSync:setProgressSyncBackwardStrategy.
+function BookloreSync:setProgressSyncBackwardStrategy(strategy)
+    self.progress_sync_backward_strategy = strategy
+    self.settings:saveSetting("progress_sync_backward_strategy", strategy)
+    self.settings:flush()
+end
+
+---BookloreSync:getLocalKoreaderProgressState.
+function BookloreSync:getLocalKoreaderProgressState()
+    local pct_ratio, progress_value = self:getCurrentKoreaderSyncProgress()
+    return {
+        percentage = tonumber(pct_ratio) or 0,
+        progress = tostring(progress_value or "0"),
+        timestamp = tonumber(self.progress_sync_last_page_turn_timestamp) or 0,
+    }
+end
+
+---BookloreSync:evaluateKoreaderProgressDirection.
+function BookloreSync:evaluateKoreaderProgressDirection(remote, local_state)
+    local remote_ts = tonumber(remote and remote.timestamp) or 0
+    local local_ts = tonumber(local_state and local_state.timestamp) or 0
+    local remote_pct = tonumber(remote and remote.percentage) or 0
+    local local_pct = tonumber(local_state and local_state.percentage) or 0
+    local remote_progress = tostring(remote and (remote.progress or remote.location) or "")
+    local local_progress = tostring(local_state and local_state.progress or "")
+
+    if remote_progress ~= "" and remote_progress == local_progress then
+        return "equal"
+    end
+
+    if remote_ts > 0 and local_ts > 0 then
+        if remote_ts > local_ts then return "forward" end
+        if remote_ts < local_ts then return "backward" end
+        if remote_pct > local_pct then return "forward" end
+        if remote_pct < local_pct then return "backward" end
+        return "equal"
+    end
+
+    if remote_pct > local_pct then return "forward" end
+    if remote_pct < local_pct then return "backward" end
+    return "equal"
+end
+
+---BookloreSync:shouldApplyRemoteKoreaderProgress.
+function BookloreSync:shouldApplyRemoteKoreaderProgress(remote, local_state)
+    local direction = self:evaluateKoreaderProgressDirection(remote, local_state)
+    local strategy = nil
+    if direction == "forward" then
+        strategy = self.progress_sync_forward_strategy or PROGRESS_SYNC_STRATEGY.PROMPT
+    elseif direction == "backward" then
+        strategy = self.progress_sync_backward_strategy or PROGRESS_SYNC_STRATEGY.DISABLE
+    else
+        strategy = PROGRESS_SYNC_STRATEGY.DISABLE
+    end
+    return direction, strategy
+end
+
+---BookloreSync:confirmApplyRemoteKoreaderProgress.
+function BookloreSync:confirmApplyRemoteKoreaderProgress(remote, direction, on_accept)
+    if type(on_accept) ~= "function" then
+        return false
+    end
+
+    local percent = math.floor(((tonumber(remote.percentage) or 0) * 100) + 0.5)
+    local device_name = tostring(remote.device or _("Unknown device"))
+    local prompt
+    if direction == "forward" then
+        prompt = T(_("Sync to latest location %1% from device '%2'?"), percent, device_name)
+    else
+        prompt = T(_("Sync to previous location %1% from device '%2'?"), percent, device_name)
+    end
+
+    UIManager:show(ConfirmBox:new{
+        text = prompt,
+        ok_callback = function()
+            on_accept()
+        end,
+    })
+    return true
+end
+
+---BookloreSync:fetchRemoteKoreaderProgress.
+function BookloreSync:fetchRemoteKoreaderProgress(book_hash, interactive)
+    local ok, body = self.api:getKoReaderProgress(book_hash)
+    if not ok then
+        if interactive then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Failed to pull progress: %1"), tostring(body or "unknown error")),
+                timeout = 2,
+            })
+        end
+        return false, nil
+    end
+    if not body then
+        if interactive then
+            UIManager:show(InfoMessage:new{
+                text = _("No remote progress found"),
+                timeout = 2,
+            })
+        end
+        return true, nil
+    end
+    return true, body
+end
+
+---BookloreSync:storeRemoteKoreaderSyncState.
+function BookloreSync:storeRemoteKoreaderSyncState(book_hash, remote)
+    local file_path = self.ui and self.ui.document and self.ui.document.file or nil
+    local bcid = file_path and self.db and self.db:getBookCacheIdByFilePath(file_path) or nil
+    self.db:markKoreaderProgressSynced({
+        book_cache_id = bcid,
+        book_hash = book_hash,
+        progress = tostring(remote.progress or remote.location or "0"),
+        percentage = tonumber(remote.percentage) or 0,
+        location = tostring(remote.location or remote.progress or "0"),
+        remote_device = remote.device,
+        remote_device_id = remote.device_id,
+        remote_timestamp = (tonumber(remote.timestamp) or 0) > 0 and tonumber(remote.timestamp) or nil,
+    })
+end
+
+--[[--
+Apply remote KOReader progress to current document.
+
+@param remote table response payload from /api/koreader/syncs/progress/:hash
+@return boolean applied
+--]]
+---BookloreSync:applyRemoteKoreaderProgress.
+function BookloreSync:applyRemoteKoreaderProgress(remote)
+    if type(remote) ~= "table" then return false end
+
+    local target = remote.progress or remote.location
+    if not target then
+        return false
+    end
+
+    local page_num = tonumber(target)
+    if page_num then
+        self.progress_sync_ignore_next_page_event = true
+        self.ui:handleEvent(Event:new("GotoPage", page_num))
+        self:logInfo("BookloreSync: Applied remote KOReader progress page:", page_num)
+        return true
+    end
+
+    if not (self.ui and self.ui.document and self.ui.document.info and self.ui.document.info.has_pages) then
+        self.progress_sync_ignore_next_page_event = true
+        self.ui:handleEvent(Event:new("GotoXPointer", tostring(target)))
+        self:logInfo("BookloreSync: Applied remote KOReader progress xpointer")
+        return true
+    end
+
+    return false
+end
+
+--[[--
+Pull remote KOReader progress and optionally apply if newer.
+
+@param interactive boolean
+@return boolean handled
+--]]
+---BookloreSync:pullKoreaderProgress.
+function BookloreSync:pullKoreaderProgress(interactive)
+    interactive = interactive or false
+
+    if not self.progress_sync_enabled then
+        return false
+    end
+    if not self.username or self.username == "" or not self.password or self.password == "" then
+        return false
+    end
+
+    local book_hash = self:getCurrentDocumentHashForProgress()
+    if not book_hash then
+        return false
+    end
+
+    if not NetworkMgr:isConnected() then
+        self:logInfo("BookloreSync: pullKoreaderProgress skipped - WiFi not connected")
+        return false
+    end
+
+    local ok, body = self:fetchRemoteKoreaderProgress(book_hash, interactive)
+    if not ok or not body then
+        return false
+    end
+
+    if body.device_id and self.progress_sync_device_id and body.device_id == self.progress_sync_device_id then
+        if interactive then
+            UIManager:show(InfoMessage:new{
+                text = _("Latest progress is coming from this device."),
+                timeout = 2,
+            })
+        end
+        return false
+    end
+
+    local local_state = self:getLocalKoreaderProgressState()
+    local direction, strategy = self:shouldApplyRemoteKoreaderProgress(body, local_state)
+    if direction == "equal" or strategy == PROGRESS_SYNC_STRATEGY.DISABLE then
+        if interactive then
+            UIManager:show(InfoMessage:new{
+                text = _("The progress has already been synchronized."),
+                timeout = 2,
+            })
+        end
+        return false
+    end
+
+    ---do_apply.
+    local function do_apply()
+        local applied = self:applyRemoteKoreaderProgress(body)
+        if applied then
+            self:storeRemoteKoreaderSyncState(book_hash, body)
+        end
+        return applied
+    end
+
+    if interactive then
+        do_apply()
+        return true
+    end
+
+    if strategy == PROGRESS_SYNC_STRATEGY.SILENT then
+        return do_apply()
+    end
+
+    if strategy == PROGRESS_SYNC_STRATEGY.PROMPT then
+        return self:confirmApplyRemoteKoreaderProgress(body, direction, do_apply)
+    end
+
+    return false
+end
+
+--[[--
 Get book type from file extension
 
 @param file_path Path to the book file
 @return string Book type (EPUB, PDF, etc.)
 --]]
+---BookloreSync:getBookType.
 function BookloreSync:getBookType(file_path)
     if not file_path then
         return "EPUB"
@@ -3483,6 +4851,7 @@ Uses the same algorithm as Booklore's FileFingerprint:
 @param file_path Path to the book file
 @return string MD5 hash or nil on error
 --]]
+---BookloreSync:calculateBookHash.
 function BookloreSync:calculateBookHash(file_path)
     self:logInfo("BookloreSync: Calculating MD5 hash for:", file_path)
     
@@ -3536,6 +4905,7 @@ Caches successful lookups in the database.
 @param book_hash MD5 hash of the book file
 @return number Book ID from server or nil if not found
 --]]
+---BookloreSync:getBookIdByHash.
 function BookloreSync:getBookIdByHash(book_hash)
     if not book_hash then
         self:logWarn("BookloreSync: No book hash provided to getBookIdByHash")
@@ -3608,6 +4978,7 @@ ISBN-13 is preferred; ISBN-10 is used as a fallback.
 @param file_path string Full path to the document file
 @return string|nil Raw ISBN digits (without "isbn:" prefix), or nil if not found
 --]]
+---BookloreSync:_extractIsbnFromDocSettings.
 function BookloreSync:_extractIsbnFromDocSettings(file_path)
     local doc_settings
     if self.ui and self.ui.doc_settings then
@@ -3651,6 +5022,7 @@ Start tracking a reading session
 
 Called when a document is opened
 --]]
+---BookloreSync:startSession.
 function BookloreSync:startSession()
     if not self.is_enabled then
         return
@@ -3816,6 +5188,7 @@ Called when document closes, device suspends, or returns to menu
   - silent: Don't show UI messages
   - force_queue: Always queue instead of trying to sync
 --]]
+---BookloreSync:endSession.
 function BookloreSync:endSession(options)
     options = options or {}
     local silent = options.silent or false
@@ -3859,6 +5232,7 @@ function BookloreSync:endSession(options)
     
     local progress_delta = end_progress - self.current_session.start_progress
     
+    ---formatTimestamp.
     local function formatTimestamp(unix_time)
         return os.date("!%Y-%m-%dT%H:%M:%SZ", unix_time)
     end
@@ -3909,16 +5283,98 @@ end
 --[[--
 Handler for when a document is opened and ready
 --]]
+---BookloreSync:onReaderReady.
 function BookloreSync:onReaderReady()
     self:logInfo("BookloreSync: Reader ready")
     self:startSession()
     self:detectBookMetadataLocation()
+
+    -- Reset per-document progress counters.
+    self.progress_sync_page_counter = 0
+    if self.ui and self.ui.getCurrentPage then
+        self.progress_sync_last_page = self.ui:getCurrentPage() or -1
+    else
+        self.progress_sync_last_page = -1
+    end
+    self.progress_sync_last_page_turn_timestamp = os.time()
+
+    -- Safer ordering on open: pull first, then queue local open chunk.
+    -- This reduces chances of pushing stale local position over newer remote.
+    if self.progress_sync_enabled and self.progress_pull_on_open and NetworkMgr:isConnected() then
+        self:pullKoreaderProgress(false)
+    end
+
+    -- Always persist a chunk at book open.
+    if self.progress_sync_enabled then
+        self:queueCurrentKoreaderProgress()
+    end
     return false -- Allow other plugins to process this event
+end
+
+--[[--
+Track page turns for KOReader progress sync when trigger is set to every N pages.
+--]]
+---BookloreSync:onPageUpdate.
+function BookloreSync:onPageUpdate(page)
+    if not self.is_enabled or not self.progress_sync_enabled then
+        return false
+    end
+    if page == nil then
+        return false
+    end
+
+    if self.progress_sync_ignore_next_page_event then
+        self.progress_sync_ignore_next_page_event = false
+        return false
+    end
+
+    if self.progress_sync_last_page ~= page then
+        self.progress_sync_last_page = page
+        self.progress_sync_last_page_turn_timestamp = os.time()
+        self.progress_sync_page_counter = (self.progress_sync_page_counter or 0) + 1
+    end
+
+    if not self.progress_sync_page_updates_enabled then
+        return false
+    end
+
+    local threshold = tonumber(self.progress_sync_interval_pages) or 10
+    if threshold < 1 then
+        threshold = 1
+    end
+    if threshold <= 0 then
+        return false
+    end
+    if self.progress_sync_page_counter < threshold then
+        return false
+    end
+
+    self.progress_sync_page_counter = 0
+
+    local now = os.time()
+    if now - (self.progress_sync_last_push_ts or 0) < PROGRESS_API_DEBOUNCE_SECONDS then
+        return false
+    end
+
+    local queued = self:queueCurrentKoreaderProgress()
+    if queued then
+        self.progress_sync_last_push_ts = now
+        if not self.manual_sync_only then
+            self:_requestWifi(_("sync reading progress"), function()
+                self:syncPendingSessions(true)
+            end, function()
+                self:logInfo("BookloreSync: WiFi request declined on page-update progress sync")
+            end)
+        end
+    end
+
+    return false
 end
 
 --[[--
 Handler for when a document is closed
 --]]
+---BookloreSync:onCloseDocument.
 function BookloreSync:onCloseDocument()
     if not self.is_enabled then
         return false
@@ -4138,6 +5594,11 @@ function BookloreSync:onCloseDocument()
     -- (see syncPendingSessions for Phase 0 book_id pre-resolution).
     -- If book_id is still unknown, everything stays in the pending queues and
     -- will be picked up on the next online resume or manual sync.
+    local progress_queued_now = false
+    if self.progress_sync_enabled then
+        progress_queued_now = self:queueCurrentKoreaderProgress()
+    end
+
     if not self.manual_sync_only then
         if pre_book_id then
             self:logInfo("BookloreSync: book_id known - triggering post-close sync")
@@ -4155,6 +5616,9 @@ function BookloreSync:onCloseDocument()
                     parts[#parts + 1] = _("S: 1 queued")
                     if ann_queued_now > 0 or ann_synced_now > 0 then
                         parts[#parts + 1] = T(_("A: %1 queued"), ann_queued_now + ann_synced_now)
+                    end
+                    if progress_queued_now then
+                        parts[#parts + 1] = _("P: 1 queued")
                     end
                     parts[#parts + 1] = _("Will sync when WiFi is available")
                     UIManager:show(InfoMessage:new{
@@ -4175,6 +5639,9 @@ function BookloreSync:onCloseDocument()
                 if pre_live_rating and self.rating_sync_enabled then
                     parts[#parts + 1] = _("R: 1 cached")
                 end
+                if progress_queued_now then
+                    parts[#parts + 1] = _("P: 1 cached")
+                end
                 parts[#parts + 1] = _("Will sync automatically when matched")
                 UIManager:show(InfoMessage:new{
                     text = table.concat(parts, "\n"),
@@ -4189,6 +5656,9 @@ function BookloreSync:onCloseDocument()
         parts[#parts + 1] = _("S: 1 queued")
         if ann_queued_now > 0 then
             parts[#parts + 1] = T(_("A: %1 queued"), ann_queued_now)
+        end
+        if progress_queued_now then
+            parts[#parts + 1] = _("P: 1 queued")
         end
         parts[#parts + 1] = _("Use 'Sync Pending Now' to upload")
         UIManager:show(InfoMessage:new{
@@ -4208,7 +5678,9 @@ Used when "Connect network on suspend" is enabled.
 
 @return boolean true if connected, false otherwise
 --]]
+---BookloreSync:connectNetwork.
 function BookloreSync:connectNetwork()
+    ---isNetworkConnected.
     local function isNetworkConnected()
         if not NetworkMgr or type(NetworkMgr.isConnected) ~= "function" then
             return false
@@ -4318,12 +5790,14 @@ plugin wants WiFi (e.g. "sync sessions", "upload annotation").
 @param on_confirm Callback invoked when WiFi is (or becomes) available.
 @param on_deny    Callback invoked when the user declines (may be nil).
 --]]--
+---BookloreSync:_requestWifi.
 function BookloreSync:_requestWifi(context, on_confirm, on_deny)
     if type(on_confirm) ~= "function" then
         on_confirm = function() end
     end
     on_deny = on_deny or function() end
 
+    ---safeInvoke.
     local function safeInvoke(cb, label)
         local ok, err = pcall(cb)
         if not ok then
@@ -4400,6 +5874,7 @@ end
 --[[--
 Handler for when the device is about to suspend
 --]]
+---BookloreSync:onSuspend.
 function BookloreSync:onSuspend()
     if not self.is_enabled then
         return false
@@ -4508,6 +5983,7 @@ end
 --[[--
 Handler for when the device resumes from suspend
 --]]
+---BookloreSync:onResume.
 function BookloreSync:onResume()
     if not self.is_enabled then
         return false
@@ -4531,6 +6007,12 @@ function BookloreSync:onResume()
             -- user is prompted before we try to connect.  On deny the sync is
             -- silently skipped (data remains queued for the next opportunity).
             self:_requestWifi(_("sync pending sessions"), function()
+                -- Safer ordering on resume: pull first, then push pending.
+                -- Avoids uploading stale local progress before reading remote.
+                if self.progress_sync_enabled and self.progress_pull_on_resume and NetworkMgr:isConnected() then
+                    self:pullKoreaderProgress(false)
+                end
+
                 self:syncPendingSessions(true)
 
                 -- Flag a deferred wake-sync so the shelf can be updated once
@@ -4567,6 +6049,7 @@ The delay avoids colliding with KOReader's own post-wake network
 activity (DNS, time sync, etc.).  A module-level flag prevents
 duplicate timers from stacking up.
 --]]
+---BookloreSync:_scheduleWakeSync.
 function BookloreSync:_scheduleWakeSync()
     if not self.needs_wake_sync then return end
     if self.wake_sync_scheduled then
@@ -4603,6 +6086,7 @@ Handler for when the network becomes available.
 If a wake-triggered sync was deferred because WiFi wasn't ready at
 resume time, kick it off now that we're connected.
 --]]
+---BookloreSync:onNetworkConnected.
 function BookloreSync:onNetworkConnected()
     if not self.is_enabled then return false end
     if not self.needs_wake_sync then return false end
@@ -4630,6 +6114,7 @@ For PDF files a mock CFI anchored to the page number is used.
 @param live_bookmarks   table|nil    Raw bookmark array from ReaderBookmark.bookmarks
 @return integer synced_count, integer queued_count, integer failed_count
 --]]
+---BookloreSync:syncBookmarks.
 function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, live_bookmarks)
     if not doc_path then
         self:logWarn("BookloreSync: syncBookmarks called without doc_path")
@@ -4810,6 +6295,7 @@ Retry all pending bookmarks from the pending_bookmarks queue.
 @param book_cache_id  integer|nil If set, only process rows for this book_cache_id
 @return integer synced_count, integer failed_count
 --]]
+---BookloreSync:syncPendingBookmarks.
 function BookloreSync:syncPendingBookmarks(silent, book_cache_id)
     silent = silent or false
     local pending = self.db:getPendingBookmarks()
@@ -4904,6 +6390,7 @@ don't litter the root of the user's home.
 
 @return string  Absolute path (directory may not yet exist)
 --]]
+---BookloreSync:_detectDefaultDownloadDir.
 function BookloreSync:_detectDefaultDownloadDir()
     local lfs = require("libs/libkoreader-lfs")
 
@@ -4949,6 +6436,7 @@ whose BookID is no longer on the shelf are deleted.
 @param silent boolean  Suppress UI messages (default: auto from context)
 @param on_complete function|nil  Optional callback(success, message)
 --]]
+---BookloreSync:syncFromBookloreShelf.
 function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     if silent == nil then silent = (self.ui and self.ui.document and true or false) end
 
@@ -5001,14 +6489,17 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     -- Database:init(db_name) always prepends DataStorage:getSettingsDir() + "/",
     -- so pass the bare filename rather than the already-absolute db_path.
     local db_name         = self.db.db_path:match("([^/]+)$") or "booklore-sync.sqlite"
-    local secure_logs     = self.secure_logs
     local download_dir    = self.download_dir
     local delete_removed  = self.delete_removed_shelf_books
     local use_original_filename = self.shelf_use_original_filename
     local delete_sdr      = self.delete_sdr_on_book_delete
+    -- Logging config: captured so subprocesses can write to the same log file.
+    local sub_log_to_file = self.log_to_file and self.file_logger ~= nil
+    local sub_log_dir     = sub_log_to_file and self.file_logger.log_dir or nil
 
     -- Helper: inline hash calculation for subprocess use.
     -- Mirrors BookloreSync:calculateBookHash but with no self dependency.
+    ---calcHash.
     local function calcHash(file_path)
         local file = io.open(file_path, "rb")
         if not file then return nil end
@@ -5031,6 +6522,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 
     -- Helper: generate filename - pure Lua, no self, same logic as _generateFilename.
     -- Precondition: book.extension must already be set (non-nil, non-empty).
+    ---genFilename.
     local function genFilename(book)
         local extension = book.extension:lower()
         local ext_suffix = "." .. extension
@@ -5078,6 +6570,41 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
         return "BookID_" .. tostring(book.id) .. ext_suffix
     end
 
+    -- Build a lightweight plugin stub for use inside subprocesses.
+    -- Subprocesses are forked copies of the Lua VM - they cannot use the parent's
+    -- self.file_logger (different fd, different state), but they CAN open the same
+    -- log file in append mode and write to it directly.  The log directory already
+    -- exists (created by the parent's FileLogger:init), so no setup is needed.
+    -- The filename pattern matches FileLogger:getLogFilePath() exactly so that
+    -- subprocess entries land in the same rotating file as parent entries.
+    -- Method signatures use (_, ...) because Database/API call these via colon
+    -- syntax (self.plugin:logInfo(...)), which passes self as the first argument.
+    ---makeSubprocessPlugin.
+    local function makeSubprocessPlugin()
+        if not sub_log_to_file or not sub_log_dir then
+            local noop = function() end
+            return { logInfo = noop, logWarn = noop, logErr = noop, logDbg = noop }
+        end
+        local log_path = sub_log_dir .. "/" .. os.date("booklore-%Y-%m-%d.log")
+        local log_file = io.open(log_path, "a")
+        ---write.
+        local function write(level, ...)
+            if not log_file then return end
+            local args = {...}
+            local parts = {}
+            for i = 1, #args do parts[i] = tostring(args[i]) end
+            log_file:write(string.format("[%s] [%s] %s\n",
+                os.date("%Y-%m-%d %H:%M:%S"), level, table.concat(parts, " ")))
+            log_file:flush()
+        end
+        return {
+            logInfo = function(_, ...) write("INFO",  ...) end,
+            logWarn = function(_, ...) write("WARN",  ...) end,
+            logErr  = function(_, ...) write("ERROR", ...) end,
+            logDbg  = function(_, ...) write("DEBUG", ...) end,
+        }
+    end
+
     -- Trapper:wrap() hands control to a coroutine on the UI thread.
      -- Trapper:wrap() provides the coroutine context needed for coroutine.yield().
      -- We do NOT use Trapper's TrapWidget machinery for cancellation - instead we
@@ -5088,6 +6615,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
         -- the sync except the explicit Cancel button in status_dialog.
         -- Returns completed (bool), result (table).
         local _coroutine = coroutine.running()
+        ---runSubprocess.
         local function runSubprocess(fn)
             local pid, read_fd = ffiutil.runInSubProcess(function(_, write_fd)
                 local results = table.pack(fn())
@@ -5114,6 +6642,7 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                         local ok, t = pcall(strbuf.decode, str)
                         if ok and t then result = table.unpack(t, 1, t.n) end
                         if not done then
+                            ---collect.
                             local function collect()
                                 if not ffiutil.isSubProcessDone(pid) then
                                     UIManager:scheduleIn(1, collect)
@@ -5154,10 +6683,11 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             -- Child process: no UIManager calls allowed here.
             local ChildDB  = require("booklore_database")
             local ChildAPI = require("booklore_api_client")
-            local child_db = ChildDB:new()
+            local child_plugin = makeSubprocessPlugin()
+            local child_db = ChildDB:new(child_plugin)
             child_db:init(db_name)
-            local child_api = ChildAPI:new()
-            child_api:init(server_url, username, password, child_db, secure_logs)
+            local child_api = ChildAPI:new(child_plugin)
+            child_api:init(server_url, username, password, child_db)
 
             local shelf_ok, shelf_id = child_api:getOrCreateShelf(shelf_name, username, password)
             if not shelf_ok then
@@ -5166,12 +6696,16 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             end
 
             local books_ok, books = child_api:getBooksInShelf(shelf_id, username, password)
-            child_db:close()
             if not books_ok then
+                child_db:close()
                 return { success = false, error = tostring(books or "Failed to retrieve books from shelf") }
             end
 
-            return { success = true, shelf_id = shelf_id, books = books or {} }
+            -- Read the cached shelf state so the parent can compute the delta.
+            local cached_state = child_db:getShelfState(shelf_id)
+            child_db:close()
+
+            return { success = true, shelf_id = shelf_id, books = books or {}, cached_state = cached_state }
         end)
 
         -- completed=false means subprocess fork failed
@@ -5223,6 +6757,9 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             UIManager:close(status_dialog)
             self.sync_in_progress = false
             local msg = _("Shelf is empty - no books to sync")
+            -- Shelf is now confirmed empty - save that state so the next sync
+            -- also exits fast (no books to add; everything already removed).
+            self.db:saveShelfState(new_shelf_id, "[]")
             if not silent and not self.silent_messages then
                 UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
             end
@@ -5230,18 +6767,71 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             return
         end
 
-        -- ── Phase 2: per-book download loop ────────────────────────────────
-        local total        = #books
+        -- ── Delta computation: diff current shelf against cached state ──────
+        -- Build a lookup of the previously known shelf contents (by book ID).
+        -- An absent cache means this is the first sync: treat every book as new.
+        local prev_books = {}  -- book_id (number) → book object from last sync
+        local cached_state = fetch_result.cached_state
+        if cached_state and type(cached_state.books_json) == "string" then
+            local ok_dec, decoded = pcall(json.decode, cached_state.books_json)
+            if ok_dec and type(decoded) == "table" then
+                for _, b in ipairs(decoded) do
+                    local bid = tonumber(b.id)
+                    if bid then prev_books[bid] = b end
+                end
+                self:logInfo("BookloreSync: delta - previous shelf state has", #decoded, "books, synced_at:", cached_state.synced_at)
+            else
+                self:logWarn("BookloreSync: delta - could not decode cached shelf JSON, forcing full sync")
+            end
+        else
+            self:logInfo("BookloreSync: delta - no cached shelf state, performing full sync")
+        end
+
+        local curr_books = {}  -- book_id (number) → book object from current API response
+        for _, b in ipairs(books) do
+            local bid = tonumber(b.id)
+            if bid then curr_books[bid] = b end
+        end
+
+        local books_to_download = {}   -- new additions: in current but not in previous
+        local books_to_delete   = {}   -- removals: in previous but not in current (IDs only)
+
+        for bid, b in pairs(curr_books) do
+            if not prev_books[bid] then
+                table.insert(books_to_download, b)
+            end
+        end
+        for bid in pairs(prev_books) do
+            if not curr_books[bid] then
+                table.insert(books_to_delete, bid)
+            end
+        end
+
+        local first_sync = (next(prev_books) == nil)  -- no cached state at all
+        local total_new  = #books_to_download
+        local total_del  = #books_to_delete
+
+        self:logInfo(string.format(
+            "BookloreSync: delta - total=%d new=%d removed=%d first_sync=%s",
+            #books, total_new, total_del, tostring(first_sync)
+        ))
+
+        -- ── Phase 2: per-book download loop (only new additions) ───────────
         local downloaded   = 0
         local skipped      = 0
         local errors       = 0
         local new_books    = {}   -- accumulate DB writes for Phase 3
-        local shelf_book_ids = {}
+        local space_error_info = nil  -- Track space error details for final notification
 
-        -- Update dialog title now that we know the total book count.
-        status_dialog:setTitle(T(_("Syncing shelf: %1 books"), total))
+        -- Update dialog title to show what we actually need to do.
+        if total_new == 0 and total_del == 0 then
+            status_dialog:setTitle(_("Shelf up to date - nothing to do"))
+        else
+            status_dialog:setTitle(T(_("Syncing shelf: %1 new, %2 removed"), total_new, total_del))
+        end
 
         -- Helper: flush accumulated DB writes and report cancellation.
+        ---cancelSync.
         local function cancelSync(books_done)
             self:logInfo("BookloreSync: sync cancelled by user after", books_done, "books")
             self.sync_in_progress = false
@@ -5257,18 +6847,17 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             end
             if not silent and not self.silent_messages then
                 UIManager:show(InfoMessage:new{
-                    text = T(_("Sync cancelled after %1 of %2 books"), books_done, total),
+                    text = T(_("Sync cancelled after %1 of %2 books"), books_done, total_new),
                     timeout = 3,
                 })
             end
+            -- Do NOT save shelf state: sync is incomplete.
             if on_complete then on_complete(false, _("Sync cancelled")) end
         end
 
-        for i, book in ipairs(books) do
+        for i, book in ipairs(books_to_download) do
             local book_id = tonumber(book.id)
             if not book_id then goto book_continue end
-
-            shelf_book_ids[book_id] = true
 
             if not book.extension or book.extension == "" then
                 self:logWarn("BookloreSync: skipping book", book_id,
@@ -5281,25 +6870,19 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             local filepath = download_dir .. "/" .. filename
 
             -- ── Migration: rename old-scheme files to the new ID-tagged name ───
-            -- Before checking whether the target file exists, look for any file
-            -- that was downloaded under an older naming scheme (no "_id" suffix).
-            -- If found, rename it in place so we don't re-download unnecessarily.
             if lfs.attributes(filepath, "mode") ~= "file" then
                 local extension = book.extension:lower()
                 local ext_suffix = "." .. extension
                 local id_tag     = "_" .. tostring(book_id)
-                -- Candidate 1: sanitized title without id tag
                 local old_safe_title = book.title and book.title
                     :gsub('[/\\:*?"<>|]', "")
                     :gsub("%s+", " ")
                     :gsub("^%s+", "")
                     :gsub("%s+$", "") or ""
-                -- Apply the same 150-char limit the old scheme used (no id_tag, just ext_suffix)
                 local old_max_stem = 150 - #ext_suffix
                 if #old_safe_title > old_max_stem then
                     old_safe_title = old_safe_title:sub(1, old_max_stem):gsub("%s+$", "")
                 end
-                -- Candidate 2: sanitized original_filename stem without id tag
                 local orig_stem = (book.original_filename or ""):match("^(.+)%.[^.]+$")
                                or book.original_filename or ""
                 local old_safe_orig = orig_stem
@@ -5317,9 +6900,6 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                 if old_safe_orig ~= "" and old_safe_orig ~= old_safe_title then
                     table.insert(candidates, download_dir .. "/" .. old_safe_orig .. ext_suffix)
                 end
-                -- Candidate 3: BookID_ fallback from old scheme (no change needed if
-                -- it already matches the current fallback, but try just in case title
-                -- was added later to a book that previously had none)
                 table.insert(candidates, download_dir .. "/BookID_" .. tostring(book_id) .. ext_suffix)
                 for _, old_path in ipairs(candidates) do
                     if old_path ~= filepath and lfs.attributes(old_path, "mode") == "file" then
@@ -5339,11 +6919,47 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 
             local already_exists = lfs.attributes(filepath, "mode") == "file"
 
+            -- ── Check disk space before downloading ─────────────────────────────
+            if not already_exists then
+                local file_size, size_err = self.api:getBookFileSize(book_id, self.username, self.password)
+                if not file_size then
+                    self:logWarn("BookloreSync: could not get file size for book", book_id, ":", size_err or "unknown error")
+                else
+                    local available_bytes, space_err = self:getAvailableSpace(download_dir)
+                    if not available_bytes then
+                        self:logErr("BookloreSync: could not check available space:", space_err or "unknown error")
+                    else
+                        local min_free_bytes = self.min_free_space_mb * 1024 * 1024
+                        local required_bytes = file_size + min_free_bytes
+
+                        if available_bytes < required_bytes then
+                            local available_mb = math.floor(available_bytes / (1024 * 1024))
+                            local file_size_mb = math.floor(file_size / (1024 * 1024) * 100) / 100
+                            local required_mb = math.floor(required_bytes / (1024 * 1024))
+
+                            space_error_info = {
+                                book_title = book.title or "Unknown",
+                                available_mb = available_mb,
+                                file_size_mb = file_size_mb,
+                                min_free_mb = self.min_free_space_mb,
+                                required_mb = required_mb,
+                                books_downloaded = downloaded,
+                                books_total = total_new,
+                            }
+
+                            self:logWarn("BookloreSync: insufficient disk space for book", book_id,
+                                "- available:", available_mb, "MB, required:", required_mb, "MB")
+                            break
+                        end
+                    end
+                end
+            end
+
             -- Update the dialog title to show current book progress.
             if already_exists then
-                status_dialog:setTitle(T(_("Skipping: %1 (%2/%3)"), book.title or "Unknown", i, total))
+                status_dialog:setTitle(T(_("Skipping: %1 (%2/%3)"), book.title or "Unknown", i, total_new))
             else
-                status_dialog:setTitle(T(_("Downloading: %1 (%2/%3)"), book.title or "Unknown", i, total))
+                status_dialog:setTitle(T(_("Downloading: %1 (%2/%3)"), book.title or "Unknown", i, total_new))
             end
 
             -- Capture loop-local values for the closure (Lua upvalue semantics)
@@ -5359,7 +6975,8 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                 if lfs.attributes(cap_filepath, "mode") == "file" then
                     -- File already on disk; check if it needs a cache entry
                     local ChildDB2 = require("booklore_database")
-                    local child_db2 = ChildDB2:new()
+                    local child_plugin2 = makeSubprocessPlugin()
+                    local child_db2 = ChildDB2:new(child_plugin2)
                     child_db2:init(db_name)
                     local cached = child_db2:getBookByFilePath(cap_filepath)
                     child_db2:close()
@@ -5374,10 +6991,11 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                 -- Download the file
                 local ChildDB3  = require("booklore_database")
                 local ChildAPI3 = require("booklore_api_client")
-                local child_db3 = ChildDB3:new()
+                local child_plugin3 = makeSubprocessPlugin()
+                local child_db3 = ChildDB3:new(child_plugin3)
                 child_db3:init(db_name)
-                local child_api3 = ChildAPI3:new()
-                child_api3:init(server_url, username, password, child_db3, secure_logs)
+                local child_api3 = ChildAPI3:new(child_plugin3)
+                child_api3:init(server_url, username, password, child_db3)
 
                 local dl_ok, dl_err = child_api3:downloadBook(cap_book_id, cap_filepath, username, password)
                 child_db3:close()
@@ -5391,7 +7009,6 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             end)
 
             -- completed=false means the subprocess fork failed
-            -- (should not happen in normal use; defensive).
             if not book_completed then
                 UIManager:close(status_dialog)
                 cancelSync(i - 1)
@@ -5400,7 +7017,6 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
 
             -- Cancel button was pressed: current book just finished cleanly, stop now.
             if cancel_requested then
-                -- Process this book's result before stopping so it is not lost.
                 if type(book_result) == "table" then
                     if book_result.status == "downloaded" then
                         downloaded = downloaded + 1
@@ -5468,21 +7084,17 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             end
 
             if delete_removed then
-                for entry in lfs.dir(download_dir) do
-                    if entry ~= "." and entry ~= ".." then
-                        local fp = download_dir .. "/" .. entry
-                        if lfs.attributes(fp, "mode") == "file" then
-                            -- Use the DB as the authoritative source of whether
-                            -- this file was placed here by the plugin.  This
-                            -- prevents accidental deletion of user-placed files
-                            -- whose names happen to end with _<number>.<ext>.
-                            local cached = self.db and self.db:getBookByFilePath(fp)
-                            local lid = cached and cached.book_id
-                            if lid and not shelf_book_ids[lid] then
+                if not first_sync then
+                    -- Delta path: we know exactly which book IDs were removed.
+                    -- Look up their file paths from the DB and delete directly,
+                    -- avoiding a full directory walk.
+                    for _, removed_id in ipairs(books_to_delete) do
+                        local cached = self.db:getBookByBookId(removed_id)
+                        if cached and cached.file_path then
+                            local fp = cached.file_path
+                            if lfs.attributes(fp, "mode") == "file" then
                                 if os.remove(fp) then
                                     deleted = deleted + 1
-                                    -- Also remove any .sdr sidecar directories if
-                                    -- the user has enabled that option.
                                     if delete_sdr then
                                         local sdr_dirs = self:getSdrPaths(fp)
                                         for _, sdr_dir in ipairs(sdr_dirs) do
@@ -5495,6 +7107,38 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
                                     end
                                 else
                                     errors = errors + 1
+                                end
+                            end
+                        end
+                    end
+                else
+                    -- First sync (no previous state): fall back to the directory
+                    -- walk so any orphan files from before the plugin managed this
+                    -- folder are still cleaned up.
+                    local shelf_book_ids = {}
+                    for bid in pairs(curr_books) do shelf_book_ids[bid] = true end
+                    for entry in lfs.dir(download_dir) do
+                        if entry ~= "." and entry ~= ".." then
+                            local fp = download_dir .. "/" .. entry
+                            if lfs.attributes(fp, "mode") == "file" then
+                                local cached = self.db and self.db:getBookByFilePath(fp)
+                                local lid = cached and cached.book_id
+                                if lid and not shelf_book_ids[lid] then
+                                    if os.remove(fp) then
+                                        deleted = deleted + 1
+                                        if delete_sdr then
+                                            local sdr_dirs = self:getSdrPaths(fp)
+                                            for _, sdr_dir in ipairs(sdr_dirs) do
+                                                self:logInfo("BookloreSync: Deleting sidecar:", sdr_dir)
+                                                local ok_rm, err_rm = self:_deleteDirRecursive(sdr_dir)
+                                                if not ok_rm then
+                                                    self:logErr("BookloreSync: Failed to delete sidecar:", sdr_dir, err_rm)
+                                                end
+                                            end
+                                        end
+                                    else
+                                        errors = errors + 1
+                                    end
                                 end
                             end
                         end
@@ -5519,11 +7163,61 @@ function BookloreSync:syncFromBookloreShelf(silent, on_complete)
             if not silent and not self.silent_messages then
                 UIManager:show(InfoMessage:new{ text = msg, timeout = 4 })
             end
+            -- Do NOT save shelf state: sync failed.
             if on_complete then on_complete(false, msg) end
             return
         end
 
+        -- Persist the current shelf contents as the new baseline for the next
+        -- delta sync.  Only saved after a fully successful commit so that a
+        -- partial/cancelled sync does not corrupt the cached state.
+        -- json.encode the full current book list (not just the delta).
+        if not space_error_info then
+            local ok_enc, books_json = pcall(json.encode, books)
+            if ok_enc and books_json then
+                self.db:saveShelfState(new_shelf_id, books_json)
+                self:logInfo("BookloreSync: shelf state saved for shelf_id", new_shelf_id)
+            else
+                self:logWarn("BookloreSync: could not encode shelf state for caching")
+            end
+        end
+
         self.sync_in_progress = false
+
+        -- ── Show space error notification if sync stopped due to insufficient space ───
+        if space_error_info then
+            local ConfirmBox = require("ui/widget/confirmbox")
+            local space_msg = T(
+                _("No space left on device\n\n" ..
+                  "Book: %1\n" ..
+                  "File size: %2 MB\n" ..
+                  "Available space: %3 MB\n" ..
+                  "Required space: %4 MB (file + %5 MB buffer)\n\n" ..
+                  "Downloaded %6 of %7 books before stopping."),
+                space_error_info.book_title,
+                space_error_info.file_size_mb,
+                space_error_info.available_mb,
+                space_error_info.required_mb,
+                space_error_info.min_free_mb,
+                space_error_info.books_downloaded,
+                space_error_info.books_total
+            )
+
+            if not silent and not self.silent_messages then
+                UIManager:show(ConfirmBox:new{
+                    text = space_msg,
+                    ok_text = _("Close"),
+                    ok_callback = function()
+                        -- Just close the dialog
+                    end,
+                })
+            end
+
+            if on_complete then
+                on_complete(false, _("Sync stopped: insufficient disk space"))
+            end
+            return
+        end
 
         local final_msg = T(
             _("Sync complete!\n\nDownloaded: %1\nSkipped: %2\nDeleted: %3\nErrors: %4"),
@@ -5559,6 +7253,7 @@ Falls back to "BookID_{id}.{extension}" when no usable title is available.
 @param book table  Book object from Booklore API
 @return string
 --]]
+---BookloreSync:_generateFilename.
 function BookloreSync:_generateFilename(book)
     local extension = (book.extension or "epub"):lower()
     local ext_suffix = "." .. extension
@@ -5594,6 +7289,7 @@ Supported formats: EPUB, PDF, CBZ, CBR.  Other formats are ignored.
 @param filepath string  Full path to the file about to be deleted
 @return hash string|nil, stem string|nil, book_id number|nil
 --]]
+---BookloreSync:preDeleteHook.
 function BookloreSync:preDeleteHook(filepath)
     if not filepath then return nil, nil, nil end
 
@@ -5658,6 +7354,7 @@ visible error during file deletion.
 @param cached_book_id number|nil  Booklore book ID if known
 @param from_queue     boolean     True when called from syncPendingDeletions (skip re-queue on failure)
 --]]
+---BookloreSync:notifyBookloreOnDeletion.
 function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_queue)
     from_queue = from_queue or false
 
@@ -5747,6 +7444,7 @@ Entries retried more than 10 times are dropped.
 @param silent boolean  Suppress UI feedback (default false)
 @return integer synced_count, integer failed_count
 --]]
+---BookloreSync:syncPendingDeletions.
 function BookloreSync:syncPendingDeletions(silent)
     silent = silent or false
 
@@ -5842,6 +7540,7 @@ an explicit sync.
 @param silent boolean  Suppress UI feedback (default false)
 @return integer synced_count, integer failed_count
 --]]
+---BookloreSync:syncPendingRatings.
 function BookloreSync:syncPendingRatings(silent)
     silent = silent or false
 
@@ -5920,7 +7619,7 @@ function BookloreSync:syncPendingRatings(silent)
 
     self:logInfo("BookloreSync: Retrying", #pending, "pending rating(s)")
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     local synced_count = 0
     local failed_count = 0
@@ -6002,6 +7701,7 @@ opened again and syncHighlightsAndNotes() succeeds.
 @return integer synced_count
 @return integer failed_count
 --]]
+---BookloreSync:syncPendingAnnotations.
 function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
     silent = silent or false
 
@@ -6037,7 +7737,7 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
 
     self:logInfo("BookloreSync: Retrying", #pending, "pending annotation(s)")
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     local synced_count = 0
     local failed_count = 0
@@ -6192,12 +7892,201 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
 end
 
 --[[--
+Re-match all books in the cache after a library re-creation.
+
+Resets the Booklore book_id on every book in book_cache (and all linked
+pending items) to NULL, then immediately calls resolveUnmatchedBooks() to
+re-resolve them from the server.  This is the correct recovery action when
+the user has wiped and re-created their Booklore library so that all book IDs
+have changed.
+--]]
+---BookloreSync:rematchAllBooksInCache.
+function BookloreSync:rematchAllBooksInCache()
+    if not self.db then return end
+    UIManager:show(ConfirmBox:new{
+        text = _("This will reset all stored book IDs and re-resolve them from the server.\n\nRun this when you re-created the library and all IDs have changed.\n\nContinue?"),
+        ok_text = _("Reset & Re-match"),
+        cancel_text = _("Cancel"),
+        ok_callback = function()
+            local ok = self.db:resetAllBookIds()
+            if not ok then
+                UIManager:show(InfoMessage:new{
+                    text = _("Failed to reset book IDs. Check logs."),
+                    timeout = 3,
+                })
+                return
+            end
+            UIManager:show(InfoMessage:new{
+                text = _("All book IDs reset. Resolving from server..."),
+                timeout = 2,
+            })
+            UIManager:scheduleIn(0.5, function()
+                if not NetworkMgr:isConnected() then
+                    UIManager:show(InfoMessage:new{
+                        text = _("No network connection. Books will be re-matched on next sync."),
+                        timeout = 3,
+                    })
+                    return
+                end
+                self:resolveUnmatchedBooks(false)
+            end)
+        end,
+    })
+end
+
+--[[--
+Show a toggle-selection dialog for clearing synced history records.
+
+Presents toggleable rows for Historical Sessions, Synced Annotations,
+Synced Bookmarks, and Rating Sync History.  Only rows whose table is
+non-empty are shown.  When the user confirms, the selected data types
+are deleted from the database and a summary InfoMessage is shown.
+--]]
+---BookloreSync:showClearAdvancedDialog.
+function BookloreSync:showClearAdvancedDialog()
+    if not self.db then return end
+
+    local hs_count = tonumber(self.db:getHistoricalSessionCount())  or 0
+    local sa_count = tonumber(self.db:getSyncedAnnotationCount())   or 0
+    local sb_count = tonumber(self.db:getSyncedBookmarkCount())     or 0
+    local rh_count = tonumber(self.db:getRatingSyncHistoryCount())  or 0
+    local sp_count = tonumber(self.db:getSyncedKoreaderProgressCount()) or 0
+
+    if (hs_count + sa_count + sb_count + rh_count + sp_count) == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("Nothing to clear"),
+            timeout = 2,
+        })
+        return
+    end
+
+    local sel = {
+        historical  = hs_count > 0,
+        annotations = sa_count > 0,
+        bookmarks   = sb_count > 0,
+        ratings     = rh_count > 0,
+        progress    = sp_count > 0,
+    }
+
+    local dialog
+    ---buildDialog.
+    local function buildDialog()
+        ---toggle_label.
+        local function toggle_label(active, label, count)
+            local check = active and "[x]" or "[ ]"
+            return T(_("%1 %2 (%3)"), check, label, count)
+        end
+
+        local any_selected = sel.historical or sel.annotations or sel.bookmarks or sel.ratings or sel.progress
+
+        local buttons = {}
+
+        if hs_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.historical, _("Historical Sessions"), hs_count),
+                callback = function()
+                    sel.historical = not sel.historical
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if sa_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.annotations, _("Synced Annotations"), sa_count),
+                callback = function()
+                    sel.annotations = not sel.annotations
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if sb_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.bookmarks, _("Synced Bookmarks"), sb_count),
+                callback = function()
+                    sel.bookmarks = not sel.bookmarks
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if rh_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.ratings, _("Rating Sync History"), rh_count),
+                callback = function()
+                    sel.ratings = not sel.ratings
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        if sp_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.progress, _("Synced Progress"), sp_count),
+                callback = function()
+                    sel.progress = not sel.progress
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
+        table.insert(buttons, {
+            {
+                text = _("Clear Selected"),
+                enabled = any_selected,
+                callback = function()
+                    UIManager:close(dialog)
+                    local cleared = {}
+                    if sel.historical  then self.db:clearHistoricalSessions(); table.insert(cleared, _("Historical Sessions"))  end
+                    if sel.annotations then self.db:clearSyncedAnnotations();  table.insert(cleared, _("Synced Annotations"))   end
+                    if sel.bookmarks   then self.db:clearSyncedBookmarks();    table.insert(cleared, _("Synced Bookmarks"))     end
+                    if sel.ratings     then self.db:clearRatingSyncHistory();  table.insert(cleared, _("Rating Sync History"))  end
+                    if sel.progress    then self.db:clearSyncedKoreaderProgress(); table.insert(cleared, _("Synced Progress")) end
+                    if #cleared > 0 then
+                        UIManager:show(InfoMessage:new{
+                            text = T(_("Cleared: %1"), table.concat(cleared, ", ")),
+                            timeout = 2,
+                        })
+                    end
+                end,
+            },
+            {
+                text = _("Cancel"),
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+        })
+
+        return ButtonDialog:new{
+            title = _("Clear Synced History"),
+            buttons = buttons,
+        }
+    end
+
+    dialog = buildDialog()
+    UIManager:show(dialog)
+end
+
+--[[--
 Show a toggle-selection dialog for clearing pending items.
 
 Presents three toggleable rows (Sessions, Annotations, Ratings), each
 showing its current queue count.  After the user confirms, all selected
 types are deleted from the database and a summary InfoMessage is shown.
 --]]
+---BookloreSync:showClearPendingDialog.
 function BookloreSync:showClearPendingDialog()
     if not self.db then return end
 
@@ -6205,22 +8094,26 @@ function BookloreSync:showClearPendingDialog()
     local a_count = tonumber(self.db:getPendingAnnotationCount()) or 0
     local r_count = tonumber(self.db:getPendingRatingCount())     or 0
     local b_count = tonumber(self.db:getPendingBookmarkCount())   or 0
+    local p_count = tonumber(self.db:getPendingKoreaderProgressCount()) or 0
 
     local sel = {
         sessions    = s_count > 0,
         annotations = a_count > 0,
         ratings     = r_count > 0,
         bookmarks   = b_count > 0,
+        progress    = p_count > 0,
     }
 
     local dialog
+    ---buildDialog.
     local function buildDialog()
+        ---toggle_label.
         local function toggle_label(active, label, count)
             local check = active and "[x]" or "[ ]"
             return T(_("%1 %2 (%3)"), check, label, count)
         end
 
-        local any_selected = sel.sessions or sel.annotations or sel.ratings or sel.bookmarks
+        local any_selected = sel.sessions or sel.annotations or sel.ratings or sel.bookmarks or sel.progress
 
         local buttons = {}
 
@@ -6272,6 +8165,18 @@ function BookloreSync:showClearPendingDialog()
             }})
         end
 
+        if p_count > 0 then
+            table.insert(buttons, {{
+                text = toggle_label(sel.progress, _("Progress"), p_count),
+                callback = function()
+                    sel.progress = not sel.progress
+                    UIManager:close(dialog)
+                    dialog = buildDialog()
+                    UIManager:show(dialog)
+                end,
+            }})
+        end
+
         table.insert(buttons, {
             {
                 text = _("Clear Selected"),
@@ -6283,6 +8188,7 @@ function BookloreSync:showClearPendingDialog()
                     if sel.annotations then self.db:clearPendingAnnotations(); table.insert(cleared, _("Annotations")) end
                     if sel.ratings     then self.db:clearPendingRatings();     table.insert(cleared, _("Ratings"))     end
                     if sel.bookmarks   then self.db:clearPendingBookmarks();   table.insert(cleared, _("Bookmarks"))   end
+                    if sel.progress    then self.db:clearPendingKoreaderProgress(); table.insert(cleared, _("Progress")) end
                     if #cleared > 0 then
                         UIManager:show(InfoMessage:new{
                             text = T(_("Cleared: %1"), table.concat(cleared, ", ")),
@@ -6309,6 +8215,81 @@ function BookloreSync:showClearPendingDialog()
     UIManager:show(dialog)
 end
 
+--[[--
+Upload pending KOReader progress rows.
+
+Each row is sent to /api/koreader/syncs/progress as the latest state for the
+book hash. On success we archive the synced state and delete the pending row.
+On failure we increment retry_count and keep it queued.
+
+@param silent boolean
+@return integer synced_count, integer failed_count
+--]]
+---BookloreSync:syncPendingKoreaderProgress.
+function BookloreSync:syncPendingKoreaderProgress(silent)
+    silent = silent or false
+
+    if not self.db then
+        return 0, 0
+    end
+
+    local rows = self.db:getPendingKoreaderProgress()
+    if not rows or #rows == 0 then
+        return 0, 0
+    end
+
+    local synced_count = 0
+    local failed_count = 0
+
+    for _, row in ipairs(rows) do
+        local payload = {
+            timestamp = tonumber(row.timestamp) or os.time(),
+            document = tostring(row.book_hash),
+            percentage = self:roundKoreaderSyncPercentage(tonumber(row.percentage) or 0),
+            progress = tostring(row.progress or row.location or "0"),
+            device = tostring(row.device or (Device and Device.model) or "KOReader"),
+            device_id = tostring(row.device_id or self.progress_sync_device_id or "unknown"),
+        }
+
+        local ok, body_or_err = self.api:updateKoReaderProgress(payload)
+        if ok then
+            synced_count = synced_count + 1
+            self.db:markKoreaderProgressSynced({
+                book_cache_id = row.book_cache_id,
+                book_hash = row.book_hash,
+                progress = payload.progress,
+                percentage = payload.percentage,
+                location = tostring(row.location or row.progress or payload.progress),
+                remote_device = payload.device,
+                remote_device_id = payload.device_id,
+                remote_timestamp = payload.timestamp,
+            })
+            self.db:deletePendingKoreaderProgress(row.id)
+        else
+            failed_count = failed_count + 1
+            self.db:incrementPendingKoreaderProgressRetry(row.id)
+            self:logWarn("BookloreSync: Failed to sync pending progress for hash:", tostring(row.book_hash), tostring(body_or_err))
+        end
+    end
+
+    if not silent and (synced_count > 0 or failed_count > 0) then
+        if failed_count > 0 then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Progress: %1 synced, %2 failed"), synced_count, failed_count),
+                timeout = 2,
+            })
+        else
+            UIManager:show(InfoMessage:new{
+                text = T(_("Progress: %1 synced"), synced_count),
+                timeout = 2,
+            })
+        end
+    end
+
+    return synced_count, failed_count
+end
+
+---BookloreSync:syncPendingSessions.
 function BookloreSync:syncPendingSessions(silent)
     silent = silent or false
 
@@ -6323,7 +8304,7 @@ function BookloreSync:syncPendingSessions(silent)
         return
     end
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     -- ── Phase 0: Resolve all book_ids ─────────────────────────────────────
     -- Iterate every pending session that is missing a book_id and attempt to
@@ -6402,7 +8383,12 @@ function BookloreSync:syncPendingSessions(silent)
     bm_synced = tonumber(bm_synced) or 0
     bm_failed = tonumber(bm_failed) or 0
 
-    -- ── Phase 2c: Deletions ───────────────────────────────────────────────
+    -- ── Phase 2c: KOReader Progress ───────────────────────────────────────
+    local prog_synced, prog_failed = self:syncPendingKoreaderProgress(true)
+    prog_synced = tonumber(prog_synced) or 0
+    prog_failed = tonumber(prog_failed) or 0
+
+    -- ── Phase 2d: Deletions ───────────────────────────────────────────────
     local del_synced, del_failed = self:syncPendingDeletions(true)
     del_synced = tonumber(del_synced) or 0
     del_failed = tonumber(del_failed) or 0
@@ -6439,6 +8425,13 @@ function BookloreSync:syncPendingSessions(silent)
                     parts[#parts + 1] = T(_("B: %1 synced, %2 failed"), bm_synced, bm_failed)
                 else
                     parts[#parts + 1] = T(_("B: %1 synced"), bm_synced)
+                end
+            end
+            if prog_synced + prog_failed > 0 then
+                if prog_failed > 0 then
+                    parts[#parts + 1] = T(_("P: %1 synced, %2 failed"), prog_synced, prog_failed)
+                else
+                    parts[#parts + 1] = T(_("P: %1 synced"), prog_synced)
                 end
             end
             local msg = #parts > 0 and table.concat(parts, "\n") or _("No pending items to sync")
@@ -6540,6 +8533,13 @@ function BookloreSync:syncPendingSessions(silent)
                 parts[#parts + 1] = T(_("B: %1 synced"), bm_synced)
             end
         end
+        if prog_synced + prog_failed > 0 then
+            if prog_failed > 0 then
+                parts[#parts + 1] = T(_("P: %1 synced, %2 failed"), prog_synced, prog_failed)
+            else
+                parts[#parts + 1] = T(_("P: %1 synced"), prog_synced)
+            end
+        end
         if #parts > 0 then
             UIManager:show(InfoMessage:new{
                 text = table.concat(parts, "\n"),
@@ -6563,6 +8563,7 @@ subsequent syncPendingAnnotations / syncPendingRatings / syncPendingSessions
 runs can resolve and upload the queued items automatically.
 --]]
 
+---BookloreSync:_startBookCacheMatching.
 function BookloreSync:_startBookCacheMatching()
     if not self.db then return end
     local unmatched = self.db:getAllUnmatchedBooks()
@@ -6579,6 +8580,7 @@ function BookloreSync:_startBookCacheMatching()
     self:_showNextBookCacheMatch()
 end
 
+---BookloreSync:_showNextBookCacheMatch.
 function BookloreSync:_showNextBookCacheMatch()
     if not self.bk_unmatched_books or
        self.bk_matching_index > #self.bk_unmatched_books then
@@ -6694,6 +8696,7 @@ Writes the resolved book_id (and ISBNs) back into book_cache, then kicks off
 syncPendingSessions so that any annotations / ratings / sessions that were
 queued while the book was unmatched are uploaded immediately.
 --]]
+---BookloreSync:_saveBookCacheMatch.
 function BookloreSync:_saveBookCacheMatch(book, selected_result)
     local book_id    = type(selected_result) == "table"
                        and tonumber(selected_result.id) or tonumber(selected_result)
@@ -6744,6 +8747,7 @@ Resolve book IDs for cached books that don't have them yet
 Queries the server for books cached while offline
 @param silent boolean Don't show UI messages if true
 --]]
+---BookloreSync:resolveUnmatchedBooks.
 function BookloreSync:resolveUnmatchedBooks(silent)
     silent = silent or false
     
@@ -6766,7 +8770,7 @@ function BookloreSync:resolveUnmatchedBooks(silent)
     
     self:logInfo("BookloreSync: Resolving", #unmatched_books, "unmatched books")
     
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
     
     local resolved_count = 0
     
@@ -6806,6 +8810,7 @@ function BookloreSync:resolveUnmatchedBooks(silent)
     return resolved_count
 end
 
+---BookloreSync:copySessionsFromKOReader.
 function BookloreSync:copySessionsFromKOReader()
     -- Check if already run
     if self.db:hasHistoricalSessions() then
@@ -6831,6 +8836,7 @@ function BookloreSync:copySessionsFromKOReader()
     })
 end
 
+---BookloreSync:_extractHistoricalSessions.
 function BookloreSync:_extractHistoricalSessions()
     UIManager:show(InfoMessage:new{
         text = _("Extracting sessions from KOReader database..."),
@@ -6912,6 +8918,7 @@ function BookloreSync:_extractHistoricalSessions()
     end
 end
 
+---BookloreSync:_calculateSessionsFromPageStats.
 function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
     -- Implements 5-minute gap logic to group page reads into sessions
     -- Based on bookloresessionmigration.py lines 61-131
@@ -7053,6 +9060,7 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
     return sessions
 end
 
+---BookloreSync:_findKOReaderStatisticsDB.
 function BookloreSync:_findKOReaderStatisticsDB()
     -- The statistics database is in the KOReader settings directory
     local stats_path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
@@ -7066,6 +9074,7 @@ function BookloreSync:_findKOReaderStatisticsDB()
     return nil
 end
 
+---BookloreSync:_getKOReaderBooks.
 function BookloreSync:_getKOReaderBooks(conn)
     local books = {}
     
@@ -7089,6 +9098,7 @@ function BookloreSync:_getKOReaderBooks(conn)
     return books
 end
 
+---BookloreSync:_getKOReaderBookByHash.
 function BookloreSync:_getKOReaderBookByHash(file_hash)
     if not file_hash or file_hash == "" then
         return nil
@@ -7131,6 +9141,7 @@ function BookloreSync:_getKOReaderBookByHash(file_hash)
     return book_info
 end
 
+---BookloreSync:_getPageStats.
 function BookloreSync:_getPageStats(conn, book_id)
     local stats = {}
     
@@ -7161,6 +9172,7 @@ function BookloreSync:_getPageStats(conn, book_id)
     return stats
 end
 
+---BookloreSync:_unixToISO8601.
 function BookloreSync:_unixToISO8601(timestamp)
     local date_table = os.date("!*t", timestamp)
     return string.format("%04d-%02d-%02dT%02d:%02d:%02dZ",
@@ -7168,6 +9180,7 @@ function BookloreSync:_unixToISO8601(timestamp)
         date_table.hour, date_table.min, date_table.sec)
 end
 
+---BookloreSync:_parseISO8601.
 function BookloreSync:_parseISO8601(iso_string)
     if not iso_string then return nil end
     
@@ -7188,6 +9201,7 @@ function BookloreSync:_parseISO8601(iso_string)
     })
 end
 
+---BookloreSync:_detectBookType.
 function BookloreSync:_detectBookType(book)
     local title = book.title or ""
     local lower_title = title:lower()
@@ -7205,6 +9219,7 @@ function BookloreSync:_detectBookType(book)
     end
 end
 
+---BookloreSync:_formatDuration.
 function BookloreSync:_formatDuration(seconds)
     local parts = {}
     
@@ -7231,6 +9246,7 @@ Group sessions by book_id for batch upload
 @param sessions Array of session objects
 @return table Grouped sessions { book_id = {book_type = ..., sessions = {...}} }
 --]]
+---BookloreSync:_groupSessionsByBook.
 function BookloreSync:_groupSessionsByBook(sessions)
     local grouped = {}
     
@@ -7258,6 +9274,7 @@ Submit a single session to the server
 @return string message
 @return number|nil code
 --]]
+---BookloreSync:_submitSingleSession.
 function BookloreSync:_submitSingleSession(session)
     local start_progress = session.start_progress or 0
     local end_progress = session.end_progress or 0
@@ -7294,6 +9311,7 @@ Falls back to individual upload if batch endpoint returns 404.
 @return number failed_count Number of failed sessions
 @return number not_found_count Number of 404 errors (book not found)
 --]]
+---BookloreSync:_uploadSessionsWithBatching.
 function BookloreSync:_uploadSessionsWithBatching(book_id, book_type, sessions)
     local synced_count = 0
     local failed_count = 0
@@ -7394,6 +9412,7 @@ function BookloreSync:_uploadSessionsWithBatching(book_id, book_type, sessions)
     return synced_count, failed_count, not_found_count
 end
 
+---BookloreSync:matchHistoricalData.
 function BookloreSync:matchHistoricalData()
     if not self.db then
         UIManager:show(InfoMessage:new{
@@ -7425,6 +9444,7 @@ function BookloreSync:matchHistoricalData()
     self:_startManualMatching()
 end
 
+---BookloreSync:_autoSyncMatchedSessions.
 function BookloreSync:_autoSyncMatchedSessions(books)
     if not books or #books == 0 then
         self:_startManualMatching()
@@ -7460,6 +9480,7 @@ function BookloreSync:_autoSyncMatchedSessions(books)
     self:_syncNextMatchedBook()
 end
 
+---BookloreSync:_syncNextMatchedBook.
 function BookloreSync:_syncNextMatchedBook()
     if not self.autosync_books or self.autosync_index > #self.autosync_books then
         -- Auto-sync phase complete
@@ -7545,6 +9566,7 @@ function BookloreSync:_syncNextMatchedBook()
     self:_syncNextMatchedBook()
 end
 
+---BookloreSync:_startManualMatching.
 function BookloreSync:_startManualMatching()
     local unmatched = self.db:getUnmatchedHistoricalBooks()
     
@@ -7563,6 +9585,7 @@ function BookloreSync:_startManualMatching()
     self:_showNextBookMatch()
 end
 
+---BookloreSync:_showNextBookMatch.
 function BookloreSync:_showNextBookMatch()
     if not self.unmatched_books or self.matching_index > #self.unmatched_books then
         UIManager:show(InfoMessage:new{
@@ -7676,6 +9699,7 @@ function BookloreSync:_showNextBookMatch()
     self:_performManualSearch(book)
 end
 
+---BookloreSync:_confirmAutoMatch.
 function BookloreSync:_confirmAutoMatch(book, book_id)
     local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
     
@@ -7701,6 +9725,7 @@ function BookloreSync:_confirmAutoMatch(book, book_id)
     })
 end
 
+---BookloreSync:_confirmIsbnMatch.
 function BookloreSync:_confirmIsbnMatch(book, server_book, matched_isbn_type)
     local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
     
@@ -7747,6 +9772,7 @@ function BookloreSync:_confirmIsbnMatch(book, server_book, matched_isbn_type)
     UIManager:show(self.isbn_match_dialog)
 end
 
+---BookloreSync:_performManualSearch.
 function BookloreSync:_performManualSearch(book)
     local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
     
@@ -7793,6 +9819,7 @@ function BookloreSync:_performManualSearch(book)
     self:_showMatchSelectionDialog(book, results)
 end
 
+---BookloreSync:_showMatchSelectionDialog.
 function BookloreSync:_showMatchSelectionDialog(book, results)
     local progress_text = T(_("Book %1 of %2"), self.matching_index, #self.unmatched_books)
     
@@ -7840,6 +9867,7 @@ function BookloreSync:_showMatchSelectionDialog(book, results)
     UIManager:show(self.match_dialog)
 end
 
+---BookloreSync:_saveMatchAndSync.
 function BookloreSync:_saveMatchAndSync(book, selected_result)
     local book_id = type(selected_result) == "table" and selected_result.id or selected_result
     local book_title = type(selected_result) == "table" and selected_result.title or book.koreader_book_title
@@ -7880,6 +9908,7 @@ function BookloreSync:_saveMatchAndSync(book, selected_result)
     self:_syncHistoricalSessions(book, sessions, nil)
 end
 
+---BookloreSync:_syncHistoricalSessions.
 function BookloreSync:_syncHistoricalSessions(book, sessions, progress_text)
     if not sessions or #sessions == 0 then
         UIManager:show(InfoMessage:new{
@@ -7939,6 +9968,7 @@ function BookloreSync:_syncHistoricalSessions(book, sessions, progress_text)
     self:_showNextBookMatch()
 end
 
+---BookloreSync:viewMatchStatistics.
 function BookloreSync:viewMatchStatistics()
     if not self.db then
         UIManager:show(InfoMessage:new{
@@ -7979,6 +10009,7 @@ function BookloreSync:viewMatchStatistics()
     })
 end
 
+---BookloreSync:resyncHistoricalData.
 function BookloreSync:resyncHistoricalData()
     if not self.db then
         UIManager:show(InfoMessage:new{
@@ -7999,6 +10030,7 @@ function BookloreSync:resyncHistoricalData()
     })
 end
 
+---BookloreSync:_performResyncHistoricalData.
 function BookloreSync:_performResyncHistoricalData()
     -- Get all synced historical sessions
     local sessions = self.db:getAllSyncedHistoricalSessions()
@@ -8079,6 +10111,7 @@ function BookloreSync:_performResyncHistoricalData()
                 "failed:", total_failed, "not found:", total_not_found)
 end
 
+---BookloreSync:syncRematchedSessions.
 function BookloreSync:syncRematchedSessions()
     -- Sync sessions that were previously marked for re-matching (404 errors)
     -- and have now been matched to valid books
@@ -8145,6 +10178,7 @@ cached title. The user can edit the term or enter a numeric Booklore ID.
 Submitting a pure integer fetches the book by ID and saves immediately;
 submitting text searches by title and shows a selection dialog.
 --]]
+---BookloreSync:manualMatching.
 function BookloreSync:manualMatching()
     if not self.db then
         UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
@@ -8164,7 +10198,7 @@ function BookloreSync:manualMatching()
         return
     end
 
-    self.api:init(self.server_url, self.username, self.password, self.db, self.secure_logs)
+    self.api:init(self.server_url, self.username, self.password, self.db)
     self.bk_matching_index  = 1
     self.bk_unmatched_books = unmatched
     self:_showManualMatchDialog(unmatched[1])
@@ -8177,6 +10211,7 @@ iterator and recurses for the next unmatched book.
 
 @param book  table  Row from getAllUnmatchedBooks()
 --]]
+---BookloreSync:_showManualMatchDialog.
 function BookloreSync:_showManualMatchDialog(book)
     local default_term = (book.title and book.title ~= "") and book.title
                          or book.file_path:match("([^/]+)$") or ""
@@ -8411,6 +10446,7 @@ end
 --[[--
 Show version information dialog
 --]]
+---BookloreSync:showVersionInfo.
 function BookloreSync:showVersionInfo()
     local version_info = self.updater:getCurrentVersion()
     
@@ -8440,7 +10476,15 @@ end
 --[[--
 Auto-check for updates (runs once per day, silent mode)
 --]]
+---BookloreSync:autoCheckForUpdates.
 function BookloreSync:autoCheckForUpdates()
+    -- Dev-build channel is intentionally manual-only to avoid noisy startup
+    -- prompts for frequently changing development artifacts.
+    if self.use_dev_builds then
+        logger.info("BookloreSync Updater: Auto-check skipped (Use Dev Builds is enabled)")
+        return
+    end
+
     -- Check if 24 hours passed since last check
     local now = os.time()
     if now - self.last_update_check < 86400 then
@@ -8496,6 +10540,7 @@ Check for updates (manual or auto)
 
 @param silent If true, only show message when update available
 --]]
+---BookloreSync:checkForUpdates.
 function BookloreSync:checkForUpdates(silent)
     -- Check network
     if not NetworkMgr:isConnected() then
@@ -8516,8 +10561,26 @@ function BookloreSync:checkForUpdates(silent)
         })
     end
     
-    -- Check for updates (use cache if silent, fresh if manual)
-    local result = self.updater:checkForUpdates(silent)
+    -- Check for updates (stable channel via GitHub release API, or direct dev
+    -- channel download URL from dev-build.location)
+    local result = nil
+    if self.use_dev_builds then
+        local dev_url, dev_err = self:getDevBuildDownloadURL()
+        if not dev_url then
+            if not silent then
+                UIManager:show(InfoMessage:new{
+                    text = T(_("Dev builds are enabled, but no valid download URL is configured.\n\n%1"), dev_err or _("Unknown error")),
+                    timeout = 4,
+                })
+            end
+            return
+        end
+
+        result = self.updater:checkForDirectDownload(dev_url)
+    else
+        -- Stable releases (use cache if silent, fresh if manual)
+        result = self.updater:checkForUpdates(silent)
+    end
     
     if not result then
         if not silent then
@@ -8531,7 +10594,7 @@ function BookloreSync:checkForUpdates(silent)
     
     if result.available then
         -- Update available
-        self.update_available = true
+        self.update_available = not self.use_dev_builds
         
         local size_text = self.updater:formatBytes(result.release_info.size)
         
@@ -8606,6 +10669,7 @@ Show changelog for the new version
 @param version Version number
 @param release_info Full release info object for showing update dialog again
 --]]
+---BookloreSync:showChangelog.
 function BookloreSync:showChangelog(changelog_url, version, release_info)
     -- Show loading message
     local loading_msg = InfoMessage:new{
@@ -8681,6 +10745,7 @@ Install update from download URL
 @param download_url URL to download ZIP from
 @param version Version being installed
 --]]
+---BookloreSync:installUpdate.
 function BookloreSync:installUpdate(download_url, version)
     -- Show initial progress message
     local progress_msg = InfoMessage:new{
@@ -8746,6 +10811,7 @@ end
 --[[--
 Rollback to previous version after failed update
 --]]
+---BookloreSync:rollbackUpdate.
 function BookloreSync:rollbackUpdate()
     UIManager:show(InfoMessage:new{
         text = _("Rolling back to previous version..."),
@@ -8768,6 +10834,7 @@ end
 --[[--
 Toggle auto-update check setting
 --]]
+---BookloreSync:toggleAutoUpdateCheck.
 function BookloreSync:toggleAutoUpdateCheck()
     self.auto_update_check = not self.auto_update_check
     self.settings:saveSetting("auto_update_check", self.auto_update_check)
@@ -8782,8 +10849,44 @@ function BookloreSync:toggleAutoUpdateCheck()
 end
 
 --[[--
+Toggle development-build update channel.
+
+Requires a valid dev-build.location file in the plugin directory.
+--]]
+---BookloreSync:toggleUseDevBuilds.
+function BookloreSync:toggleUseDevBuilds()
+    -- Enabling requires a valid dev-build.location file.
+    if not self.use_dev_builds then
+        local dev_url, dev_err = self:getDevBuildDownloadURL()
+        if not dev_url then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Cannot enable dev builds.\n\n%1"), dev_err or _("Unknown error")),
+                timeout = 4,
+            })
+            return
+        end
+    end
+
+    self.use_dev_builds = not self.use_dev_builds
+    self.settings:saveSetting("use_dev_builds", self.use_dev_builds)
+    self.settings:flush()
+
+    -- Channel changed: clear cached stable release info and reset badge state.
+    self.updater:clearCache()
+    self.update_available = false
+
+    UIManager:show(InfoMessage:new{
+        text = self.use_dev_builds and
+            _("Dev builds enabled.\n\nCheck for Updates will use dev-build.location.") or
+            _("Dev builds disabled.\n\nCheck for Updates will use stable releases."),
+        timeout = 3,
+    })
+end
+
+--[[--
 Clear update cache to force fresh check
 --]]
+---BookloreSync:clearUpdateCache.
 function BookloreSync:clearUpdateCache()
     self.updater:clearCache()
     self.update_available = false
@@ -8804,6 +10907,7 @@ Database:updateHardcoverId() when present.
 
 Shows a summary InfoMessage when done.
 --]]
+---BookloreSync:fetchAndStoreHardcoverIds.
 function BookloreSync:fetchAndStoreHardcoverIds()
     if not self.server_url or self.server_url == "" then
         UIManager:show(InfoMessage:new{
@@ -9084,7 +11188,3 @@ function BookloreSync:fetchAndStoreHardcoverIds()
 end
 
 return BookloreSync
-
-
-
-

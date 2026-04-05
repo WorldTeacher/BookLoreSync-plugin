@@ -130,4 +130,36 @@ describe("Updater helper methods", function()
     assert.are.equal("1.0 KB", updater:formatBytes(1024))
     assert.are.equal("1.0 MB", updater:formatBytes(1024 * 1024))
   end)
+
+  it("returns installable result for direct download channel", function()
+    updater.getCurrentVersion = function()
+      return { version = "3.8.4" }
+    end
+
+    updater._headRequest = function()
+      return true, "https://example.org/dev-download", 1234, 200
+    end
+
+    local result = updater:checkForDirectDownload("https://example.org/dev-download")
+    assert.is_table(result)
+    assert.is_true(result.available)
+    assert.are.equal("3.8.4", result.current_version)
+    assert.are.equal("dev-build", result.latest_version)
+    assert.are.equal("https://example.org/dev-download", result.release_info.download_url)
+    assert.are.equal("dev", result.release_info.channel)
+    assert.are.equal(1234, result.release_info.size)
+  end)
+
+  it("fails direct download check when endpoint is unreachable", function()
+    updater.getCurrentVersion = function()
+      return { version = "3.8.4" }
+    end
+
+    updater._headRequest = function()
+      return false, "timeout", nil, nil
+    end
+
+    local result = updater:checkForDirectDownload("https://example.org/dev-download")
+    assert.is_nil(result)
+  end)
 end)

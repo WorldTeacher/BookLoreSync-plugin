@@ -1,12 +1,12 @@
 +++
-title = "Import Reading History"
+title = "Import & Matching"
 description = "Extract and match historical reading sessions from KOReader's statistics database."
 weight = 4
 +++
 
-# Import Reading History
+# Import & Matching
 
-Found at: **Tools → BookLore Sync → Import Reading History**
+Found at: **Tools → BookLore Sync → Import & Matching**
 
 Imports your existing reading history from KOReader's built-in statistics database into BookLore. This is a one-time setup process - normal sessions recorded after the plugin is installed are handled automatically.
 
@@ -14,7 +14,7 @@ The recommended order is: **Extract → Match → (check statistics) → Sync**.
 
 ---
 
-## Extract Sessions from KOReader
+## Extract Historical Data
 
 Reads KOReader's statistics database and converts page-level reading data into sessions, which are stored in the plugin's local database.
 
@@ -24,7 +24,7 @@ Run this step once before any other action in this menu.
 
 ---
 
-## Match Books with Booklore
+## Match Historical Sessions
 
 
 ![KOReader UI with matching menu, showing results for a title](../manual_match_page.png)

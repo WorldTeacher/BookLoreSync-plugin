@@ -11,8 +11,13 @@ echo "Generating version information..."
 # Get git commit hash (if available)
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
+# Prefer explicit override from CI/job environment
+if [ -n "${VERSION_OVERRIDE:-}" ]; then
+    VERSION="$VERSION_OVERRIDE"
+    VERSION_TYPE="development"
+    echo "Using override version: $VERSION"
 # Try to get version from git tags
-if git describe --tags --exact-match HEAD 2>/dev/null; then
+elif git describe --tags --exact-match HEAD 2>/dev/null; then
     # We're on a tagged commit (release)
     VERSION=$(git describe --tags --exact-match HEAD)
     VERSION_TYPE="release"
@@ -68,7 +73,7 @@ META_FILE="bookloresync.koplugin/_meta.lua"
 cat > "$META_FILE" <<EOF
 local _ = require("gettext")
 return {
-    name = "booklore",
+    name = "bookloresync",
     fullname = _("Booklore Sync"),
     description = _([[Sync your reading sessions to Booklore server.]]),
     version = "$VERSION",

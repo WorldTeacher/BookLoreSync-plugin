@@ -154,7 +154,7 @@ If it does not appear, check that:
 
 ![BookLore Sync authentication submenu in KOReader](../koreader-settings-auth.png)
 
-Go to **Tools → Booklore Sync → Authentication** and enter:
+Go to **Tools → Booklore Sync → Connection Setup** and enter:
 
 1. **Server URL** - the address of your Booklore server, e.g. `http://192.168.1.100:6060` or `https://booklore.example.com`.
 > Enter only the base URL - do not append `/api` or any path. The plugin handles all API routing internally.

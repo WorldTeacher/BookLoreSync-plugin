@@ -19,19 +19,31 @@ local HardcoverClient = {
 }
 HardcoverClient.__index = HardcoverClient
 
+---HardcoverClient:new.
 function HardcoverClient:new(o)
     o = o or {}
     setmetatable(o, self)
+    self.__index = self
     return o
 end
 
 -- Minimal log helpers so callers don't need to pass a logger in.
+---HardcoverClient:logInfo.
 function HardcoverClient:logInfo(...)
-    logger.info(...)
+    if self.plugin then
+        self.plugin:logInfo(...)
+    else
+        logger.info(...)
+    end
 end
 
+---HardcoverClient:logWarn.
 function HardcoverClient:logWarn(...)
-    logger.warn(...)
+    if self.plugin then
+        self.plugin:logWarn(...)
+    else
+        logger.warn(...)
+    end
 end
 
 --[[--
@@ -45,6 +57,7 @@ All Hardcover API calls go through this function.
 @return table|nil  Parsed `data` table on success, nil on failure
 @return string|nil Error message on failure
 --]]
+---HardcoverClient:query.
 function HardcoverClient:query(query, variables, token)
     if not token or token == "" then
         return nil, "Hardcover token not configured"
@@ -112,6 +125,7 @@ return immediately without a network round-trip.
 @return number|nil  Integer user ID on success, nil on failure
 @return string|nil  Error message on failure
 --]]
+---HardcoverClient:getUserId.
 function HardcoverClient:getUserId(token)
     if self.db then
         local cached = self.db:getHardcoverUserId()
@@ -154,6 +168,7 @@ parent book's integer ID.
 @return number|nil  Hardcover book_id on success, nil on failure
 @return string|nil  Error message on failure
 --]]
+---HardcoverClient:findBookByIsbn.
 function HardcoverClient:findBookByIsbn(isbn, token)
     if not isbn or isbn == "" then
         return nil, "No ISBN provided"
@@ -207,6 +222,7 @@ Each result table contains:
 @return table|nil   Array of candidate tables on success
 @return string|nil  Error message on failure
 --]]
+---HardcoverClient:searchBook.
 function HardcoverClient:searchBook(title, author, token)
     if not title or title:match("^%s*$") then
         return nil, "No title provided"
@@ -328,6 +344,7 @@ the user's Hardcover library.
 @return number|nil  user_book.id on success, nil if not found or on error
 @return string|nil  Error message on failure
 --]]
+---HardcoverClient:findUserBookId.
 function HardcoverClient:findUserBookId(hardcover_book_id, user_id, token)
     local query = [[
         query($bookId: Int!, $userId: Int!) {
@@ -371,6 +388,7 @@ increments).  The conversion is hardcover_rating = booklore_rating / 2.
 @return boolean success
 @return string|nil  Error message on failure
 --]]
+---HardcoverClient:submitRating.
 function HardcoverClient:submitRating(hardcover_id, rating, token)
     hardcover_id = tonumber(hardcover_id)
     rating       = tonumber(rating)

@@ -60,6 +60,30 @@ When disabled, the plugin enables WiFi automatically without prompting whenever 
 
 ---
 
+## Plugin Name (Branding)
+
+**Default:** `Booklore`
+
+Lets you rename how the plugin is labeled in KOReader UI text. The setting is available in:
+
+**Tools -> BookLore Sync -> Preferences -> Plugin Name**
+
+Behavior details:
+
+- The value is trimmed and normalized before saving.
+- If the name ends with `Sync`, that suffix is removed automatically to avoid duplicate naming.
+- The plugin also computes a shortcut-style label as `<DisplayName>Sync` for places that use the compact form.
+- If branding cannot be applied globally, the value is still saved locally and you'll see an error message with details.
+
+Examples:
+
+- `MyLibrary` -> display name `MyLibrary`, shortcut name `MyLibrarySync`
+- `MyLibrarySync` -> display name `MyLibrary`, shortcut name `MyLibrarySync`
+
+Branding affects plugin-provided labels and messages; it does not rename unrelated KOReader UI text from other plugins.
+
+---
+
 ## Export Settings
 
 Writes the current plugin configuration to a JSON file at:

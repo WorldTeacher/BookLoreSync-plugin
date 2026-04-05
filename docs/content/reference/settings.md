@@ -111,6 +111,7 @@ Settings are read and written via the menus in **Tools → BookLore Sync → Set
 |-----|------|---------|-------------|
 | `silent_messages` | boolean | `false` | Suppress session-related popup notifications |
 | `log_to_file` | boolean | `false` | Enable file-based debug logging with daily rotation |
+| `booklore_brand_display_name` | string | `"Booklore"` | Custom plugin display name used for UI branding; trailing `Sync` is normalized away and shortcut naming is derived automatically |
 
 ---
 

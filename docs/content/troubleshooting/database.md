@@ -133,8 +133,8 @@ The plugin will create a fresh database on the next startup and prompt you to co
 
 | Action | Menu path | What it clears |
 |--------|-----------|---------------|
-| Clear book cache | Manage Sessions → Clear Cache | `book_cache` table only |
-| Clear pending sessions | Manage Sessions → Clear Pending | `pending_sessions`, `pending_ratings`, `pending_annotations` tables |
+| Clear book cache | Sync & Cache → Clear Cache | `book_cache` table only |
+| Clear pending sessions | Sync & Cache → Clear Pending | `pending_sessions`, `pending_ratings`, `pending_annotations` tables |
 
 ---
 

@@ -47,7 +47,7 @@ Run this once after setting up your Hardcover token and after your books are mat
 
 A summary is shown at the end with counts for stored, skipped, and failed books.
 
-Requires BookLore server URL and credentials to be configured. See [Authentication](@/configuration/authentication.md).
+Requires BookLore server URL and credentials to be configured. See [Connection Setup](@/configuration/authentication.md).
 
 ---
 

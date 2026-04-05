@@ -12,7 +12,7 @@ All settings are stored in the `plugin_settings` table of the local SQLite datab
 SELECT key, value FROM plugin_settings ORDER BY key;
 ```
 
-Settings are read and written via the menus in **Tools → BookLore Sync → Settings**. You should not need to edit them manually.
+Settings are read and written via the menus in **Tools → BookLore Sync**. You should not need to edit them manually.
 
 ---
 

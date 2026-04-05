@@ -60,3 +60,20 @@ hide_page_list = true
   </a>
 
 </div>
+
+---
+
+## Main menu order
+
+Current top-level order under **Tools → BookLore Sync**:
+
+1. **Enable Sync**
+2. **Connection Setup**
+3. **What to Sync**
+4. **Sync Behavior**
+5. **Sync & Cache**
+6. **Shelf Sync**
+7. **Import & Matching**
+8. **Integrations**
+9. **Appearance & Diagnostics**
+10. **About & Updates**

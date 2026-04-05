@@ -3515,7 +3515,7 @@ function BookloreSync:addToMainMenu(menu_items)
     }
 
     local shelf_downloads_menu = {
-        text = _("Shelf Downloads"),
+        text = _("Shelf Sync"),
         sub_item_table = {
             {
                 text = _("Sync from Booklore Shelf"),

@@ -945,6 +945,18 @@ function APIClient:_normalizeBookObject(book)
         if not book.isbn13 then
             book.isbn13 = book.metadata.isbn13
         end
+        if not book.pagecount then
+            book.pagecount = book.metadata.pagecount or book.metadata.pageCount
+        end
+    end
+
+    if book.pagecount ~= nil then
+        local normalized_pagecount = tonumber(book.pagecount)
+        if normalized_pagecount and normalized_pagecount > 0 then
+            book.pagecount = math.floor(normalized_pagecount + 0.5)
+        else
+            book.pagecount = nil
+        end
     end
 
     -- Normalise hardcover_id: accept all known field names from the API.

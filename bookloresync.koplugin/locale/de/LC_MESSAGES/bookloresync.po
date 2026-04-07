@@ -1224,21 +1224,37 @@ msgstr "Fortschrittssynchronisierung"
 msgid "Configure KOReader document-position sync with Booklore."
 msgstr "KOReader-Dokumentposition mit Booklore synchronisieren."
 
-#: bookloresync.koplugin/main.lua:3144
-msgid "Automatically keep documents in sync"
-msgstr "Dokumente automatisch synchron halten"
+#: bookloresync.koplugin/main.lua:3245
+msgid "Automatically sync progress"
+msgstr "Fortschritt automatisch synchronisieren"
 
 #: bookloresync.koplugin/main.lua:3145
 msgid "Automatically keep document position in sync across devices."
 msgstr "Dokumentenposition gerateubergreifend automatisch synchron halten."
 
-#: bookloresync.koplugin/main.lua:3154
-msgid "Automatic document sync enabled"
-msgstr "Automatische Dokumentsynchronisierung aktiviert"
+#: bookloresync.koplugin/main.lua:3255
+msgid "Automatic progress sync enabled"
+msgstr "Automatische Fortschrittssynchronisierung aktiviert"
 
-#: bookloresync.koplugin/main.lua:3154
-msgid "Automatic document sync disabled"
-msgstr "Automatische Dokumentsynchronisierung deaktiviert"
+#: bookloresync.koplugin/main.lua:3255
+msgid "Automatic progress sync disabled"
+msgstr "Automatische Fortschrittssynchronisierung deaktiviert"
+
+#: bookloresync.koplugin/main.lua:3428
+msgid "Normalize session locations"
+msgstr "Sitzungspositionen normalisieren"
+
+#: bookloresync.koplugin/main.lua:3429
+msgid "When enabled, start/end session locations are scaled to server pagecount metadata before upload. Progress percentages are unchanged."
+msgstr "Wenn aktiviert, werden Start-/Endpositionen von Sitzungen vor dem Hochladen auf die Server-Seitenzahl skaliert. Fortschrittsprozente bleiben unverändert."
+
+#: bookloresync.koplugin/main.lua:3445
+msgid "Session location normalization enabled"
+msgstr "Normalisierung von Sitzungspositionen aktiviert"
+
+#: bookloresync.koplugin/main.lua:3446
+msgid "Session location normalization disabled"
+msgstr "Normalisierung von Sitzungspositionen deaktiviert"
 
 #: bookloresync.koplugin/main.lua:3160
 msgid "Pull progress on book open"
@@ -1991,6 +2007,44 @@ msgstr ""
 "Dies ausfuhren, wenn Sie die Bibliothek neu erstellt haben und sich alle IDs "
 "geandert haben. Setzt alle gespeicherten Buch-IDs zuruck und lost sie erneut "
 "vom Server auf."
+
+#: bookloresync.koplugin/main.lua:3933
+msgid "Re-sync Stored Metadata"
+msgstr "Gespeicherte Metadaten neu synchronisieren"
+
+#: bookloresync.koplugin/main.lua:3934
+msgid "Re-fetch metadata for all cached books that already have a Booklore ID. Updates fields like server pagecount for existing cache entries."
+msgstr "Metadaten fur alle gecachten Bucher mit bestehender Booklore-ID erneut abrufen. Aktualisiert Felder wie die Server-Seitenzahl fur vorhandene Cache-Eintrage."
+
+#: bookloresync.koplugin/main.lua:8078
+msgid ""
+"This will re-fetch metadata for all matched cached books from the server.\n"
+"\n"
+"Use this to refresh stored metadata such as server pagecount.\n"
+"\n"
+"Continue?"
+msgstr ""
+"Dies ruft Metadaten fur alle zugeordneten gecachten Bucher erneut vom Server ab.\n"
+"\n"
+"Verwenden Sie dies, um gespeicherte Metadaten wie die Server-Seitenzahl zu aktualisieren.\n"
+"\n"
+"Fortfahren?"
+
+#: bookloresync.koplugin/main.lua:8079
+msgid "Re-sync Metadata"
+msgstr "Metadaten neu synchronisieren"
+
+#: bookloresync.koplugin/main.lua:8090
+msgid "No network connection. Metadata refresh skipped."
+msgstr "Keine Netzwerkverbindung. Metadatenaktualisierung ubersprungen."
+
+#: bookloresync.koplugin/main.lua:8135
+msgid "No matched cached books found."
+msgstr "Keine zugeordneten gecachten Bucher gefunden."
+
+#: bookloresync.koplugin/main.lua:8143
+msgid "Metadata refresh complete: %1 updated, %2 failed."
+msgstr "Metadatenaktualisierung abgeschlossen: %1 aktualisiert, %2 fehlgeschlagen."
 
 #: bookloresync.koplugin/main.lua:3923 bookloresync.koplugin/main.lua:3929
 msgid "Clear..."

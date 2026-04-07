@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 25,  -- Current database schema version
+    VERSION = 27,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -707,6 +707,12 @@ Database.migrations = {
             ON pending_koreader_progress(created_at)
         ]],
     },
+
+    -- Migration 26: Store server-reported pagecount in book_cache.
+    [26] = {},
+
+    -- Migration 27: Store KOReader pagecount captured with each pending session.
+    [27] = {},
 }
 
 -- Post-migration hooks: Lua functions run after the SQL transaction commits.
@@ -861,6 +867,58 @@ Database.migration_hooks = {
             self.plugin:logWarn("BookloreSync Database: Migration 10 hook: could not delete booklore.lua:", remove_err)
         end
 
+        return true
+    end,
+
+    -- Migration 26: Add server_pagecount to book_cache if not already present.
+    [26] = function(db)
+        local has_col = false
+        local info = db.conn:prepare("PRAGMA table_info(book_cache)")
+        if info then
+            for row in info:rows() do
+                if row[2] == "server_pagecount" then
+                    has_col = true
+                    break
+                end
+            end
+            info:close()
+        end
+
+        if not has_col then
+            local res = db.conn:exec("ALTER TABLE book_cache ADD COLUMN server_pagecount INTEGER")
+            if res ~= SQ3.OK then
+                self.plugin:logErr("BookloreSync Database: Migration 26 hook: failed to add server_pagecount:", db.conn:errmsg())
+                return false
+            end
+        else
+            self.plugin:logInfo("BookloreSync Database: Migration 26 hook: server_pagecount already exists, skipping ALTER")
+        end
+        return true
+    end,
+
+    -- Migration 27: Add koreader_pagecount to pending_sessions if not already present.
+    [27] = function(db)
+        local has_col = false
+        local info = db.conn:prepare("PRAGMA table_info(pending_sessions)")
+        if info then
+            for row in info:rows() do
+                if row[2] == "koreader_pagecount" then
+                    has_col = true
+                    break
+                end
+            end
+            info:close()
+        end
+
+        if not has_col then
+            local res = db.conn:exec("ALTER TABLE pending_sessions ADD COLUMN koreader_pagecount INTEGER")
+            if res ~= SQ3.OK then
+                self.plugin:logErr("BookloreSync Database: Migration 27 hook: failed to add koreader_pagecount:", db.conn:errmsg())
+                return false
+            end
+        else
+            self.plugin:logInfo("BookloreSync Database: Migration 27 hook: koreader_pagecount already exists, skipping ALTER")
+        end
         return true
     end,
 }
@@ -1088,7 +1146,7 @@ function Database:getBookByFilePath(file_path)
     file_path = tostring(file_path)
     
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13, hardcover_id
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13, hardcover_id, server_pagecount
         FROM book_cache
         WHERE file_path = ?
     ]])
@@ -1126,6 +1184,7 @@ function Database:getBookByFilePath(file_path)
             isbn10 = row[8] and tostring(row[8]) or nil,
             isbn13 = row[9] and tostring(row[9]) or nil,
             hardcover_id = row[10] and tonumber(row[10]) or nil,
+            server_pagecount = row[11] and tonumber(row[11]) or nil,
         }
         break
     end
@@ -1137,7 +1196,7 @@ end
 ---Database:getBookByHash.
 function Database:getBookByHash(file_hash)
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13, hardcover_id
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, isbn10, isbn13, hardcover_id, server_pagecount
         FROM book_cache
         WHERE file_hash = ?
         LIMIT 1
@@ -1163,6 +1222,7 @@ function Database:getBookByHash(file_hash)
             isbn10 = row[8] and tostring(row[8]) or nil,
             isbn13 = row[9] and tostring(row[9]) or nil,
             hardcover_id = row[10] and tonumber(row[10]) or nil,
+            server_pagecount = row[11] and tonumber(row[11]) or nil,
         }
         break
     end
@@ -1180,7 +1240,7 @@ function Database:getBookByBookId(book_id)
     end
     
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, last_accessed
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, server_pagecount
         FROM book_cache
         WHERE book_id = ?
         LIMIT 1
@@ -1203,6 +1263,7 @@ function Database:getBookByBookId(book_id)
             title = row[5] and tostring(row[5]) or nil,
             author = row[6] and tostring(row[6]) or nil,
             last_accessed = row[7] and tonumber(row[7]) or nil,
+            server_pagecount = row[8] and tonumber(row[8]) or nil,
         }
         break
     end
@@ -1212,7 +1273,7 @@ function Database:getBookByBookId(book_id)
 end
 
 ---Database:saveBookCache.
-function Database:saveBookCache(file_path, file_hash, book_id, title, author, isbn10, isbn13)
+function Database:saveBookCache(file_path, file_hash, book_id, title, author, isbn10, isbn13, server_pagecount)
     file_path = tostring(file_path or "")
     file_hash = tostring(file_hash or "")
     
@@ -1229,6 +1290,7 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
     self.plugin:logDbg("  author:", author, "type:", type(author))
     self.plugin:logDbg("  isbn10:", isbn10, "type:", type(isbn10))
     self.plugin:logDbg("  isbn13:", isbn13, "type:", type(isbn13))
+    self.plugin:logDbg("  server_pagecount:", server_pagecount, "type:", type(server_pagecount))
     
     if book_id ~= nil then
         local original_book_id = book_id
@@ -1238,12 +1300,58 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
             book_id = nil
         end
     end
+
+    if server_pagecount ~= nil then
+        local original_server_pagecount = server_pagecount
+        server_pagecount = tonumber(server_pagecount)
+        if not server_pagecount or server_pagecount <= 0 then
+            self.plugin:logWarn("BookloreSync Database: Invalid server_pagecount, setting to NULL. Original value:", original_server_pagecount, "type:", type(original_server_pagecount))
+            server_pagecount = nil
+        else
+            server_pagecount = math.floor(server_pagecount + 0.5)
+        end
+    else
+        -- Preserve existing server_pagecount when caller does not provide one.
+        local existing_stmt
+        if file_path ~= "" then
+            existing_stmt = self.conn:prepare("SELECT server_pagecount FROM book_cache WHERE file_path = ? LIMIT 1")
+            if existing_stmt then
+                existing_stmt:bind(file_path)
+                for row in existing_stmt:rows() do
+                    server_pagecount = row[1] and tonumber(row[1]) or nil
+                    break
+                end
+                existing_stmt:close()
+            end
+        end
+        if server_pagecount == nil and file_hash ~= "" then
+            existing_stmt = self.conn:prepare("SELECT server_pagecount FROM book_cache WHERE file_hash = ? LIMIT 1")
+            if existing_stmt then
+                existing_stmt:bind(file_hash)
+                for row in existing_stmt:rows() do
+                    server_pagecount = row[1] and tonumber(row[1]) or nil
+                    break
+                end
+                existing_stmt:close()
+            end
+        end
+    end
     
     self.plugin:logDbg("BookloreSync Database: After conversion, book_id:", book_id, "type:", type(book_id))
     
     local stmt = self.conn:prepare([[
-        INSERT OR REPLACE INTO book_cache (file_path, file_hash, book_id, title, author, isbn10, isbn13, last_accessed)
-        VALUES (?, ?, ?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+        INSERT INTO book_cache (file_path, file_hash, book_id, title, author, isbn10, isbn13, server_pagecount, last_accessed)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+        ON CONFLICT(file_path) DO UPDATE SET
+            file_hash = excluded.file_hash,
+            book_id = excluded.book_id,
+            title = excluded.title,
+            author = excluded.author,
+            isbn10 = excluded.isbn10,
+            isbn13 = excluded.isbn13,
+            server_pagecount = excluded.server_pagecount,
+            last_accessed = excluded.last_accessed,
+            updated_at = CAST(strftime('%s', 'now') AS INTEGER)
     ]])
     
     if not stmt then
@@ -1251,7 +1359,7 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
         return false
     end
     
-    stmt:bind(file_path, file_hash, book_id, title, author, isbn10, isbn13)
+    stmt:bind(file_path, file_hash, book_id, title, author, isbn10, isbn13, server_pagecount)
     
     local result = stmt:step()
     stmt:close()
@@ -1446,6 +1554,38 @@ function Database:getAllUnmatchedBooks()
     return books
 end
 
+---Database:getAllCachedBooks.
+function Database:getAllCachedBooks()
+    local stmt = self.conn:prepare([[
+        SELECT id, file_path, file_hash, book_id, title, author, isbn10, isbn13, server_pagecount
+        FROM book_cache
+        ORDER BY last_accessed DESC
+    ]])
+
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare getAllCachedBooks statement:", self.conn:errmsg())
+        return {}
+    end
+
+    local books = {}
+    for row in stmt:rows() do
+        table.insert(books, {
+            id = tonumber(row[1]),
+            file_path = row[2] and tostring(row[2]) or "",
+            file_hash = row[3] and tostring(row[3]) or "",
+            book_id = row[4] and tonumber(row[4]) or nil,
+            title = row[5] and tostring(row[5]) or nil,
+            author = row[6] and tostring(row[6]) or nil,
+            isbn10 = row[7] and tostring(row[7]) or nil,
+            isbn13 = row[8] and tostring(row[8]) or nil,
+            server_pagecount = row[9] and tonumber(row[9]) or nil,
+        })
+    end
+
+    stmt:close()
+    return books
+end
+
 ---Database:getBookCacheStats.
 function Database:getBookCacheStats()
     local stmt = self.conn:prepare([[
@@ -1492,13 +1632,20 @@ function Database:addPendingSession(session_data)
     end
     
     local duration_seconds = tonumber(session_data.durationSeconds) or 0
+    local koreader_pagecount = nil
+    if session_data.koreaderPagecount ~= nil then
+        local parsed_pagecount = tonumber(session_data.koreaderPagecount)
+        if parsed_pagecount and parsed_pagecount > 0 then
+            koreader_pagecount = math.floor(parsed_pagecount + 0.5)
+        end
+    end
     
     local stmt = self.conn:prepare([[
         INSERT INTO pending_sessions (
             book_id, book_hash, book_title, koreader_book_id, book_type, start_time, end_time,
             duration_seconds, start_progress, end_progress, progress_delta,
-            start_location, end_location
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            start_location, end_location, koreader_pagecount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ]])
     
     if not stmt then
@@ -1519,7 +1666,8 @@ function Database:addPendingSession(session_data)
         session_data.endProgress or 0.0,
         session_data.progressDelta or 0.0,
         session_data.startLocation or "0",
-        session_data.endLocation or "0"
+        session_data.endLocation or "0",
+        koreader_pagecount
     )
     
     local result = stmt:step()
@@ -1540,7 +1688,7 @@ function Database:getPendingSessions(limit)
     local stmt = self.conn:prepare([[
         SELECT id, book_id, book_hash, book_title, koreader_book_id, book_type, start_time, end_time,
                duration_seconds, start_progress, end_progress, progress_delta,
-               start_location, end_location, retry_count
+               start_location, end_location, retry_count, koreader_pagecount
         FROM pending_sessions
         ORDER BY created_at ASC
         LIMIT ?
@@ -1571,6 +1719,7 @@ function Database:getPendingSessions(limit)
             startLocation = tostring(row[13]),
             endLocation = tostring(row[14]),
             retryCount = tonumber(row[15]),
+            koreaderPagecount = row[16] and tonumber(row[16]) or nil,
         })
     end
     
@@ -2493,7 +2642,7 @@ function Database:getBookCacheById(id)
     end
 
     local stmt = self.conn:prepare([[
-        SELECT id, file_path, file_hash, book_id, title, author, hardcover_id
+        SELECT id, file_path, file_hash, book_id, title, author, hardcover_id, server_pagecount
         FROM book_cache WHERE id = ? LIMIT 1
     ]])
     if not stmt then
@@ -2518,6 +2667,7 @@ function Database:getBookCacheById(id)
             title        = row[5],
             author       = row[6],
             hardcover_id = row[7] and tonumber(row[7]) or nil,
+            server_pagecount = row[8] and tonumber(row[8]) or nil,
         }
         break
     end

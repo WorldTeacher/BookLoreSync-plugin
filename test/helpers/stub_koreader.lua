@@ -4,6 +4,7 @@ local STUB_KEYS = {
   "dispatcher",
   "apps/filemanager/filemanager",
   "ui/widget/eventlistener",
+  "ui/event",
   "ui/widget/infomessage",
   "ui/widget/inputdialog",
   "luasettings",
@@ -25,6 +26,7 @@ local STUB_KEYS = {
   "ffi/util",
   "string.buffer",
   "ui/trapper",
+  "device",
 }
 
 local function install()
@@ -65,6 +67,10 @@ local function install()
 
   package.preload["ui/widget/eventlistener"] = function()
     return {}
+  end
+
+  package.preload["ui/event"] = function()
+    return { new = function(_, o) return o or {} end }
   end
 
   package.preload["ui/widget/infomessage"] = function()
@@ -214,6 +220,15 @@ local function install()
         end
         return true, result
       end,
+    }
+  end
+
+  package.preload["device"] = function()
+    return {
+      model = "KOReader-Test",
+      isAndroid = function() return false end,
+      canExecuteScript = function() return true end,
+      performHapticFeedback = function() end,
     }
   end
 

@@ -381,6 +381,10 @@ function BookloreSync:init()
     if self.progress_sync_set_read_on_rating == nil then
         self.progress_sync_set_read_on_rating = false
     end
+    self.progress_sync_normalize_session_locations = self.settings:readSetting("progress_sync_normalize_session_locations")
+    if self.progress_sync_normalize_session_locations == nil then
+        self.progress_sync_normalize_session_locations = false
+    end
     self.progress_sync_last_push_ts = 0
     self.progress_sync_page_counter = 0
     self.progress_sync_last_page = -1
@@ -3238,7 +3242,7 @@ function BookloreSync:addToMainMenu(menu_items)
         help_text = _("Configure KOReader document-position sync with Booklore."),
         sub_item_table = {
             {
-                text = _("Automatically keep documents in sync"),
+                text = _("Automatically sync progress"),
                 help_text = _("Automatically keep document position in sync across devices."),
                 checked_func = function()
                     return self.progress_sync_enabled
@@ -3248,7 +3252,7 @@ function BookloreSync:addToMainMenu(menu_items)
                     self.settings:saveSetting("progress_sync_enabled", self.progress_sync_enabled)
                     self.settings:flush()
                     UIManager:show(InfoMessage:new{
-                        text = self.progress_sync_enabled and _("Automatic document sync enabled") or _("Automatic document sync disabled"),
+                        text = self.progress_sync_enabled and _("Automatic progress sync enabled") or _("Automatic progress sync disabled"),
                         timeout = 2,
                     })
                 end,
@@ -3420,6 +3424,28 @@ function BookloreSync:addToMainMenu(menu_items)
                     }
                     UIManager:show(widget)
                 end,
+            },
+            {
+                text = _("Normalize session locations"),
+                help_text = _("When enabled, start/end session locations are scaled to server pagecount metadata before upload. Progress percentages are unchanged."),
+                checked_func = function()
+                    return self.progress_sync_normalize_session_locations
+                end,
+                enabled_func = function()
+                    return self.progress_sync_enabled
+                end,
+                callback = function()
+                    self.progress_sync_normalize_session_locations = not self.progress_sync_normalize_session_locations
+                    self.settings:saveSetting("progress_sync_normalize_session_locations", self.progress_sync_normalize_session_locations)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.progress_sync_normalize_session_locations
+                            and _("Session location normalization enabled")
+                            or _("Session location normalization disabled"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
             },
             {
                 text = _("Set book to read on rating"),
@@ -3901,6 +3927,13 @@ function BookloreSync:addToMainMenu(menu_items)
                         help_text = _("Run this when you re-created the library and all IDs have changed. Resets all stored book IDs and re-resolves them from the server."),
                         callback = function()
                             self:rematchAllBooksInCache()
+                        end,
+                    },
+                    {
+                        text = _("Re-sync Stored Metadata"),
+                        help_text = _("Re-fetch metadata for all cached books that already have a Booklore ID. Updates fields like server pagecount for existing cache entries."),
+                        callback = function()
+                            self:resyncStoredMetadata()
                         end,
                     },
                     {
@@ -4401,6 +4434,77 @@ function BookloreSync:roundKoreaderSyncPercentage(value)
     if n < 0 then n = 0 end
     if n > 1 then n = 1 end
     return math.floor(n * 10000 + 0.5) / 10000
+end
+
+--[[--
+Round a numeric value to the nearest integer.
+
+@param value any
+@return number|nil
+--]]
+---BookloreSync:roundToInt.
+function BookloreSync:roundToInt(value)
+    local n = tonumber(value)
+    if not n then
+        return nil
+    end
+    return math.floor(n + 0.5)
+end
+
+--[[--
+Normalize a KOReader location page to the server page space.
+
+@param location any
+@param koreader_pagecount number|nil
+@param server_pagecount number|nil
+@return string normalized_location
+--]]
+---BookloreSync:normalizeSessionLocationForServer.
+function BookloreSync:normalizeSessionLocationForServer(location, koreader_pagecount, server_pagecount)
+    local location_num = tonumber(location)
+    local k_count = tonumber(koreader_pagecount)
+    local s_count = tonumber(server_pagecount)
+
+    if not location_num then
+        return tostring(location or "0")
+    end
+
+    if not k_count or k_count <= 0 or not s_count or s_count <= 0 then
+        return tostring(location)
+    end
+
+    local scaled = location_num * (s_count / k_count)
+    local normalized = self:roundToInt(scaled) or location_num
+    if normalized < 1 then normalized = 1 end
+    if normalized > s_count then normalized = s_count end
+    return tostring(normalized)
+end
+
+--[[--
+Resolve server pagecount for a pending session.
+
+@param session table
+@return number|nil
+--]]
+---BookloreSync:getServerPagecountForSession.
+function BookloreSync:getServerPagecountForSession(session)
+    if not self.db or type(session) ~= "table" then
+        return nil
+    end
+
+    local session_book = nil
+    if session.bookHash and session.bookHash ~= "" then
+        session_book = self.db:getBookByHash(session.bookHash)
+    end
+    if not session_book and session.bookId then
+        session_book = self.db:getBookByBookId(session.bookId)
+    end
+
+    local server_pagecount = session_book and tonumber(session_book.server_pagecount) or nil
+    if server_pagecount and server_pagecount > 0 then
+        return math.floor(server_pagecount + 0.5)
+    end
+    return nil
 end
 
 --[[--
@@ -4923,8 +5027,11 @@ function BookloreSync:getBookIdByHash(book_hash)
     
     local cached_book = self.db:getBookByHash(book_hash)
     if cached_book and cached_book.book_id then
-        self:logInfo("BookloreSync: Found book ID in database cache:", cached_book.book_id)
-        return cached_book.book_id, cached_book.isbn10, cached_book.isbn13
+        if cached_book.server_pagecount and tonumber(cached_book.server_pagecount) and tonumber(cached_book.server_pagecount) > 0 then
+            self:logInfo("BookloreSync: Found book ID in database cache:", cached_book.book_id)
+            return cached_book.book_id, cached_book.isbn10, cached_book.isbn13, cached_book.server_pagecount
+        end
+        self:logInfo("BookloreSync: Cached book has no server pagecount, refreshing from server")
     end
     
     self:logInfo("BookloreSync: Book ID not in cache, querying server")
@@ -4933,22 +5040,28 @@ function BookloreSync:getBookIdByHash(book_hash)
     
     if not success then
         self:logWarn("BookloreSync: Failed to get book from server (offline or error)")
-        return nil, nil, nil
+        return nil, nil, nil, nil
     end
     
     if not book_data or not book_data.id then
         self:logInfo("BookloreSync: Book not found on server")
-        return nil, nil, nil
+        return nil, nil, nil, nil
     end
     
     local book_id = tonumber(book_data.id)
     if not book_id then
         self:logWarn("BookloreSync: Invalid book ID from server:", book_data.id)
-        return nil, nil, nil
+        return nil, nil, nil, nil
     end
-    
+
     local isbn10 = book_data.isbn10 or nil
     local isbn13 = book_data.isbn13 or nil
+    local server_pagecount = tonumber(book_data.pagecount)
+    if server_pagecount and server_pagecount > 0 then
+        server_pagecount = math.floor(server_pagecount + 0.5)
+    else
+        server_pagecount = nil
+    end
     
     self:logInfo("BookloreSync: Found book ID on server:", book_id)
     self:logInfo("BookloreSync: Book data from server includes ISBN-10:", isbn10, "ISBN-13:", isbn13)
@@ -4961,12 +5074,13 @@ function BookloreSync:getBookIdByHash(book_hash)
             book_data.title or cached_book.title, 
             book_data.author or cached_book.author,
             isbn10,
-            isbn13
+            isbn13,
+            server_pagecount
         )
         self:logInfo("BookloreSync: Updated database cache with book ID and ISBN")
     end
-    
-    return book_id, isbn10, isbn13
+
+    return book_id, isbn10, isbn13, server_pagecount
 end
 
 --[[--
@@ -5072,6 +5186,23 @@ function BookloreSync:startSession()
         self:logInfo("BookloreSync: Found book in cache - ID:", cached_book.book_id, "Hash:", cached_book.file_hash)
         file_hash = cached_book.file_hash
         book_id = cached_book.book_id and tonumber(cached_book.book_id) or nil
+
+        -- First open can have hash cached locally but no server-resolved ID yet.
+        -- If network is available, resolve now so we do not need a second open.
+        if file_hash and file_hash ~= "" and not book_id and NetworkMgr:isConnected() then
+            self:logInfo("BookloreSync: Cache entry has no book_id, resolving from server now")
+            local resolved_book_id, isbn10, isbn13, server_pagecount = self:getBookIdByHash(file_hash)
+            if resolved_book_id then
+                book_id = resolved_book_id
+                local save_ok = self.db:saveBookCache(file_path, file_hash, book_id,
+                    cached_book.title, cached_book.author, isbn10, isbn13, server_pagecount)
+                if save_ok then
+                    self:logInfo("BookloreSync: Cache updated with resolved book_id on open:", book_id)
+                end
+            else
+                self:logInfo("BookloreSync: Could not resolve book_id for cached hash on open")
+            end
+        end
     else
         self:logInfo("BookloreSync: Book not in cache, calculating hash")
             file_hash = self:calculateBookHash(file_path)
@@ -5081,10 +5212,10 @@ function BookloreSync:startSession()
         else
             self:logInfo("BookloreSync: Hash calculated:", file_hash)
             
-            local isbn10, isbn13
+            local isbn10, isbn13, server_pagecount
             if NetworkMgr:isConnected() then
                 self:logInfo("BookloreSync: Network connected, looking up book on server")
-                book_id, isbn10, isbn13 = self:getBookIdByHash(file_hash)
+                book_id, isbn10, isbn13, server_pagecount = self:getBookIdByHash(file_hash)
                 
                 if book_id then
                     self:logInfo("BookloreSync: Book ID found on server:", book_id)
@@ -5133,7 +5264,7 @@ function BookloreSync:startSession()
             end
             
             local ok, result = pcall(function()
-                return self.db:saveBookCache(file_path, file_hash, book_id, nil, nil, isbn10, isbn13)
+                return self.db:saveBookCache(file_path, file_hash, book_id, nil, nil, isbn10, isbn13, server_pagecount)
             end)
             
             if not ok then
@@ -5152,6 +5283,13 @@ function BookloreSync:startSession()
     end
     
     local start_progress, start_location = self:getCurrentProgress()
+    local koreader_pagecount = nil
+    if self.ui and self.ui.document and self.ui.document.getPageCount then
+        local pc = tonumber(self.ui.document:getPageCount())
+        if pc and pc > 0 then
+            koreader_pagecount = math.floor(pc + 0.5)
+        end
+    end
     
     local koreader_book_id = nil
     local book_title = nil
@@ -5181,6 +5319,7 @@ function BookloreSync:startSession()
         start_progress = start_progress,
         start_location = start_location,
         book_type = self:getBookType(file_path),
+        koreader_pagecount = koreader_pagecount,
     }
     
     self:logInfo("BookloreSync: Session started for '", book_title, "' at", start_progress, "% (location:", start_location, ")")
@@ -5258,6 +5397,7 @@ function BookloreSync:endSession(options)
         progressDelta = progress_delta,
         startLocation = self.current_session.start_location,
         endLocation = end_location,
+        koreaderPagecount = self.current_session.koreader_pagecount,
     }
     
     self:logInfo("BookloreSync: Session valid - Duration:", duration_seconds, "s, Progress delta:", progress_delta, "%")
@@ -5427,10 +5567,19 @@ function BookloreSync:onCloseDocument()
                 pre_book_id = tonumber(cached.book_id)
                 self:logInfo("BookloreSync: book_id resolved from cache at close:", pre_book_id)
             else
-                local ok_bh, book_data = self.api:getBookByHash(pre_file_hash)
-                if ok_bh and book_data and book_data.id then
-                    pre_book_id = tonumber(book_data.id)
-                    self.db:updateBookId(pre_file_hash, pre_book_id)
+                local resolved_book_id, isbn10, isbn13, server_pagecount = self:getBookIdByHash(pre_file_hash)
+                if resolved_book_id then
+                    pre_book_id = tonumber(resolved_book_id)
+                    self.db:saveBookCache(
+                        pre_file_path,
+                        pre_file_hash,
+                        pre_book_id,
+                        nil,
+                        nil,
+                        isbn10,
+                        isbn13,
+                        server_pagecount
+                    )
                     self:logInfo("BookloreSync: book_id resolved from server at close:", pre_book_id)
                 else
                     self:logWarn("BookloreSync: book_id could not be resolved at close - all data will be stored locally only")
@@ -7942,6 +8091,91 @@ function BookloreSync:rematchAllBooksInCache()
 end
 
 --[[--
+Re-fetch metadata for cached books that are already matched.
+
+This updates cached server metadata (for example server pagecount) without
+resetting existing matches.
+--]]
+---BookloreSync:resyncStoredMetadata.
+function BookloreSync:resyncStoredMetadata()
+    if not self.db then
+        return
+    end
+
+    UIManager:show(ConfirmBox:new{
+        text = _("This will re-fetch metadata for all matched cached books from the server.\n\nUse this to refresh stored metadata such as server pagecount.\n\nContinue?"),
+        ok_text = _("Re-sync Metadata"),
+        cancel_text = _("Cancel"),
+        ok_callback = function()
+            self:_runStoredMetadataResync()
+        end,
+    })
+end
+
+---BookloreSync:_runStoredMetadataResync.
+function BookloreSync:_runStoredMetadataResync()
+    if not self.db then
+        return
+    end
+
+    if not NetworkMgr:isConnected() then
+        UIManager:show(InfoMessage:new{
+            text = _("No network connection. Metadata refresh skipped."),
+            timeout = 3,
+        })
+        return
+    end
+
+    self.api:init(self.server_url, self.username, self.password, self.db)
+
+    local books = self.db:getAllCachedBooks() or {}
+    local total_matched = 0
+    local refreshed = 0
+    local failed = 0
+
+    for _, book in ipairs(books) do
+        local existing_book_id = tonumber(book.book_id)
+        if existing_book_id and existing_book_id > 0 and book.file_hash and book.file_hash ~= "" then
+            total_matched = total_matched + 1
+
+            local resolved_book_id, isbn10, isbn13, server_pagecount = self:getBookIdByHash(book.file_hash)
+            if resolved_book_id then
+                local ok = self.db:saveBookCache(
+                    book.file_path,
+                    book.file_hash,
+                    resolved_book_id,
+                    book.title,
+                    book.author,
+                    isbn10,
+                    isbn13,
+                    server_pagecount
+                )
+                if ok then
+                    refreshed = refreshed + 1
+                else
+                    failed = failed + 1
+                end
+            else
+                failed = failed + 1
+            end
+        end
+    end
+
+    if total_matched == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No matched cached books found."),
+            timeout = 2,
+        })
+        return
+    end
+
+    UIManager:show(InfoMessage:new{
+        text = T(_("Metadata refresh complete: %1 updated, %2 failed."), refreshed, failed),
+        timeout = 3,
+    })
+end
+
+--[[--
 Show a toggle-selection dialog for clearing synced history records.
 
 Presents toggleable rows for Historical Sessions, Synced Annotations,
@@ -8466,6 +8700,21 @@ function BookloreSync:syncPendingSessions(silent)
         end
 
         local duration_formatted = self:formatDuration(session.durationSeconds)
+        local normalized_start_location = session.startLocation
+        local normalized_end_location = session.endLocation
+        if self.progress_sync_normalize_session_locations then
+            local server_pagecount = self:getServerPagecountForSession(session)
+            normalized_start_location = self:normalizeSessionLocationForServer(
+                session.startLocation,
+                session.koreaderPagecount,
+                server_pagecount
+            )
+            normalized_end_location = self:normalizeSessionLocationForServer(
+                session.endLocation,
+                session.koreaderPagecount,
+                server_pagecount
+            )
+        end
 
         local session_data = {
             bookId            = session.bookId,
@@ -8477,8 +8726,8 @@ function BookloreSync:syncPendingSessions(silent)
             startProgress     = self:roundProgress(session.startProgress),
             endProgress       = self:roundProgress(session.endProgress),
             progressDelta     = self:roundProgress(session.progressDelta),
-            startLocation     = session.startLocation,
-            endLocation       = session.endLocation,
+            startLocation     = normalized_start_location,
+            endLocation       = normalized_end_location,
         }
 
         self:logInfo("BookloreSync: Submitting session", i, "- book_id:", session.bookId,
@@ -8785,7 +9034,7 @@ function BookloreSync:resolveUnmatchedBooks(silent)
         if book.file_hash and book.file_hash ~= "" then
             self:logInfo("BookloreSync: Resolving book:", book.file_path)
             
-            local book_id, isbn10, isbn13 = self:getBookIdByHash(book.file_hash)
+            local book_id, isbn10, isbn13, server_pagecount = self:getBookIdByHash(book.file_hash)
             
             if book_id then
                 self:logInfo("BookloreSync: Resolved book ID:", book_id)
@@ -8796,7 +9045,8 @@ function BookloreSync:resolveUnmatchedBooks(silent)
                     book.title,
                     book.author,
                     isbn10,
-                    isbn13
+                    isbn13,
+                    server_pagecount
                 )
                 resolved_count = resolved_count + 1
             else

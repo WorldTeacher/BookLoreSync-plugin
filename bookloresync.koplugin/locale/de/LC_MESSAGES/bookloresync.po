@@ -1245,8 +1245,8 @@ msgid "Normalize session locations"
 msgstr "Sitzungspositionen normalisieren"
 
 #: bookloresync.koplugin/main.lua:3429
-msgid "When enabled, start/end session locations are scaled to server pagecount metadata before upload. Progress percentages are unchanged."
-msgstr "Wenn aktiviert, werden Start-/Endpositionen von Sitzungen vor dem Hochladen auf die Server-Seitenzahl skaliert. Fortschrittsprozente bleiben unverändert."
+msgid "When enabled, start/end session locations are converted to the server page-count scale so the displayed book page is correct instead of using KOReader-provided pages. This needs page count metadata from the server, which can be re-synced in Sync & Cache -> Advanced. Progress percentages are unchanged."
+msgstr "Wenn aktiviert, werden die Start-/Endpositionen von Sitzungen in die Seitenzahlskala des Servers umgerechnet, damit die angezeigte Buchseite korrekt ist, statt die von KOReader bereitgestellten Seiten zu verwenden. Dafur werden Seitenzahl-Metadaten vom Server benotigt, die unter Synchronisieren & Cache -> Erweitert erneut synchronisiert werden konnen. Fortschrittsprozente bleiben unverandert."
 
 #: bookloresync.koplugin/main.lua:3445
 msgid "Session location normalization enabled"

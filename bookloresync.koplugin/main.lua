@@ -3427,7 +3427,7 @@ function BookloreSync:addToMainMenu(menu_items)
             },
             {
                 text = _("Normalize session locations"),
-                help_text = _("When enabled, start/end session locations are scaled to server pagecount metadata before upload. Progress percentages are unchanged."),
+                help_text = _("When enabled, start/end session locations are converted to the server page-count scale so the displayed book page is correct instead of using KOReader-provided pages. This needs page count metadata from the server, which can be re-synced in Sync & Cache -> Advanced. Progress percentages are unchanged."),
                 checked_func = function()
                     return self.progress_sync_normalize_session_locations
                 end,

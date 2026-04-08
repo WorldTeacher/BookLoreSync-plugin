@@ -1096,7 +1096,7 @@ msgid "Normalize session locations"
 msgstr ""
 
 #: bookloresync.koplugin/main.lua:3429
-msgid "When enabled, start/end session locations are scaled to server pagecount metadata before upload. Progress percentages are unchanged."
+msgid "When enabled, start/end session locations are converted to the server page-count scale so the displayed book page is correct instead of using KOReader-provided pages. This needs page count metadata from the server, which can be re-synced in Sync & Cache -> Advanced. Progress percentages are unchanged."
 msgstr ""
 
 #: bookloresync.koplugin/main.lua:3445

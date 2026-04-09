@@ -698,6 +698,18 @@ function BookloreSync:registerDispatcherActions()
         title = _("BookLoreSync: Sync from Booklore Shelf"),
         general = true,
     })
+    Dispatcher:registerAction("booklore_pull_current_book_progress", {
+        category = "none",
+        event = "PullBookloreCurrentBookProgress",
+        title = _("BookLoreSync: Pull Current Book Progress"),
+        general = true,
+    })
+    Dispatcher:registerAction("booklore_push_current_book_progress", {
+        category = "none",
+        event = "PushBookloreCurrentBookProgress",
+        title = _("BookLoreSync: Push Current Book Progress"),
+        general = true,
+    })
 end
 
 ---BookloreSync:onSyncBookloreShelf.
@@ -712,6 +724,87 @@ function BookloreSync:onSyncBookloreShelf()
     end
     UIManager:scheduleIn(0.1, function()
         self:syncFromBookloreShelf(false)
+    end)
+    return true
+end
+
+---BookloreSync:hasOpenDocumentForProgressSync.
+function BookloreSync:hasOpenDocumentForProgressSync()
+    return self.ui and self.ui.document and self.ui.document.file and self.ui.document.file ~= ""
+end
+
+---BookloreSync:onPullBookloreCurrentBookProgress.
+function BookloreSync:onPullBookloreCurrentBookProgress()
+    if not self:hasOpenDocumentForProgressSync() then
+        UIManager:show(InfoMessage:new{
+            text = _("Open a book to pull progress"),
+            timeout = 2,
+        })
+        return true
+    end
+    if not self.progress_sync_enabled then
+        UIManager:show(InfoMessage:new{
+            text = _("Progress sync is disabled"),
+            timeout = 2,
+        })
+        return true
+    end
+
+    self:_requestWifi(_("pull current book progress"), function()
+        self:pullKoreaderProgress(true)
+    end, function()
+        UIManager:show(InfoMessage:new{
+            text = _("WiFi not enabled - pull skipped"),
+            timeout = 2,
+        })
+    end)
+    return true
+end
+
+---BookloreSync:onPushBookloreCurrentBookProgress.
+function BookloreSync:onPushBookloreCurrentBookProgress()
+    if not self:hasOpenDocumentForProgressSync() then
+        UIManager:show(InfoMessage:new{
+            text = _("Open a book to push progress"),
+            timeout = 2,
+        })
+        return true
+    end
+    if not self.progress_sync_enabled then
+        UIManager:show(InfoMessage:new{
+            text = _("Progress sync is disabled"),
+            timeout = 2,
+        })
+        return true
+    end
+
+    self:_requestWifi(_("push current book progress"), function()
+        local payload = self:buildCurrentKoreaderProgressPayload(os.time())
+        if not payload then
+            UIManager:show(InfoMessage:new{
+                text = _("Could not build current progress payload"),
+                timeout = 2,
+            })
+            return
+        end
+
+        local ok, reason = self:pushCurrentKoreaderProgressDirect(payload)
+        if ok then
+            UIManager:show(InfoMessage:new{
+                text = _("Current book progress pushed"),
+                timeout = 2,
+            })
+        else
+            UIManager:show(InfoMessage:new{
+                text = T(_("Failed to push progress: %1"), tostring(reason or "unknown error")),
+                timeout = 2,
+            })
+        end
+    end, function()
+        UIManager:show(InfoMessage:new{
+            text = _("WiFi not enabled - push skipped"),
+            timeout = 2,
+        })
     end)
     return true
 end
@@ -3242,55 +3335,83 @@ function BookloreSync:addToMainMenu(menu_items)
         help_text = _("Configure KOReader document-position sync with Booklore."),
         sub_item_table = {
             {
-                text = _("Automatically sync progress"),
-                help_text = _("Automatically keep document position in sync across devices."),
-                checked_func = function()
-                    return self.progress_sync_enabled
-                end,
-                callback = function()
-                    self.progress_sync_enabled = not self.progress_sync_enabled
-                    self.settings:saveSetting("progress_sync_enabled", self.progress_sync_enabled)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.progress_sync_enabled and _("Automatic progress sync enabled") or _("Automatic progress sync disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("Pull progress on book open"),
-                help_text = _("When WiFi is already connected, check for remote progress when opening a book."),
-                checked_func = function()
-                    return self.progress_pull_on_open
-                end,
-                enabled_func = function()
-                    return self.progress_sync_enabled
-                end,
-                callback = function()
-                    self.progress_pull_on_open = not self.progress_pull_on_open
-                    self.settings:saveSetting("progress_pull_on_open", self.progress_pull_on_open)
-                    self.settings:flush()
-                end,
+                text = _("General"),
+                sub_item_table = {
+                    {
+                        text = _("Automatically sync progress"),
+                        help_text = _("Automatically keep document position in sync across devices."),
+                        checked_func = function()
+                            return self.progress_sync_enabled
+                        end,
+                        callback = function()
+                            self.progress_sync_enabled = not self.progress_sync_enabled
+                            self.settings:saveSetting("progress_sync_enabled", self.progress_sync_enabled)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.progress_sync_enabled and _("Automatic progress sync enabled") or _("Automatic progress sync disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                    {
+                        text = _("Pull progress on book open"),
+                        help_text = _("When WiFi is already connected, check for remote progress when opening a book."),
+                        checked_func = function()
+                            return self.progress_pull_on_open
+                        end,
+                        enabled_func = function()
+                            return self.progress_sync_enabled
+                        end,
+                        callback = function()
+                            self.progress_pull_on_open = not self.progress_pull_on_open
+                            self.settings:saveSetting("progress_pull_on_open", self.progress_pull_on_open)
+                            self.settings:flush()
+                        end,
+                        keep_menu_open = true,
+                    },
+                    {
+                        text = _("Pull progress on resume"),
+                        help_text = _("When WiFi is already connected, check for remote progress after wake/resume."),
+                        checked_func = function()
+                            return self.progress_pull_on_resume
+                        end,
+                        enabled_func = function()
+                            return self.progress_sync_enabled
+                        end,
+                        callback = function()
+                            self.progress_pull_on_resume = not self.progress_pull_on_resume
+                            self.settings:saveSetting("progress_pull_on_resume", self.progress_pull_on_resume)
+                            self.settings:flush()
+                        end,
+                        keep_menu_open = true,
+                    },
+                    {
+                        text = _("Pull progress now"),
+                        help_text = _("Immediately pull progress for the currently open book."),
+                        enabled_func = function()
+                            return self.progress_sync_enabled
+                        end,
+                        callback = function()
+                            self:onPullBookloreCurrentBookProgress()
+                        end,
+                        keep_menu_open = true,
+                    },
+                    {
+                        text = _("Push progress now"),
+                        help_text = _("Immediately push progress for the currently open book."),
+                        enabled_func = function()
+                            return self.progress_sync_enabled
+                        end,
+                        callback = function()
+                            self:onPushBookloreCurrentBookProgress()
+                        end,
+                        keep_menu_open = true,
+                    },
+                },
                 keep_menu_open = true,
             },
             {
-                text = _("Pull progress on resume"),
-                help_text = _("When WiFi is already connected, check for remote progress after wake/resume."),
-                checked_func = function()
-                    return self.progress_pull_on_resume
-                end,
-                enabled_func = function()
-                    return self.progress_sync_enabled
-                end,
-                callback = function()
-                    self.progress_pull_on_resume = not self.progress_pull_on_resume
-                    self.settings:saveSetting("progress_pull_on_resume", self.progress_pull_on_resume)
-                    self.settings:flush()
-                end,
-                keep_menu_open = true,
-            },
-            {
-                text = _("Sync behavior"),
+                text = _("Conflict handling"),
                 help_text = _("Control how incoming progress updates are applied."),
                 enabled_func = function()
                     return self.progress_sync_enabled
@@ -3370,101 +3491,110 @@ function BookloreSync:addToMainMenu(menu_items)
                 keep_menu_open = true,
             },
             {
-                text = _("Periodic page-turn updates"),
-                help_text = _("Enable or disable periodic page-turn progress updates. Book-open and book-close positions are always stored."),
-                checked_func = function()
-                    return self.progress_sync_page_updates_enabled
-                end,
+                text = _("Update frequency"),
                 enabled_func = function()
                     return self.progress_sync_enabled
                 end,
-                keep_menu_open = true,
-                callback = function()
-                    self.progress_sync_page_updates_enabled = not self.progress_sync_page_updates_enabled
-                    self.progress_sync_trigger = self.progress_sync_page_updates_enabled and "each_n_pages" or "book_open_close"
-                    self.settings:saveSetting("progress_sync_page_updates_enabled", self.progress_sync_page_updates_enabled)
-                    self.settings:saveSetting("progress_sync_trigger", self.progress_sync_trigger)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.progress_sync_page_updates_enabled and _("Periodic page-turn updates enabled") or _("Periodic page-turn updates disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text_func = function()
-                    return T(_("Periodically sync every # pages (%1)"), tostring(self.progress_sync_interval_pages or 1))
-                end,
-                help_text = _("How many page turns before a periodic sync update is queued. Minimum is 1 when periodic updates are enabled."),
-                enabled_func = function()
-                    return self.progress_sync_enabled and self.progress_sync_page_updates_enabled
-                end,
-                keep_menu_open = true,
-                callback = function()
-                    local SpinWidget = require("ui/widget/spinwidget")
-                    local widget = SpinWidget:new{
-                        text = _("This value determines how many page turns it takes to update book progress.\nMinimum value is 1."),
-                        value = self.progress_sync_interval_pages or 1,
-                        value_min = 1,
-                        value_max = 999,
-                        value_step = 1,
-                        value_hold_step = 10,
-                        ok_text = _("Set"),
-                        title_text = _("Number of pages before update"),
-                        default_value = 10,
-                        callback = function(spin)
-                            local n = math.floor(tonumber(spin.value) or 1)
-                            if n < 1 then n = 1 end
-                            self.progress_sync_interval_pages = n
+                sub_item_table = {
+                    {
+                        text = _("Periodic page-turn updates"),
+                        help_text = _("Enable or disable periodic page-turn progress updates. Book-open and book-close positions are always stored."),
+                        checked_func = function()
+                            return self.progress_sync_page_updates_enabled
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            self.progress_sync_page_updates_enabled = not self.progress_sync_page_updates_enabled
                             self.progress_sync_trigger = self.progress_sync_page_updates_enabled and "each_n_pages" or "book_open_close"
-                            self.settings:saveSetting("progress_sync_interval_pages", n)
+                            self.settings:saveSetting("progress_sync_page_updates_enabled", self.progress_sync_page_updates_enabled)
                             self.settings:saveSetting("progress_sync_trigger", self.progress_sync_trigger)
                             self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.progress_sync_page_updates_enabled and _("Periodic page-turn updates enabled") or _("Periodic page-turn updates disabled"),
+                                timeout = 2,
+                            })
                         end,
-                    }
-                    UIManager:show(widget)
-                end,
-            },
-            {
-                text = _("Normalize session locations"),
-                help_text = _("When enabled, start/end session locations are converted to the server page-count scale so the displayed book page is correct instead of using KOReader-provided pages. This needs page count metadata from the server, which can be re-synced in Sync & Cache -> Advanced. Progress percentages are unchanged."),
-                checked_func = function()
-                    return self.progress_sync_normalize_session_locations
-                end,
-                enabled_func = function()
-                    return self.progress_sync_enabled
-                end,
-                callback = function()
-                    self.progress_sync_normalize_session_locations = not self.progress_sync_normalize_session_locations
-                    self.settings:saveSetting("progress_sync_normalize_session_locations", self.progress_sync_normalize_session_locations)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.progress_sync_normalize_session_locations
-                            and _("Session location normalization enabled")
-                            or _("Session location normalization disabled"),
-                        timeout = 2,
-                    })
-                end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Periodically sync every # pages (%1)"), tostring(self.progress_sync_interval_pages or 1))
+                        end,
+                        help_text = _("How many page turns before a periodic sync update is queued. Minimum is 1 when periodic updates are enabled."),
+                        enabled_func = function()
+                            return self.progress_sync_page_updates_enabled
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            local SpinWidget = require("ui/widget/spinwidget")
+                            local widget = SpinWidget:new{
+                                text = _("This value determines how many page turns it takes to update book progress.\nMinimum value is 1."),
+                                value = self.progress_sync_interval_pages or 1,
+                                value_min = 1,
+                                value_max = 999,
+                                value_step = 1,
+                                value_hold_step = 10,
+                                ok_text = _("Set"),
+                                title_text = _("Number of pages before update"),
+                                default_value = 10,
+                                callback = function(spin)
+                                    local n = math.floor(tonumber(spin.value) or 1)
+                                    if n < 1 then n = 1 end
+                                    self.progress_sync_interval_pages = n
+                                    self.progress_sync_trigger = self.progress_sync_page_updates_enabled and "each_n_pages" or "book_open_close"
+                                    self.settings:saveSetting("progress_sync_interval_pages", n)
+                                    self.settings:saveSetting("progress_sync_trigger", self.progress_sync_trigger)
+                                    self.settings:flush()
+                                end,
+                            }
+                            UIManager:show(widget)
+                        end,
+                    },
+                },
                 keep_menu_open = true,
             },
             {
-                text = _("Set book to read on rating"),
-                help_text = _("When a rating is submitted, queue progress as 100% for sync, even if the real reading progress is lower."),
-                checked_func = function()
-                    return self.progress_sync_set_read_on_rating
-                end,
+                text = _("Advanced"),
                 enabled_func = function()
                     return self.progress_sync_enabled
                 end,
-                callback = function()
-                    self.progress_sync_set_read_on_rating = not self.progress_sync_set_read_on_rating
-                    self.settings:saveSetting("progress_sync_set_read_on_rating", self.progress_sync_set_read_on_rating)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.progress_sync_set_read_on_rating and _("Set book to read on rating enabled") or _("Set book to read on rating disabled"),
-                        timeout = 2,
-                    })
-                end,
+                sub_item_table = {
+                    {
+                        text = _("Normalize session locations"),
+                        help_text = _("When enabled, start/end session locations are converted to the server page-count scale so the displayed book page is correct instead of using KOReader-provided pages. This needs page count metadata from the server, which can be re-synced in Sync & Cache -> Advanced. Progress percentages are unchanged."),
+                        checked_func = function()
+                            return self.progress_sync_normalize_session_locations
+                        end,
+                        callback = function()
+                            self.progress_sync_normalize_session_locations = not self.progress_sync_normalize_session_locations
+                            self.settings:saveSetting("progress_sync_normalize_session_locations", self.progress_sync_normalize_session_locations)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.progress_sync_normalize_session_locations
+                                    and _("Session location normalization enabled")
+                                    or _("Session location normalization disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                        keep_menu_open = true,
+                    },
+                    {
+                        text = _("Set book to read on rating"),
+                        help_text = _("When a rating is submitted, queue progress as 100% for sync, even if the real reading progress is lower."),
+                        checked_func = function()
+                            return self.progress_sync_set_read_on_rating
+                        end,
+                        callback = function()
+                            self.progress_sync_set_read_on_rating = not self.progress_sync_set_read_on_rating
+                            self.settings:saveSetting("progress_sync_set_read_on_rating", self.progress_sync_set_read_on_rating)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.progress_sync_set_read_on_rating and _("Set book to read on rating enabled") or _("Set book to read on rating disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                        keep_menu_open = true,
+                    },
+                },
                 keep_menu_open = true,
             },
         },

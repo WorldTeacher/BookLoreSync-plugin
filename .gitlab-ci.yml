@@ -59,7 +59,7 @@ variables:
 
 lua-format-check:
   stage: test
-  image: ghcr.io/johnnymorganz/stylua:latest
+  image: johnnymorganz/stylua:2.4.1
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:

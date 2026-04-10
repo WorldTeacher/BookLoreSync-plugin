@@ -59,9 +59,15 @@ variables:
 
 lua-format-check:
   stage: test
-  image: johnnymorganz/stylua:2.4.1
+  image: alpine:latest
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  before_script:
+    - apk add --no-cache curl unzip
+    - STYLUA_VERSION=2.4.1
+    - curl -fsSL -o /tmp/stylua.zip "https://github.com/JohnnyMorganz/StyLua/releases/download/v${STYLUA_VERSION}/stylua-linux-x86_64.zip"
+    - unzip -o /tmp/stylua.zip -d /usr/local/bin
+    - chmod +x /usr/local/bin/stylua
   script:
     - echo "Checking Lua formatting with Stylua"
     - stylua --check bookloresync.koplugin test
@@ -89,9 +95,10 @@ lua-tests:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   before_script:
     - apk add --no-cache bash git lua5.1 lua5.1-dev luarocks build-base
-    - luarocks --lua-version=5.1 install busted
-    - luarocks --lua-version=5.1 install luacov
-    - luarocks --lua-version=5.1 install luacov-cobertura
+    - LUAROCKS_BIN="$(command -v luarocks-5.1 || command -v luarocks)"
+    - "$LUAROCKS_BIN" --lua-version=5.1 install busted
+    - "$LUAROCKS_BIN" --lua-version=5.1 install luacov
+    - "$LUAROCKS_BIN" --lua-version=5.1 install luacov-cobertura
   script:
     - echo "Running Lua test suite"
     - bash run_tests.sh

@@ -1,3 +1,8 @@
+stages:
+  - build
+  - publish
+  - test
+
 # included templates
 include:
   # semantic-release template
@@ -45,7 +50,7 @@ variables:
 # SEMREL_GPG_SIGNKEY: Path to the GPG signkey exported with `gpg --armor --export-secret-key`.
 
 lua-format-check:
-  stage: build
+  stage: test
   image: ghcr.io/johnnymorganz/stylua:latest
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -54,7 +59,7 @@ lua-format-check:
     - stylua --check bookloresync.koplugin test
 
 msgfmt-check:
-  stage: build
+  stage: test
   image: alpine:latest
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -70,7 +75,7 @@ msgfmt-check:
       done
 
 lua-tests:
-  stage: build
+  stage: test
   image: alpine:latest
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'

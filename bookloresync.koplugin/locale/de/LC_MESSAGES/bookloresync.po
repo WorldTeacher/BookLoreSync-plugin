@@ -1482,7 +1482,7 @@ msgstr "WLAN-Verbindung bei Standby deaktiviert"
 
 #: bookloresync.koplugin/main.lua:3451
 msgid "Shelf Sync"
-msgstr "Regal-Sync"
+msgstr "Regal-Synchronisierung"
 
 #: bookloresync.koplugin/main.lua:3454
 msgid "Sync from Booklore Shelf"
@@ -1671,6 +1671,13 @@ msgstr "Synchronisierungsverhalten"
 msgid "What to Sync"
 msgstr "Was synchronisieren"
 
+<<<<<<< HEAD
+=======
+#: bookloresync.koplugin/main.lua:3490
+msgid "Shelf Sync"
+msgstr "Regal-Synchronisierung"
+
+>>>>>>> 02f4659f (fix(localization): update translations for shelf sync and related settings)
 #: bookloresync.koplugin/main.lua:3714
 msgid "Sync & Cache"
 msgstr "Sync & Cache"
@@ -2340,14 +2347,6 @@ msgstr "Aktivieren"
 #: bookloresync.koplugin/main.lua:10293
 msgid "Skip"
 msgstr "Überspringen"
-
-#: bookloresync.koplugin/main.lua:5737
-msgid "Failed to enable WiFi"
-msgstr "WLAN konnte nicht aktiviert werden"
-
-#: bookloresync.koplugin/main.lua:5748
-msgid "Could not connect to WiFi"
-msgstr "Verbindung zu WLAN nicht möglich"
 
 #: bookloresync.koplugin/main.lua:5853
 msgid "sync sessions on suspend"

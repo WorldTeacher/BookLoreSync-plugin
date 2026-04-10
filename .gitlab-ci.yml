@@ -94,10 +94,11 @@ lua-tests:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   before_script:
     - apk add --no-cache bash git lua5.4 lua5.4-dev luarocks build-base
-    - LUAROCKS_BIN="$(command -v luarocks-5.4 || command -v luarocks)"
-    - "$LUAROCKS_BIN" --lua-version=5.4 install busted
-    - "$LUAROCKS_BIN" --lua-version=5.4 install luacov
-    - "$LUAROCKS_BIN" --lua-version=5.4 install luacov-cobertura
+    - |
+      LUAROCKS_BIN="$(command -v luarocks-5.4 || command -v luarocks)"
+      "$LUAROCKS_BIN" --lua-version=5.4 install busted
+      "$LUAROCKS_BIN" --lua-version=5.4 install luacov
+      "$LUAROCKS_BIN" --lua-version=5.4 install luacov-cobertura
   script:
     - echo "Running Lua test suite"
     - bash run_tests.sh

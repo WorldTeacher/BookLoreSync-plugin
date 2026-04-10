@@ -64,12 +64,13 @@ lua-format-check:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   before_script:
     - apk add --no-cache curl unzip
-    - curl -fsSL -o /tmp/stylua.zip "https://github.com/JohnnyMorganz/StyLua/releases/download/v2.4.1/stylua-linux-x86_64.zip"
+    - curl -fsSL -o /tmp/stylua.zip "https://github.com/JohnnyMorganz/StyLua/releases/download/v2.4.1/stylua-linux-musl.zip"
     - unzip -o /tmp/stylua.zip -d /usr/local/bin
     - chmod +x /usr/local/bin/stylua
+    - /usr/local/bin/stylua --version
   script:
     - echo "Checking Lua formatting with Stylua"
-    - stylua --check bookloresync.koplugin test
+    - /usr/local/bin/stylua --check bookloresync.koplugin test
 
 msgfmt-check:
   stage: test
@@ -98,15 +99,14 @@ lua-tests:
       LUAROCKS_BIN="$(command -v luarocks-5.4 || command -v luarocks)"
       "$LUAROCKS_BIN" --lua-version=5.4 install busted
       "$LUAROCKS_BIN" --lua-version=5.4 install luacov
-      "$LUAROCKS_BIN" --lua-version=5.4 install luacov-cobertura
   script:
     - echo "Running Lua test suite"
-    - bash run_tests.sh
+    - busted --output utfTerminal --pattern "_spec%.lua$" test
+    - luacov
   artifacts:
     when: always
     paths:
       - luacov.report.out
-      - coverage.xml
     expire_in: 10 days
 
 build-koplugin-artifact:

@@ -2,7 +2,7 @@ stages:
   - build
   - publish
   - test
-
+  - production
 # included templates
 include:
   # semantic-release template

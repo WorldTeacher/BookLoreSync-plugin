@@ -5019,6 +5019,18 @@ function BookloreSync:pullKoreaderProgress(interactive)
         return false
     end
 
+    local remote_percentage = tonumber(body.percentage) or 0
+    if remote_percentage <= 0 then
+        self:logInfo("BookloreSync: pullKoreaderProgress skipped - remote progress is 0%")
+        if interactive then
+            UIManager:show(InfoMessage:new{
+                text = _("Remote progress is at 0%; keeping current location."),
+                timeout = 2,
+            })
+        end
+        return false
+    end
+
     local local_state = self:getLocalKoreaderProgressState()
     local direction, strategy = self:shouldApplyRemoteKoreaderProgress(body, local_state)
     if direction == "equal" or strategy == PROGRESS_SYNC_STRATEGY.DISABLE then

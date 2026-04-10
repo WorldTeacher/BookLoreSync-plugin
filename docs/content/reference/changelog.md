@@ -12,7 +12,7 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 ## Unreleased
 
-- No unreleased changes yet.
+- **Progress sync:** Remote KOReader progress entries at `0%` are now ignored during pull, so they are not offered as a "sync to" option and do not overwrite current reading position.
 
 ---
 

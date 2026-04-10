@@ -52,6 +52,8 @@ Two toggles control when remote progress is checked:
 
 If there is no remote progress for a book (`404` from the endpoint), this is treated as normal and reading continues with local state.
 
+If remote progress exists but the fetched percentage is `0%`, the plugin skips applying it and does not show it as a sync target.
+
 ---
 
 ## Conflict strategy

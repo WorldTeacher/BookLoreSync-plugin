@@ -779,10 +779,10 @@ function BookloreSync:onPushBookloreCurrentBookProgress()
     end
 
     self:_requestWifi(_("push current book progress"), function()
-        local payload = self:buildCurrentKoreaderProgressPayload(os.time())
+        local payload, payload_err = self:buildCurrentKoreaderProgressPayload(os.time())
         if not payload then
             UIManager:show(InfoMessage:new{
-                text = _("Could not build current progress payload"),
+                text = T(_("Could not build current progress payload: %1"), tostring(payload_err or "unknown error")),
                 timeout = 2,
             })
             return
@@ -4707,6 +4707,93 @@ function BookloreSync:getCurrentDocumentHashForProgress()
     end
 
     return nil
+end
+
+--[[--
+Build a KOReader progress payload for the currently open document.
+
+@param timestamp number|nil unix timestamp; defaults to os.time()
+@return table|nil payload
+@return string|nil error_message
+--]]
+---BookloreSync:buildCurrentKoreaderProgressPayload.
+function BookloreSync:buildCurrentKoreaderProgressPayload(timestamp)
+    if not self.progress_sync_enabled then
+        return nil, "Progress sync is disabled"
+    end
+
+    local file_path = self.ui and self.ui.document and self.ui.document.file or nil
+    if not file_path or file_path == "" then
+        return nil, "No open document"
+    end
+
+    local book_hash = self:getCurrentDocumentHashForProgress()
+    if not book_hash or book_hash == "" then
+        return nil, "Missing book hash"
+    end
+
+    local percentage_ratio, progress_value, location_value = self:getCurrentKoreaderSyncProgress()
+    local ts = tonumber(timestamp) or os.time()
+    local device_id = tostring(self.progress_sync_device_id or "unknown")
+    local device_name = tostring((Device and Device.model) or "KOReader")
+    local book_cache_id = self.db and self.db:getBookCacheIdByFilePath(file_path) or nil
+
+    return {
+        timestamp = ts,
+        document = tostring(book_hash),
+        percentage = self:roundKoreaderSyncPercentage(tonumber(percentage_ratio) or 0),
+        progress = tostring(progress_value or location_value or "0"),
+        device = device_name,
+        device_id = device_id,
+        -- Local metadata used for synced-state bookkeeping.
+        book_hash = tostring(book_hash),
+        book_cache_id = book_cache_id,
+        location = tostring(location_value or progress_value or "0"),
+    }, nil
+end
+
+--[[--
+Push KOReader progress directly to Booklore without queueing.
+
+On success, this also updates synced_koreader_progress locally.
+
+@param payload table
+@return boolean ok
+@return string|table|nil reason
+--]]
+---BookloreSync:pushCurrentKoreaderProgressDirect.
+function BookloreSync:pushCurrentKoreaderProgressDirect(payload)
+    if type(payload) ~= "table" then
+        return false, "Invalid payload"
+    end
+    if not self.api then
+        return false, "API client not initialized"
+    end
+    if not NetworkMgr:isConnected() then
+        return false, "WiFi is not connected"
+    end
+
+    self.api:init(self.server_url, self.username, self.password, self.db)
+
+    local ok, body_or_err = self.api:updateKoReaderProgress(payload)
+    if not ok then
+        return false, body_or_err
+    end
+
+    if self.db then
+        self.db:markKoreaderProgressSynced({
+            book_cache_id = payload.book_cache_id,
+            book_hash = payload.book_hash or payload.document,
+            progress = tostring(payload.progress or payload.location or "0"),
+            percentage = tonumber(payload.percentage) or 0,
+            location = tostring(payload.location or payload.progress or "0"),
+            remote_device = payload.device,
+            remote_device_id = payload.device_id,
+            remote_timestamp = tonumber(payload.timestamp) or nil,
+        })
+    end
+
+    return true, body_or_err
 end
 
 --[[--

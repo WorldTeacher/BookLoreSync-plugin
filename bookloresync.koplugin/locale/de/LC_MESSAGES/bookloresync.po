@@ -1671,13 +1671,6 @@ msgstr "Synchronisierungsverhalten"
 msgid "What to Sync"
 msgstr "Was synchronisieren"
 
-<<<<<<< HEAD
-=======
-#: bookloresync.koplugin/main.lua:3490
-msgid "Shelf Sync"
-msgstr "Regal-Synchronisierung"
-
->>>>>>> 02f4659f (fix(localization): update translations for shelf sync and related settings)
 #: bookloresync.koplugin/main.lua:3714
 msgid "Sync & Cache"
 msgstr "Sync & Cache"

@@ -87,6 +87,7 @@ lua-tests:
       "$LUAROCKS_BIN" --lua-version=5.4 install luasec
       "$LUAROCKS_BIN" --lua-version=5.4 install busted
       "$LUAROCKS_BIN" --lua-version=5.4 install luacov
+      eval "$($LUAROCKS_BIN --lua-version=5.4 path)"
     - |
       cat > /tmp/random.lua <<'EOF'
       local random = {}
@@ -108,10 +109,10 @@ lua-tests:
 
       return random
       EOF
-      export LUA_PATH="/tmp/?.lua;;"
+      export LUA_PATH="/tmp/?.lua;${LUA_PATH:-;;}"
   script:
     - echo "Running Lua test suite"
-    - busted --output utfTerminal --pattern "_spec%.lua$" test
+    - busted --coverage --output utfTerminal --pattern "_spec%.lua$" test
     - luacov
   artifacts:
     when: always

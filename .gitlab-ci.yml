@@ -1,8 +1,16 @@
 stages:
   - build
-  - publish
   - test
+  - publish
   - production
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
+    - if: "$CI_COMMIT_TAG"
+    - when: never
 # included templates
 include:
   # semantic-release template

@@ -44,6 +44,51 @@ variables:
 # GITLAB_TOKEN: A GitLab 'project access token' or 'personal access token' with `api`, `read_repository` and `write repository` scopes.
 # SEMREL_GPG_SIGNKEY: Path to the GPG signkey exported with `gpg --armor --export-secret-key`.
 
+lua-format-check:
+  stage: test
+  image: ghcr.io/johnnymorganz/stylua:latest
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - echo "Checking Lua formatting with Stylua"
+    - stylua --check bookloresync.koplugin test
+
+msgfmt-check:
+  stage: test
+  image: alpine:latest
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  before_script:
+    - apk add --no-cache gettext
+  script:
+    - echo "Validating gettext translation files"
+    - |
+      find "$CI_PROJECT_DIR/bookloresync.koplugin/locale" -name "*.po" | while read po; do
+        mo="${po%.po}.mo"
+        echo "Compiling $po -> $mo"
+        msgfmt "$po" -o "$mo"
+      done
+
+lua-tests:
+  stage: test
+  image: alpine:latest
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  before_script:
+    - apk add --no-cache bash git lua5.1 lua5.1-dev luarocks build-base
+    - luarocks --lua-version=5.1 install busted
+    - luarocks --lua-version=5.1 install luacov
+    - luarocks --lua-version=5.1 install luacov-cobertura
+  script:
+    - echo "Running Lua test suite"
+    - bash run_tests.sh
+  artifacts:
+    when: always
+    paths:
+      - luacov.report.out
+      - coverage.xml
+    expire_in: 10 days
+
 build-koplugin-artifact:
   stage: build
   image: alpine:latest

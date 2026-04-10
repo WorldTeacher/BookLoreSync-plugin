@@ -2175,167 +2175,186 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
         if datetime == "" then
             self:logWarn("BookloreSync: Skipping annotation with no datetime")
             skipped_count = skipped_count + 1
-            goto continue
-        end
-
-        local has_note = ann.note and ann.note ~= ""
-
-        -- Determine type key for dedup tracking
-        local ann_type
-        if not has_note then
-            ann_type = "highlight"
-        elseif notes_dest == "in_book" then
-            ann_type = "in_book_note"
-        elseif notes_dest == "both" then
-            ann_type = "both_note"
         else
-            ann_type = "booklore_note"
-        end
+            local has_note = ann.note and ann.note ~= ""
 
-        -- Skip if already synced
-        if self.db:isAnnotationSynced(book_cache_id, datetime, ann_type) then
-            self:logInfo("BookloreSync: Annotation already synced, skipping:", datetime)
-            skipped_count = skipped_count + 1
-            goto continue
-        end
-
-        -- Wrap per-annotation processing in pcall so a malformed xpointer or
-        -- unexpected nil never crashes the close-document flow.
-        local ann_ok, ann_err = pcall(function()
-            local ok, server_id
-            local cfi  -- computed below and reused in payload
-
-            -- Build a CFI for this annotation.
-            -- For EPUB: use the full xpointer-based CFI via buildCfi.
-            -- For PDF: use a mock CFI anchored to the page number.
-            -- For other formats: no CFI available.
-            ---resolveCfi.
-            local function resolveCfi()
-                if is_epub and spine then
-                    return self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
-                elseif is_pdf and ann.page then
-                    return self:buildMockPdfCfi(ann.page)
-                end
-                return nil
-            end
-
+            -- Determine type key for dedup tracking
+            local ann_type
             if not has_note then
-                -- ── Pure highlight ──────────────────────────────────────────────
-                cfi = resolveCfi()
-                if not cfi then
-                    self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, nil)
-                    skipped_count = skipped_count + 1
-                    return
-                end
-                if not queue_only then
-                    ok, server_id = self.api:submitHighlight(
-                        book_id, cfi, ann.text,
-                        {
-                            color         = self:colorToHex(ann.color),
-                            style         = self:drawerToStyle(ann.drawer),
-                            chapter_title = ann.chapter,
-                        },
-                        self.booklore_username, self.booklore_password
-                    )
-                end
-
+                ann_type = "highlight"
             elseif notes_dest == "in_book" then
-                -- ── In-book note (v2) ────────────────────────────────────────────
-                cfi = resolveCfi()
-                if not cfi then
-                    self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, nil)
-                    skipped_count = skipped_count + 1
-                    return
-                end
-                if not queue_only then
-                    ok, server_id = self.api:submitInBookNote(
-                        book_id, cfi, ann.note,
-                        {
-                            selected_text = ann.text,
-                            color         = self:colorToHex(ann.color),
-                            chapter_title = ann.chapter,
-                        },
-                        self.booklore_username, self.booklore_password
-                    )
-                end
-
+                ann_type = "in_book_note"
             elseif notes_dest == "both" then
-                -- ── Both: in-book note + Booklore web-UI note ───────────────────
-                cfi = resolveCfi()
-                local in_book_ok, in_book_id
-                local bl_ok, bl_id
-                local requires_in_book = cfi ~= nil and cfi ~= ""
-                if not queue_only then
-                    if requires_in_book then
-                        in_book_ok, in_book_id = self.api:submitInBookNote(
-                            book_id, cfi, ann.note,
-                            {
-                                selected_text = ann.text,
-                                color         = self:colorToHex(ann.color),
-                                chapter_title = ann.chapter,
-                            },
-                            self.booklore_username, self.booklore_password
-                        )
-                        if not in_book_ok then
-                            self:logWarn("BookloreSync: 'Both' - in-book note failed:", in_book_id)
+                ann_type = "both_note"
+            else
+                ann_type = "booklore_note"
+            end
+
+            -- Skip if already synced
+            if self.db:isAnnotationSynced(book_cache_id, datetime, ann_type) then
+                self:logInfo("BookloreSync: Annotation already synced, skipping:", datetime)
+                skipped_count = skipped_count + 1
+            else
+                -- Wrap per-annotation processing in pcall so a malformed xpointer or
+                -- unexpected nil never crashes the close-document flow.
+                local ann_ok, ann_err = pcall(function()
+                    local ok, server_id
+                    local cfi  -- computed below and reused in payload
+
+                    -- Build a CFI for this annotation.
+                    -- For EPUB: use the full xpointer-based CFI via buildCfi.
+                    -- For PDF: use a mock CFI anchored to the page number.
+                    -- For other formats: no CFI available.
+                    ---resolveCfi.
+                    local function resolveCfi()
+                        if is_epub and spine then
+                            return self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
+                        elseif is_pdf and ann.page then
+                            return self:buildMockPdfCfi(ann.page)
                         end
+                        return nil
+                    end
+
+                    if not has_note then
+                        -- ── Pure highlight ──────────────────────────────────────────────
+                        cfi = resolveCfi()
+                        if not cfi then
+                            self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, nil)
+                            skipped_count = skipped_count + 1
+                            return
+                        end
+                        if not queue_only then
+                            ok, server_id = self.api:submitHighlight(
+                                book_id, cfi, ann.text,
+                                {
+                                    color         = self:colorToHex(ann.color),
+                                    style         = self:drawerToStyle(ann.drawer),
+                                    chapter_title = ann.chapter,
+                                },
+                                self.booklore_username, self.booklore_password
+                            )
+                        end
+
+                    elseif notes_dest == "in_book" then
+                        -- ── In-book note (v2) ────────────────────────────────────────────
+                        cfi = resolveCfi()
+                        if not cfi then
+                            self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, nil)
+                            skipped_count = skipped_count + 1
+                            return
+                        end
+                        if not queue_only then
+                            ok, server_id = self.api:submitInBookNote(
+                                book_id, cfi, ann.note,
+                                {
+                                    selected_text = ann.text,
+                                    color         = self:colorToHex(ann.color),
+                                    chapter_title = ann.chapter,
+                                },
+                                self.booklore_username, self.booklore_password
+                            )
+                        end
+
+                    elseif notes_dest == "both" then
+                        -- ── Both: in-book note + Booklore web-UI note ───────────────────
+                        cfi = resolveCfi()
+                        local in_book_ok, in_book_id
+                        local bl_ok, bl_id
+                        local requires_in_book = cfi ~= nil and cfi ~= ""
+                        if not queue_only then
+                            if requires_in_book then
+                                in_book_ok, in_book_id = self.api:submitInBookNote(
+                                    book_id, cfi, ann.note,
+                                    {
+                                        selected_text = ann.text,
+                                        color         = self:colorToHex(ann.color),
+                                        chapter_title = ann.chapter,
+                                    },
+                                    self.booklore_username, self.booklore_password
+                                )
+                                if not in_book_ok then
+                                    self:logWarn("BookloreSync: 'Both' - in-book note failed:", in_book_id)
+                                end
+                            else
+                                self:logInfo("BookloreSync: 'Both' - no CFI available, skipping in-book note")
+                            end
+                            bl_ok, bl_id = self.api:submitBookloreNote(
+                                book_id, ann.note, ann.chapter,
+                                self.booklore_username, self.booklore_password
+                            )
+                            if not bl_ok then
+                                self:logWarn("BookloreSync: 'Both' - Booklore note failed:", bl_id)
+                            end
+                        end
+                        -- In "both" mode, keep retrying until every required destination
+                        -- has succeeded. If no CFI exists, only the Booklore note is required.
+                        ok = (requires_in_book and in_book_ok and bl_ok) or ((not requires_in_book) and bl_ok) or false
+                        server_id = in_book_id or bl_id
+
                     else
-                        self:logInfo("BookloreSync: 'Both' - no CFI available, skipping in-book note")
+                        -- ── Booklore (web-UI) note ───────────────────────────────────────
+                        if not queue_only then
+                            ok, server_id = self.api:submitBookloreNote(
+                                book_id, ann.note, ann.chapter,
+                                self.booklore_username, self.booklore_password
+                            )
+                        end
                     end
-                    bl_ok, bl_id = self.api:submitBookloreNote(
-                        book_id, ann.note, ann.chapter,
-                        self.booklore_username, self.booklore_password
-                    )
-                    if not bl_ok then
-                        self:logWarn("BookloreSync: 'Both' - Booklore note failed:", bl_id)
+
+                    if queue_only then
+                        -- No book_id yet or manual_sync_only mode - queue for retry with full CFI cached in payload.
+                        local pending_payload = json.encode({
+                            ann_type   = ann_type,
+                            datetime   = datetime,
+                            text       = ann.text,
+                            note       = ann.note,
+                            chapter    = ann.chapter,
+                            color      = self:colorToHex(ann.color),
+                            style      = self:drawerToStyle(ann.drawer),
+                            cfi        = cfi,
+                            pos0       = ann.pos0,
+                            pos1       = ann.pos1,
+                            notes_dest = notes_dest,
+                        })
+                        self.db:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, pending_payload)
+                        if self.manual_sync_only then
+                            queued_count = queued_count + 1
+                        else
+                            failed_count = failed_count + 1
+                        end
+                    elseif ok then
+                        self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, server_id)
+                        synced_count = synced_count + 1
+                    else
+                        self:logWarn("BookloreSync: Failed to sync annotation at:", datetime, "-", server_id)
+                        failed_count = failed_count + 1
+                        -- Queue for retry so it is not silently dropped.
+                        -- Cache the already-computed CFI in the payload so the retry
+                        -- path does not need a live document.
+                        local pending_payload = json.encode({
+                            ann_type   = ann_type,
+                            datetime   = datetime,
+                            text       = ann.text,
+                            note       = ann.note,
+                            chapter    = ann.chapter,
+                            color      = self:colorToHex(ann.color),
+                            style      = self:drawerToStyle(ann.drawer),
+                            cfi        = cfi,
+                            pos0       = ann.pos0,
+                            pos1       = ann.pos1,
+                            notes_dest = notes_dest,
+                        })
+                        self.db:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, pending_payload)
                     end
-                end
-                -- In "both" mode, keep retrying until every required destination
-                -- has succeeded. If no CFI exists, only the Booklore note is required.
-                ok = (requires_in_book and in_book_ok and bl_ok) or ((not requires_in_book) and bl_ok) or false
-                server_id = in_book_id or bl_id
+                end)
 
-            else
-                -- ── Booklore (web-UI) note ───────────────────────────────────────
-                if not queue_only then
-                    ok, server_id = self.api:submitBookloreNote(
-                        book_id, ann.note, ann.chapter,
-                        self.booklore_username, self.booklore_password
-                    )
-                end
-            end
-
-            if queue_only then
-                -- No book_id yet or manual_sync_only mode - queue for retry with full CFI cached in payload.
-                local pending_payload = json.encode({
-                    ann_type   = ann_type,
-                    datetime   = datetime,
-                    text       = ann.text,
-                    note       = ann.note,
-                    chapter    = ann.chapter,
-                    color      = self:colorToHex(ann.color),
-                    style      = self:drawerToStyle(ann.drawer),
-                    cfi        = cfi,
-                    pos0       = ann.pos0,
-                    pos1       = ann.pos1,
-                    notes_dest = notes_dest,
-                })
-                self.db:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, pending_payload)
-                if self.manual_sync_only then
-                    queued_count = queued_count + 1
-                else
+                if not ann_ok then
+                    self:logErr("BookloreSync: Unexpected error processing annotation at:", datetime, "-", ann_err)
                     failed_count = failed_count + 1
-                end
-            elseif ok then
-                self.db:markAnnotationSynced(book_cache_id, datetime, ann_type, server_id)
-                synced_count = synced_count + 1
-            else
-                self:logWarn("BookloreSync: Failed to sync annotation at:", datetime, "-", server_id)
-                failed_count = failed_count + 1
-                -- Queue for retry so it is not silently dropped.
-                -- Cache the already-computed CFI in the payload so the retry
-                -- path does not need a live document.
-                local pending_payload = json.encode({
+                    -- Queue for retry even when the pcall itself fails, so the
+                    -- annotation is not lost.  Use a minimal payload (no CFI) - the
+                    -- retry path will skip annotations it cannot re-submit.
+                    local ok_enc, pending_payload = pcall(json.encode, {
                     ann_type   = ann_type,
                     datetime   = datetime,
                     text       = ann.text,
@@ -2348,34 +2367,12 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
                     pos1       = ann.pos1,
                     notes_dest = notes_dest,
                 })
-                self.db:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, pending_payload)
-            end
-        end)
-
-        if not ann_ok then
-            self:logErr("BookloreSync: Unexpected error processing annotation at:", datetime, "-", ann_err)
-            failed_count = failed_count + 1
-            -- Queue for retry even when the pcall itself fails, so the
-            -- annotation is not lost.  Use a minimal payload (no CFI) - the
-            -- retry path will skip annotations it cannot re-submit.
-            local ok_enc, pending_payload = pcall(json.encode, {
-                ann_type   = ann_type,
-                datetime   = datetime,
-                text       = ann.text,
-                note       = ann.note,
-                chapter    = ann.chapter,
-                color      = self:colorToHex(ann.color),
-                style      = self:drawerToStyle(ann.drawer),
-                pos0       = ann.pos0,
-                pos1       = ann.pos1,
-                notes_dest = notes_dest,
-            })
-            if ok_enc and pending_payload then
-                self.db:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, pending_payload)
+                    if ok_enc and pending_payload then
+                        self.db:addPendingAnnotation(book_cache_id, book_id, ann_type, datetime, pending_payload)
+                    end
+                end
             end
         end
-
-        ::continue::
     end
 
     if self.manual_sync_only and queued_count > 0 then
@@ -8838,60 +8835,57 @@ function BookloreSync:syncPendingSessions(silent)
             self:logWarn("BookloreSync: Session", i, "has no book_id after Phase 0 - skipping")
             self.db:incrementSessionRetryCount(session.id)
             failed_count = failed_count + 1
-            goto continue
-        end
-
-        local duration_formatted = self:formatDuration(session.durationSeconds)
-        local normalized_start_location = session.startLocation
-        local normalized_end_location = session.endLocation
-        if self.progress_sync_normalize_session_locations then
-            local server_pagecount = self:getServerPagecountForSession(session)
-            normalized_start_location = self:normalizeSessionLocationForServer(
-                session.startLocation,
-                session.koreaderPagecount,
-                server_pagecount
-            )
-            normalized_end_location = self:normalizeSessionLocationForServer(
-                session.endLocation,
-                session.koreaderPagecount,
-                server_pagecount
-            )
-        end
-
-        local session_data = {
-            bookId            = session.bookId,
-            bookType          = session.bookType,
-            startTime         = session.startTime,
-            endTime           = session.endTime,
-            durationSeconds   = session.durationSeconds,
-            durationFormatted = duration_formatted,
-            startProgress     = self:roundProgress(session.startProgress),
-            endProgress       = self:roundProgress(session.endProgress),
-            progressDelta     = self:roundProgress(session.progressDelta),
-            startLocation     = normalized_start_location,
-            endLocation       = normalized_end_location,
-        }
-
-        self:logInfo("BookloreSync: Submitting session", i, "- book_id:", session.bookId,
-                     "duration:", duration_formatted)
-
-        local success, message = self.api:submitSession(session_data)
-
-        if success then
-            synced_count = synced_count + 1
-            local archived = self.db:archivePendingSession(session.id)
-            if not archived then
-                self:logWarn("BookloreSync: Failed to archive session", i, "to historical_sessions")
-            end
-            self.db:deletePendingSession(session.id)
-            self:logInfo("BookloreSync: Session", i, "synced successfully")
         else
-            failed_count = failed_count + 1
-            self:logWarn("BookloreSync: Session", i, "failed to sync:", message)
-            self.db:incrementSessionRetryCount(session.id)
-        end
+            local duration_formatted = self:formatDuration(session.durationSeconds)
+            local normalized_start_location = session.startLocation
+            local normalized_end_location = session.endLocation
+            if self.progress_sync_normalize_session_locations then
+                local server_pagecount = self:getServerPagecountForSession(session)
+                normalized_start_location = self:normalizeSessionLocationForServer(
+                    session.startLocation,
+                    session.koreaderPagecount,
+                    server_pagecount
+                )
+                normalized_end_location = self:normalizeSessionLocationForServer(
+                    session.endLocation,
+                    session.koreaderPagecount,
+                    server_pagecount
+                )
+            end
 
-        ::continue::
+            local session_data = {
+                bookId            = session.bookId,
+                bookType          = session.bookType,
+                startTime         = session.startTime,
+                endTime           = session.endTime,
+                durationSeconds   = session.durationSeconds,
+                durationFormatted = duration_formatted,
+                startProgress     = self:roundProgress(session.startProgress),
+                endProgress       = self:roundProgress(session.endProgress),
+                progressDelta     = self:roundProgress(session.progressDelta),
+                startLocation     = normalized_start_location,
+                endLocation       = normalized_end_location,
+            }
+
+            self:logInfo("BookloreSync: Submitting session", i, "- book_id:", session.bookId,
+                         "duration:", duration_formatted)
+
+            local success, message = self.api:submitSession(session_data)
+
+            if success then
+                synced_count = synced_count + 1
+                local archived = self.db:archivePendingSession(session.id)
+                if not archived then
+                    self:logWarn("BookloreSync: Failed to archive session", i, "to historical_sessions")
+                end
+                self.db:deletePendingSession(session.id)
+                self:logInfo("BookloreSync: Session", i, "synced successfully")
+            else
+                failed_count = failed_count + 1
+                self:logWarn("BookloreSync: Session", i, "failed to sync:", message)
+                self.db:incrementSessionRetryCount(session.id)
+            end
+        end
     end
 
     self:logInfo("BookloreSync: Sync complete - sessions synced:", synced_count,
@@ -9334,48 +9328,13 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
         local timestamp = tonumber(timestamp_str)
         if not timestamp then
             self:logWarn("BookloreSync: Failed to parse timestamp:", stat.start_time)
-            goto continue
-        end
-        
-        local iso_time = self:_unixToISO8601(timestamp)
-        
-        local progress = (stat.total_pages and stat.total_pages > 0) 
-            and ((stat.page / stat.total_pages) * 100) or 0
-        
-        if not current_session then
-            current_session = {
-                start_time = iso_time,
-                end_time = iso_time,
-                start_timestamp = timestamp,
-                end_timestamp = timestamp,
-                start_progress = progress,
-                end_progress = progress,
-                start_page = stat.page,
-                end_page = stat.page,
-                duration_seconds = stat.duration or 0,
-            }
         else
-            local gap = timestamp - current_session.end_timestamp
+            local iso_time = self:_unixToISO8601(timestamp)
             
-            if gap > SESSION_GAP_SECONDS then
-                -- Save current session if progress increased
-                local start_progress = current_session.start_progress or 0
-                local end_progress = current_session.end_progress or 0
-                local progress_delta = end_progress - start_progress
-                if progress_delta > 0 then
-                    table.insert(sessions, {
-                        start_time = current_session.start_time,
-                        end_time = current_session.end_time,
-                        duration_seconds = current_session.duration_seconds,
-                        start_progress = current_session.start_progress,
-                        end_progress = current_session.end_progress,
-                        progress_delta = progress_delta,
-                        start_location = tostring(current_session.start_page),
-                        end_location = tostring(current_session.end_page),
-                    })
-                end
-                
-                -- Start new session
+            local progress = (stat.total_pages and stat.total_pages > 0)
+                and ((stat.page / stat.total_pages) * 100) or 0
+
+            if not current_session then
                 current_session = {
                     start_time = iso_time,
                     end_time = iso_time,
@@ -9388,15 +9347,47 @@ function BookloreSync:_calculateSessionsFromPageStats(page_stats, book)
                     duration_seconds = stat.duration or 0,
                 }
             else
-                current_session.end_time = iso_time
-                current_session.end_timestamp = timestamp
-                current_session.end_progress = progress
-                current_session.end_page = stat.page
-                current_session.duration_seconds = current_session.duration_seconds + (stat.duration or 0)
+                local gap = timestamp - current_session.end_timestamp
+
+                if gap > SESSION_GAP_SECONDS then
+                    -- Save current session if progress increased
+                    local start_progress = current_session.start_progress or 0
+                    local end_progress = current_session.end_progress or 0
+                    local progress_delta = end_progress - start_progress
+                    if progress_delta > 0 then
+                        table.insert(sessions, {
+                            start_time = current_session.start_time,
+                            end_time = current_session.end_time,
+                            duration_seconds = current_session.duration_seconds,
+                            start_progress = current_session.start_progress,
+                            end_progress = current_session.end_progress,
+                            progress_delta = progress_delta,
+                            start_location = tostring(current_session.start_page),
+                            end_location = tostring(current_session.end_page),
+                        })
+                    end
+
+                    -- Start new session
+                    current_session = {
+                        start_time = iso_time,
+                        end_time = iso_time,
+                        start_timestamp = timestamp,
+                        end_timestamp = timestamp,
+                        start_progress = progress,
+                        end_progress = progress,
+                        start_page = stat.page,
+                        end_page = stat.page,
+                        duration_seconds = stat.duration or 0,
+                    }
+                else
+                    current_session.end_time = iso_time
+                    current_session.end_timestamp = timestamp
+                    current_session.end_progress = progress
+                    current_session.end_page = stat.page
+                    current_session.duration_seconds = current_session.duration_seconds + (stat.duration or 0)
+                end
             end
         end
-        
-        ::continue::
     end
     
     if current_session then

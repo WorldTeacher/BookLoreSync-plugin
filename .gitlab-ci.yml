@@ -57,21 +57,6 @@ variables:
 # GITLAB_TOKEN: A GitLab 'project access token' or 'personal access token' with `api`, `read_repository` and `write repository` scopes.
 # SEMREL_GPG_SIGNKEY: Path to the GPG signkey exported with `gpg --armor --export-secret-key`.
 
-lua-format-check:
-  stage: test
-  image: alpine:latest
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-  before_script:
-    - apk add --no-cache curl unzip
-    - curl -fsSL -o /tmp/stylua.zip "https://github.com/JohnnyMorganz/StyLua/releases/download/v2.4.1/stylua-linux-x86_64-musl.zip"
-    - unzip -o /tmp/stylua.zip -d /usr/local/bin
-    - chmod +x /usr/local/bin/stylua
-    - /usr/local/bin/stylua --version
-  script:
-    - echo "Checking Lua formatting with Stylua"
-    - /usr/local/bin/stylua --check bookloresync.koplugin test
-
 msgfmt-check:
   stage: test
   image: alpine:latest

@@ -45,7 +45,7 @@ variables:
 # SEMREL_GPG_SIGNKEY: Path to the GPG signkey exported with `gpg --armor --export-secret-key`.
 
 lua-format-check:
-  stage: test
+  stage: build
   image: ghcr.io/johnnymorganz/stylua:latest
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -54,7 +54,7 @@ lua-format-check:
     - stylua --check bookloresync.koplugin test
 
 msgfmt-check:
-  stage: test
+  stage: build
   image: alpine:latest
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -70,7 +70,7 @@ msgfmt-check:
       done
 
 lua-tests:
-  stage: test
+  stage: build
   image: alpine:latest
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'

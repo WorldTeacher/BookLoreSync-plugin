@@ -5671,16 +5671,13 @@ function BookloreSync:onReaderReady()
     end
     self.progress_sync_last_page_turn_timestamp = os.time()
 
-    -- Safer ordering on open: pull first, then queue local open chunk.
-    -- This reduces chances of pushing stale local position over newer remote.
+    -- Pull-only on open: allow remote catch-up without recording local state.
     if self.progress_sync_enabled and self.progress_pull_on_open and NetworkMgr:isConnected() then
         self:pullKoreaderProgress(false)
     end
 
-    -- Always persist a chunk at book open.
-    if self.progress_sync_enabled then
-        self:queueCurrentKoreaderProgress()
-    end
+    -- Do not queue local progress on open.
+    -- Local state is recorded by periodic page-update triggers and on close.
     return false -- Allow other plugins to process this event
 end
 

@@ -69,7 +69,11 @@ package.preload["json"] = function()
   }
 end
 
+package.loaded["hardcover_api_client"] = nil
+package.preload["hardcover_api_client"] = nil
+
 local HardcoverClient = require("hardcover_api_client")
+local https = require("ssl.https")
 
 describe("HardcoverClient", function()
   local client
@@ -96,14 +100,14 @@ describe("HardcoverClient", function()
   end)
 
   it("returns connection errors", function()
-    package.loaded["ssl.https"].request = function() return nil, "timeout", {} end
+    https.request = function() return nil, "timeout", {} end
     local data, err = client:query("query { ping }", nil, "jwt")
     assert.is_nil(data)
     assert.is_truthy(err:find("connection error", 1, true))
   end)
 
   it("returns HTTP status errors", function()
-    package.loaded["ssl.https"].request = function(req)
+    https.request = function(req)
       if req.sink then req.sink("nope") end
       return true, 503, {}
     end

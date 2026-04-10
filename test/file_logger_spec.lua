@@ -13,6 +13,9 @@ package.preload["logger"] = function()
   }
 end
 
+package.loaded["booklore_file_logger"] = nil
+package.preload["booklore_file_logger"] = nil
+
 local FileLogger = require("booklore_file_logger")
 
 describe("FileLogger", function()

@@ -23,6 +23,8 @@ local STUB_KEYS = {
   "booklore_file_logger",
   "booklore_metadata_extractor",
   "gettext",
+  "random",
+  "ffi",
   "ffi/util",
   "string.buffer",
   "ui/trapper",
@@ -31,8 +33,10 @@ local STUB_KEYS = {
 
 local function install()
   local original = {}
+  local original_loaded = {}
   for _, k in ipairs(STUB_KEYS) do
     original[k] = package.preload[k]
+    original_loaded[k] = package.loaded[k]
   end
 
   package.path = table.concat({
@@ -165,6 +169,16 @@ local function install()
     return function(s) return s end
   end
 
+  package.preload["random"] = function()
+    return {
+      random = function(_, _) return 1 end,
+    }
+  end
+
+  package.preload["ffi"] = function()
+    return {}
+  end
+
   package.preload["ffi/util"] = function()
     -- Synchronous subprocess stub: runInSubProcess calls fn inline.
     -- writeToFD stores data into fake_result; readAllFromFD returns it.
@@ -235,6 +249,7 @@ local function install()
   return function()
     for _, k in ipairs(STUB_KEYS) do
       package.preload[k] = original[k]
+      package.loaded[k] = original_loaded[k]
     end
   end
 end

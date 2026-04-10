@@ -64,8 +64,7 @@ lua-format-check:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   before_script:
     - apk add --no-cache curl unzip
-    - STYLUA_VERSION=2.4.1
-    - curl -fsSL -o /tmp/stylua.zip "https://github.com/JohnnyMorganz/StyLua/releases/download/v${STYLUA_VERSION}/stylua-linux-x86_64.zip"
+    - curl -fsSL -o /tmp/stylua.zip "https://github.com/JohnnyMorganz/StyLua/releases/download/v2.4.1/stylua-linux-x86_64.zip"
     - unzip -o /tmp/stylua.zip -d /usr/local/bin
     - chmod +x /usr/local/bin/stylua
   script:
@@ -94,11 +93,11 @@ lua-tests:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   before_script:
-    - apk add --no-cache bash git lua5.1 lua5.1-dev luarocks build-base
-    - 'LUAROCKS_BIN="$(command -v luarocks-5.1 || command -v luarocks)"'
-    - '"$LUAROCKS_BIN" --lua-version=5.1 install busted'
-    - '"$LUAROCKS_BIN" --lua-version=5.1 install luacov'
-    - '"$LUAROCKS_BIN" --lua-version=5.1 install luacov-cobertura'
+    - apk add --no-cache bash git lua5.4 lua5.4-dev luarocks build-base
+    - LUAROCKS_BIN="$(command -v luarocks-5.4 || command -v luarocks)"
+    - "$LUAROCKS_BIN" --lua-version=5.4 install busted
+    - "$LUAROCKS_BIN" --lua-version=5.4 install luacov
+    - "$LUAROCKS_BIN" --lua-version=5.4 install luacov-cobertura
   script:
     - echo "Running Lua test suite"
     - bash run_tests.sh

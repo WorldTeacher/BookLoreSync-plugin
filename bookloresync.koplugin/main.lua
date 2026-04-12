@@ -74,6 +74,10 @@ local BookloreSync = WidgetContainer:extend{
     is_doc_only = false,
 }
 
+local function nowMs()
+    return math.floor(os.clock() * 1000)
+end
+
 -- Guard flag: ensure FileManager deletion hooks are only applied once per session.
 -- Declared at module level so all plugin instances share the same flag.
 local booklore_fm_patched = false
@@ -439,6 +443,14 @@ function BookloreSync:init()
     self.needs_wake_sync      = false -- flagged by onResume; consumed by onNetworkConnected
     self.wake_sync_scheduled  = false -- prevents duplicate scheduled wake syncs
 
+    -- Deferred close-flush state (phase 3)
+    self.deferred_close_flush_requested = false
+    self.deferred_close_flush_scheduled = false
+    self.deferred_close_flush_running = false
+    self.deferred_close_flush_seq = 0
+    self.deferred_close_flush_last_queued_ms = 0
+    self.deferred_close_flush_last_completed_ms = 0
+
     -- Migrate old settings to new preset system if needed
     if not self.sync_mode then
         if self.manual_sync_only then
@@ -464,6 +476,16 @@ function BookloreSync:init()
     self.notes_destination             = self.settings:readSetting("notes_destination")             or "in_book"
     self.upload_strategy               = self.settings:readSetting("upload_strategy")               or "on_session"
     self.bookmarks_sync_enabled        = self.settings:readSetting("bookmarks_sync_enabled")        or false
+    self.enable_spine_context_cache = self.settings:readSetting("enable_spine_context_cache")
+    if self.enable_spine_context_cache == nil then
+        self.enable_spine_context_cache = true
+    end
+
+    self.epub_context_cache = nil
+    self.spine_cache_stats = {
+        hit = 0,
+        miss = 0,
+    }
 
     self.current_session = nil
     
@@ -1543,6 +1565,435 @@ function BookloreSync:drawerToStyle(drawer)
     return KOREADER_STYLE_MAP[drawer:lower()] or "highlight"
 end
 
+function BookloreSync:getTimingNowMs()
+    return nowMs()
+end
+
+function BookloreSync:getDocumentFingerprint(_document, file_path)
+    local normalized_path = file_path or ""
+    local size = 0
+    local mtime = 0
+
+    if normalized_path ~= "" then
+        local lfs = require("libs/libkoreader-lfs")
+        size = tonumber(lfs.attributes(normalized_path, "size")) or 0
+        mtime = tonumber(lfs.attributes(normalized_path, "modification")) or 0
+    end
+
+    return string.format("%s|%d|%d", normalized_path, size, mtime)
+end
+
+function BookloreSync:logSpineCacheEvent(event_name, reason, file_path, extra)
+    if event_name == "spine_cache_hit" then
+        self.spine_cache_stats.hit = (self.spine_cache_stats.hit or 0) + 1
+        self:logInfo(
+            "BookloreSync:",
+            "spine_cache_hit",
+            "count=", tostring(self.spine_cache_stats.hit),
+            "spine_rebuild_reason=", tostring(reason or "none"),
+            "path=", tostring(file_path or "")
+        )
+    else
+        self.spine_cache_stats.miss = (self.spine_cache_stats.miss or 0) + 1
+        self:logInfo(
+            "BookloreSync:",
+            "spine_cache_miss",
+            "count=", tostring(self.spine_cache_stats.miss),
+            "spine_rebuild_reason=", tostring(reason or "unknown"),
+            "path=", tostring(file_path or ""),
+            extra and ("extra=" .. tostring(extra)) or ""
+        )
+    end
+end
+
+function BookloreSync:invalidateEpubContext(reason, expected_path)
+    if not self.epub_context_cache then
+        return
+    end
+
+    if expected_path and self.epub_context_cache.doc_path ~= expected_path then
+        return
+    end
+
+    self:logInfo(
+        "BookloreSync: Invalidating EPUB context cache",
+        "reason=", tostring(reason or "unknown"),
+        "path=", tostring(self.epub_context_cache.doc_path or "")
+    )
+    self.epub_context_cache = nil
+end
+
+function BookloreSync:getOrBuildEpubContext(document, file_path)
+    if not document then
+        return nil
+    end
+
+    local fingerprint = self:getDocumentFingerprint(document, file_path)
+
+    if not self.enable_spine_context_cache then
+        self:logSpineCacheEvent("spine_cache_miss", "feature_disabled", file_path)
+        local build_started_ms = self:getTimingNowMs()
+        local spine_map = self:buildEpubSpineMap(document)
+        local elapsed_ms = self:getTimingNowMs() - build_started_ms
+        if not spine_map then
+            return nil
+        end
+        self:logInfo("BookloreSync: spine_context_build_ms=", tostring(elapsed_ms), "path=", tostring(file_path or ""))
+        return {
+            spine_map = spine_map,
+            fingerprint = fingerprint,
+            doc_path = file_path,
+            built_at_ms = self:getTimingNowMs(),
+            spine_count = #spine_map,
+        }
+    end
+
+    local cache = self.epub_context_cache
+    if cache and cache.doc_path == file_path and cache.fingerprint == fingerprint and cache.spine_map then
+        self:logSpineCacheEvent("spine_cache_hit", "cache_match", file_path)
+        return cache
+    end
+
+    local rebuild_reason = "cache_empty"
+    if cache and cache.doc_path ~= file_path then
+        rebuild_reason = "document_switched"
+    elseif cache and cache.doc_path == file_path and cache.fingerprint ~= fingerprint then
+        rebuild_reason = "fingerprint_changed"
+    end
+
+    self:logSpineCacheEvent("spine_cache_miss", rebuild_reason, file_path)
+    local build_started_ms = self:getTimingNowMs()
+    local spine_map = self:buildEpubSpineMap(document)
+    local elapsed_ms = self:getTimingNowMs() - build_started_ms
+    if not spine_map then
+        return nil
+    end
+
+    self.epub_context_cache = {
+        spine_map = spine_map,
+        fingerprint = fingerprint,
+        doc_path = file_path,
+        built_at_ms = self:getTimingNowMs(),
+        spine_count = #spine_map,
+    }
+
+    self:logInfo(
+        "BookloreSync:",
+        "spine_context_build_ms=", tostring(elapsed_ms),
+        "spine_count=", tostring(#spine_map),
+        "path=", tostring(file_path or "")
+    )
+
+    return self.epub_context_cache
+end
+
+local function stableSerializeValue(value)
+    local t = type(value)
+    if value == nil then
+        return ""
+    end
+    if t == "boolean" or t == "number" or t == "string" then
+        return tostring(value)
+    end
+    if t == "table" then
+        local parts = {}
+        for k, v in pairs(value) do
+            parts[#parts + 1] = tostring(k) .. "=" .. stableSerializeValue(v)
+        end
+        table.sort(parts)
+        return "{" .. table.concat(parts, ",") .. "}"
+    end
+    return tostring(value)
+end
+
+function BookloreSync:getSyncFingerprintKey(kind, book_cache_id)
+    if not kind or not book_cache_id then
+        return nil
+    end
+    return "sync_fp_" .. tostring(kind) .. "_" .. tostring(book_cache_id)
+end
+
+function BookloreSync:getStoredSyncFingerprint(kind, book_cache_id)
+    if not self.settings then
+        return nil
+    end
+    local key = self:getSyncFingerprintKey(kind, book_cache_id)
+    if not key then
+        return nil
+    end
+    local value = self.settings:readSetting(key)
+    if value == nil then
+        return nil
+    end
+    value = tostring(value)
+    if value == "" then
+        return nil
+    end
+    return value
+end
+
+function BookloreSync:setStoredSyncFingerprint(kind, book_cache_id, value)
+    if not self.settings then
+        return false
+    end
+    local key = self:getSyncFingerprintKey(kind, book_cache_id)
+    if not key then
+        return false
+    end
+    return self.settings:saveSetting(key, value)
+end
+
+function BookloreSync:clearStoredSyncFingerprint(kind, book_cache_id)
+    if not self.settings then
+        return false
+    end
+    local key = self:getSyncFingerprintKey(kind, book_cache_id)
+    if not key then
+        return false
+    end
+    return self.settings:saveSetting(key, nil)
+end
+
+function BookloreSync:hashSyncTokens(tokens)
+    if not tokens then
+        return nil
+    end
+    if #tokens == 0 then
+        return "empty"
+    end
+    table.sort(tokens)
+    local ok_sha2, sha2 = pcall(require, "ffi/sha2")
+    if not ok_sha2 or not sha2 or type(sha2.md5) ~= "function" then
+        self:logWarn("BookloreSync: Sync fingerprint hashing unavailable")
+        return nil
+    end
+    return sha2.md5(table.concat(tokens, "\n"))
+end
+
+function BookloreSync:computeAnnotationsFingerprint(annotations)
+    if not annotations then
+        return nil
+    end
+    local tokens = {}
+    for _, ann in ipairs(annotations) do
+        local token = table.concat({
+            stableSerializeValue(ann.datetime),
+            stableSerializeValue(ann.datetime_updated),
+            stableSerializeValue(ann.text),
+            stableSerializeValue(ann.note),
+            stableSerializeValue(ann.page),
+            stableSerializeValue(ann.chapter),
+            stableSerializeValue(ann.color),
+            stableSerializeValue(ann.drawer),
+            stableSerializeValue(ann.pos0),
+            stableSerializeValue(ann.pos1),
+        }, "|")
+        tokens[#tokens + 1] = token
+    end
+    return self:hashSyncTokens(tokens)
+end
+
+function BookloreSync:computeBookmarksFingerprint(bookmarks)
+    if not bookmarks then
+        return nil
+    end
+    local tokens = {}
+    for _, bm in ipairs(bookmarks) do
+        local token = table.concat({
+            stableSerializeValue(bm.datetime),
+            stableSerializeValue(bm.datetime_updated),
+            stableSerializeValue(bm.notes),
+            stableSerializeValue(bm.pos0),
+            stableSerializeValue(bm.pos1),
+            stableSerializeValue(bm.page),
+        }, "|")
+        tokens[#tokens + 1] = token
+    end
+    return self:hashSyncTokens(tokens)
+end
+
+function BookloreSync:parseKoreaderDateTime(datetime_str)
+    if not datetime_str or datetime_str == "" then
+        return nil
+    end
+    local y, m, d, hh, mm, ss = tostring(datetime_str):match("^(%d%d%d%d)%-(%d%d)%-(%d%d) (%d%d):(%d%d):(%d%d)$")
+    if not y then
+        return nil
+    end
+    return os.time({
+        year = tonumber(y),
+        month = tonumber(m),
+        day = tonumber(d),
+        hour = tonumber(hh),
+        min = tonumber(mm),
+        sec = tonumber(ss),
+    })
+end
+
+function BookloreSync:getEntryChangedAt(entry)
+    if not entry then
+        return nil
+    end
+    local updated_at = self:parseKoreaderDateTime(entry.datetime_updated)
+    if updated_at then
+        return updated_at
+    end
+    return self:parseKoreaderDateTime(entry.datetime)
+end
+
+function BookloreSync:filterEntriesBySessionStart(entries, session_start_time)
+    if not entries or not session_start_time then
+        return entries or {}, 0
+    end
+
+    local threshold = tonumber(session_start_time) or 0
+    if threshold <= 0 then
+        return entries, 0
+    end
+
+    local filtered = {}
+    local skipped = 0
+    local adjusted_threshold = threshold - 1
+
+    for _, entry in ipairs(entries) do
+        local changed_at = self:getEntryChangedAt(entry)
+        if changed_at == nil or changed_at >= adjusted_threshold then
+            filtered[#filtered + 1] = entry
+        else
+            skipped = skipped + 1
+        end
+    end
+
+    return filtered, skipped
+end
+
+function BookloreSync:shouldSkipNoopSync(kind, book_cache_id, current_fp, pending_count)
+    if not kind or not book_cache_id then
+        return false, "no_cache_id"
+    end
+    if not current_fp then
+        return false, "fingerprint_unavailable"
+    end
+    pending_count = tonumber(pending_count) or 0
+    if pending_count > 0 then
+        return false, "pending_exists"
+    end
+    local stored_fp = self:getStoredSyncFingerprint(kind, book_cache_id)
+    if not stored_fp then
+        return false, "no_marker"
+    end
+    if stored_fp ~= current_fp then
+        return false, "fingerprint_changed"
+    end
+    return true, "fingerprint_match_no_pending"
+end
+
+function BookloreSync:updateNoopSyncMarker(kind, book_cache_id, current_fp, failed_count, queued_count, queue_only)
+    if not kind or not book_cache_id or not current_fp then
+        return
+    end
+
+    local failed = tonumber(failed_count) or 0
+    local queued = tonumber(queued_count) or 0
+
+    if queue_only or failed > 0 or queued > 0 then
+        self:clearStoredSyncFingerprint(kind, book_cache_id)
+        self:logInfo(
+            "BookloreSync: No-op marker invalidated",
+            "kind=", tostring(kind),
+            "book_cache_id=", tostring(book_cache_id),
+            "reason=dirty_or_unsynced"
+        )
+        return
+    end
+
+    local pending_count = 0
+    if kind == "annotations" and self.db and type(self.db.getPendingAnnotationCountForBook) == "function" then
+        pending_count = tonumber(self.db:getPendingAnnotationCountForBook(book_cache_id)) or 0
+    elseif kind == "bookmarks" and self.db and type(self.db.getPendingBookmarkCountForBook) == "function" then
+        pending_count = tonumber(self.db:getPendingBookmarkCountForBook(book_cache_id)) or 0
+    end
+
+    if pending_count > 0 then
+        self:clearStoredSyncFingerprint(kind, book_cache_id)
+        self:logInfo(
+            "BookloreSync: No-op marker invalidated",
+            "kind=", tostring(kind),
+            "book_cache_id=", tostring(book_cache_id),
+            "reason=pending_exists"
+        )
+        return
+    end
+
+    self:setStoredSyncFingerprint(kind, book_cache_id, current_fp)
+    self:logInfo(
+        "BookloreSync: No-op marker updated",
+        "kind=", tostring(kind),
+        "book_cache_id=", tostring(book_cache_id),
+        "reason=sync_clean"
+    )
+end
+
+function BookloreSync:createCloseSyncContext(params)
+    params = params or {}
+
+    local ctx = {
+        created_at_ms = self:getTimingNowMs(),
+        close_started_ms = tonumber(params.close_started_ms) or self:getTimingNowMs(),
+        session_started_at = tonumber(params.session_started_at),
+        doc_path = params.doc_path,
+        file_hash = params.file_hash,
+        book_id = params.book_id,
+        end_progress = params.end_progress,
+        document = params.document,
+        doc_settings = params.doc_settings,
+        live_annotations = params.live_annotations,
+        live_bookmarks = params.live_bookmarks,
+        book_cache_id = nil,
+        epub_context = nil,
+    }
+
+    if ctx.doc_path and self.db then
+        ctx.book_cache_id = self.db:getBookCacheIdByFilePath(ctx.doc_path)
+        if not ctx.book_cache_id then
+            self.db:saveBookCache(ctx.doc_path, ctx.file_hash or "", nil, nil, nil, nil, nil)
+            ctx.book_cache_id = self.db:getBookCacheIdByFilePath(ctx.doc_path)
+        end
+    end
+
+    local is_epub = ctx.doc_path and ctx.doc_path:lower():match("%.epub$") ~= nil
+    if is_epub and ctx.document then
+        ctx.epub_context = self:getOrBuildEpubContext(ctx.document, ctx.doc_path)
+    end
+
+    self:logInfo(
+        "BookloreSync: Close context created",
+        "path=", tostring(ctx.doc_path or ""),
+        "book_id=", tostring(ctx.book_id),
+        "book_cache_id=", tostring(ctx.book_cache_id),
+        "has_epub_context=", tostring(ctx.epub_context ~= nil),
+        "session_started_at=", tostring(ctx.session_started_at),
+        "annotations=", tostring(ctx.live_annotations and #ctx.live_annotations or 0),
+        "bookmarks=", tostring(ctx.live_bookmarks and #ctx.live_bookmarks or 0)
+    )
+
+    return ctx
+end
+
+function BookloreSync:releaseCloseSyncContext(ctx, reason)
+    if not ctx then
+        return
+    end
+
+    local elapsed_ms = self:getTimingNowMs() - (tonumber(ctx.created_at_ms) or self:getTimingNowMs())
+    self:logInfo(
+        "BookloreSync: Close context released",
+        "reason=", tostring(reason or "unknown"),
+        "path=", tostring(ctx.doc_path or ""),
+        "elapsed_ms=", tostring(elapsed_ms)
+    )
+end
+
 -- ── EPUB CFI conversion ────────────────────────────────────────────────────
 
 -- Void/self-closing HTML elements (never have children)
@@ -2064,7 +2515,8 @@ PDF/CBZ highlights and notes → mock CFI (epubcfi(/6/<page*2>!/4/2/1:0,/1:0))
                                    Passing self.ui.annotation.annotations directly avoids this race.
 --]]
 ---BookloreSync:syncHighlightsAndNotes.
-function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_settings, live_annotations)
+function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_settings, live_annotations, close_ctx)
+    local sync_started_ms = self:getTimingNowMs()
     if not doc_path then
         self:logWarn("BookloreSync: syncHighlightsAndNotes called without doc_path")
         return 0, 0, 0
@@ -2101,6 +2553,16 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
     --
     -- 3. on-disk sidecar - last resort for retry/manual-sync paths where no live
     --    objects are available and the sidecar has already been flushed.
+    if close_ctx and type(close_ctx) == "table" then
+        doc_path = close_ctx.doc_path or doc_path
+        book_id = close_ctx.book_id or book_id
+        document = close_ctx.document or document
+        doc_settings = close_ctx.doc_settings or doc_settings
+        if type(close_ctx.live_annotations) == "table" then
+            live_annotations = close_ctx.live_annotations
+        end
+    end
+
     local annotations
     if live_annotations and type(live_annotations) == "table" then
         -- Map ReaderAnnotation items → the normalised shape the rest of this
@@ -2136,6 +2598,28 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
         return 0, 0, 0
     end
 
+    local session_started_at = close_ctx and tonumber(close_ctx.session_started_at) or nil
+    local filtered_annotations, skipped_pre_session = self:filterEntriesBySessionStart(annotations, session_started_at)
+    if skipped_pre_session > 0 then
+        self:logInfo(
+            "BookloreSync: Session-window filter applied",
+            "component=annotations",
+            "session_started_at=", tostring(session_started_at),
+            "skipped=", tostring(skipped_pre_session),
+            "kept=", tostring(#filtered_annotations)
+        )
+    end
+    annotations = filtered_annotations
+    if #annotations == 0 then
+        self:logInfo(
+            "BookloreSync: No-op skipped",
+            "component=annotations",
+            "reason=no_entries_in_session_window",
+            "path=", tostring(doc_path or "")
+        )
+        return 0, 0, 0
+    end
+
     self:logInfo("BookloreSync: Syncing", #annotations, "annotations for book_id:", book_id)
 
     -- Build EPUB spine map (needed for CFI generation).
@@ -2143,8 +2627,12 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
     local spine = nil
     local is_epub = doc_path:lower():match("%.epub$") ~= nil
     local is_pdf  = doc_path:lower():match("%.pdf$")  ~= nil
+    local epub_ctx = close_ctx and close_ctx.epub_context or nil
     if is_epub and document then
-        spine = self:buildEpubSpineMap(document)
+        if not epub_ctx then
+            epub_ctx = self:getOrBuildEpubContext(document, doc_path)
+        end
+        spine = epub_ctx and epub_ctx.spine_map or nil
         if not spine then
             self:logWarn("BookloreSync: Could not build EPUB spine map - highlights/in-book notes will be skipped")
         end
@@ -2154,7 +2642,17 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
     local html_cache = {}
 
     -- Ensure we have a book_cache_id (create minimal cache entry if needed)
-    local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    local book_cache_id = close_ctx and close_ctx.book_cache_id or nil
+    if close_ctx and close_ctx.doc_path == doc_path and close_ctx.book_id == nil then
+        close_ctx.book_id = book_id
+    end
+    local used_close_ctx = close_ctx and close_ctx.doc_path == doc_path
+    if used_close_ctx then
+        self:logInfo("BookloreSync: syncHighlightsAndNotes using shared close context", "path=", tostring(doc_path))
+    end
+    if not book_cache_id then
+        book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    end
     if not book_cache_id then
         self.db:saveBookCache(doc_path, "", nil, nil, nil, nil, nil)
         book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
@@ -2163,6 +2661,31 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
         self:logWarn("BookloreSync: Could not obtain book_cache_id for highlights sync")
         return 0, 0, 0
     end
+    if close_ctx and close_ctx.doc_path == doc_path then
+        close_ctx.book_cache_id = book_cache_id
+    end
+
+    local current_annotations_fp = self:computeAnnotationsFingerprint(annotations)
+    local pending_ann_count = tonumber(self.db:getPendingAnnotationCountForBook(book_cache_id)) or 0
+    local should_skip_noop, skip_reason = self:shouldSkipNoopSync("annotations", book_cache_id, current_annotations_fp, pending_ann_count)
+    if should_skip_noop then
+        local elapsed_ms = self:getTimingNowMs() - sync_started_ms
+        self:logInfo(
+            "BookloreSync: No-op skipped",
+            "component=annotations",
+            "reason=", tostring(skip_reason),
+            "book_cache_id=", tostring(book_cache_id),
+            "path=", tostring(doc_path or ""),
+            "syncHighlightsAndNotes_total_ms=", tostring(elapsed_ms)
+        )
+        return 0, 0, 0
+    end
+    self:logInfo(
+        "BookloreSync: No-op marker bypass",
+        "component=annotations",
+        "reason=", tostring(skip_reason),
+        "book_cache_id=", tostring(book_cache_id)
+    )
 
     local notes_dest    = self.notes_destination or "in_book"
     local synced_count  = 0
@@ -2208,7 +2731,17 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
                     ---resolveCfi.
                     local function resolveCfi()
                         if is_epub and spine then
-                            return self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
+                            local cfi = self:buildCfi(ann.pos0, ann.pos1, spine, document, html_cache)
+                            if not cfi and ann.page then
+                                -- Some large/complex EPUBs emit xpointers that cannot be
+                                -- resolved reliably against raw spine HTML (e.g. deep
+                                -- DocFragment/body paths with transformed nodes). Fall
+                                -- back to a page-anchored synthetic CFI so in-book sync
+                                -- can still proceed instead of being dropped.
+                                cfi = self:buildMockPdfCfi(ann.page)
+                                self:logWarn("BookloreSync: Falling back to page-based CFI for annotation at", tostring(datetime), "page", tostring(ann.page))
+                            end
+                            return cfi
                         elseif is_pdf and ann.page then
                             return self:buildMockPdfCfi(ann.page)
                         end
@@ -2386,6 +2919,11 @@ function BookloreSync:syncHighlightsAndNotes(doc_path, book_id, document, doc_se
             synced_count, skipped_count, failed_count, queued_count
         ))
     end
+
+    local elapsed_ms = self:getTimingNowMs() - sync_started_ms
+    self:logInfo("BookloreSync: syncHighlightsAndNotes_total_ms=", tostring(elapsed_ms), "path=", tostring(doc_path))
+
+    self:updateNoopSyncMarker("annotations", book_cache_id, current_annotations_fp, failed_count, queued_count, queue_only)
 
     return synced_count, queued_count, failed_count
 end
@@ -4797,6 +5335,98 @@ function BookloreSync:pushCurrentKoreaderProgressDirect(payload)
 end
 
 --[[--
+Push current KOReader progress immediately (no full pending sync pipeline).
+
+Used by periodic page-turn updates to avoid running unrelated sync phases
+(sessions/ratings/annotations/bookmarks) on every interval.
+
+Falls back to queueing when direct push cannot be performed.
+
+@return boolean delivered_or_queued
+--]]
+---BookloreSync:pushCurrentKoreaderProgressFastTrack.
+function BookloreSync:pushCurrentKoreaderProgressFastTrack(payload)
+    local payload_err = nil
+    if not payload then
+        payload, payload_err = self:buildCurrentKoreaderProgressPayload(os.time())
+    end
+    if not payload then
+        self:logWarn("BookloreSync: Fast-track progress payload build failed:", tostring(payload_err or "unknown"))
+        return false
+    end
+
+    local ok, reason = self:pushCurrentKoreaderProgressDirect(payload)
+    if ok then
+        self:logInfo("BookloreSync: Fast-track progress push succeeded for hash:", tostring(payload.document))
+        return true
+    end
+
+    self:logWarn("BookloreSync: Fast-track progress push failed, queueing instead:", tostring(reason or "unknown"))
+    return self:queueCurrentKoreaderProgress()
+end
+
+--[[--
+Build KOReader progress payload from an explicit page number.
+
+This avoids relying on getLastProgress()/getLastPercent() during rapid page
+turns, which can lag on some devices and only update after turning stops.
+
+@param page number|string current page from page-update event
+@param timestamp number|nil unix timestamp
+@return table|nil payload
+@return string|nil error_message
+--]]
+---BookloreSync:buildKoreaderProgressPayloadForPage.
+function BookloreSync:buildKoreaderProgressPayloadForPage(page, timestamp)
+    if not self.progress_sync_enabled then
+        return nil, "Progress sync disabled"
+    end
+
+    local file_path = self.ui and self.ui.document and self.ui.document.file or nil
+    if not file_path then
+        return nil, "No open document"
+    end
+
+    local page_num = tonumber(page)
+    if not page_num or page_num < 1 then
+        return nil, "Invalid page"
+    end
+
+    local total_pages = self.ui and self.ui.document and self.ui.document.getPageCount and tonumber(self.ui.document:getPageCount()) or nil
+    if not total_pages or total_pages <= 0 then
+        return nil, "Invalid page count"
+    end
+
+    local book_hash = self:getCurrentDocumentHashForProgress()
+    if not book_hash then
+        return nil, "Book hash unavailable"
+    end
+
+    if page_num > total_pages then
+        page_num = total_pages
+    end
+
+    local percentage_ratio = self:roundKoreaderSyncPercentage(page_num / total_pages)
+    local progress_value = tostring(page_num)
+    local ts = tonumber(timestamp) or os.time()
+    local device_name = Device and Device.model or "KOReader"
+    local device_id = tostring(self.progress_sync_device_id or "unknown")
+    local book_cache_id = self.db and self.db:getBookCacheIdByFilePath(file_path) or nil
+
+    return {
+        timestamp = ts,
+        document = tostring(book_hash),
+        percentage = percentage_ratio,
+        progress = progress_value,
+        device = device_name,
+        device_id = device_id,
+        book_hash = tostring(book_hash),
+        book_cache_id = book_cache_id,
+        location = progress_value,
+    }, nil
+end
+
+--[[--
 Queue local KOReader progress into pending_koreader_progress.
 
 @return boolean queued
@@ -5659,6 +6289,14 @@ Handler for when a document is opened and ready
 ---BookloreSync:onReaderReady.
 function BookloreSync:onReaderReady()
     self:logInfo("BookloreSync: Reader ready")
+
+    if self.ui and self.ui.document and self.ui.document.file then
+        local open_path = self.ui.document.file
+        if self.epub_context_cache and self.epub_context_cache.doc_path ~= open_path then
+            self:invalidateEpubContext("document_open_switch")
+        end
+    end
+
     self:startSession()
     self:detectBookMetadataLocation()
 
@@ -5721,21 +6359,39 @@ function BookloreSync:onPageUpdate(page)
 
     self.progress_sync_page_counter = 0
 
+    local payload = nil
+    if self.ui and self.ui.document and self.ui.document.info and self.ui.document.info.has_pages then
+        payload = self:buildKoreaderProgressPayloadForPage(page, os.time())
+    end
+
+    local debounce_seconds = PROGRESS_API_DEBOUNCE_SECONDS
+    if threshold <= 1 then
+        debounce_seconds = 0
+    end
+
     local now = os.time()
-    if now - (self.progress_sync_last_push_ts or 0) < PROGRESS_API_DEBOUNCE_SECONDS then
+    if debounce_seconds > 0 and now - (self.progress_sync_last_push_ts or 0) < debounce_seconds then
         return false
     end
 
-    local queued = self:queueCurrentKoreaderProgress()
-    if queued then
-        self.progress_sync_last_push_ts = now
-        if not self.manual_sync_only then
-            self:_requestWifi(_("sync reading progress"), function()
-                self:syncPendingSessions(true)
-            end, function()
-                self:logInfo("BookloreSync: WiFi request declined on page-update progress sync")
-            end)
+    if self.manual_sync_only then
+        local queued = self:queueCurrentKoreaderProgress()
+        if queued then
+            self.progress_sync_last_push_ts = now
         end
+    else
+        self:_requestWifi(_("sync reading progress"), function()
+            local done = self:pushCurrentKoreaderProgressFastTrack(payload)
+            if done then
+                self.progress_sync_last_push_ts = os.time()
+            end
+        end, function()
+            self:logInfo("BookloreSync: WiFi request declined on page-update progress sync - queueing")
+            local queued = self:queueCurrentKoreaderProgress(payload)
+            if queued then
+                self.progress_sync_last_push_ts = os.time()
+            end
+        end)
     end
 
     return false
@@ -5750,11 +6406,19 @@ function BookloreSync:onCloseDocument()
         return false
     end
 
+    local close_started_ms = self:getTimingNowMs()
+    local function closeReturn(value)
+        local elapsed_ms = self:getTimingNowMs() - close_started_ms
+        self:logInfo("BookloreSync: onCloseDocument_total_ms=", tostring(elapsed_ms))
+        return value
+    end
+
     self:logInfo("BookloreSync: Document closing")
 
     local pre_file_path = self.current_session and self.current_session.file_path
     local pre_file_hash = self.current_session and self.current_session.file_hash
     local pre_book_id   = self.current_session and self.current_session.book_id
+    local pre_session_started_at = self.current_session and self.current_session.start_time
     local pre_end_progress = nil
     if self.current_session then
         pre_end_progress = self:getCurrentProgress()
@@ -5832,7 +6496,7 @@ function BookloreSync:onCloseDocument()
             text    = _("Session not saved: criteria not met"),
             timeout = 3,
         })
-        return false
+        return closeReturn(false)
     end
 
     -- Per-book tracking disabled: endSession already discarded the session.
@@ -5840,7 +6504,7 @@ function BookloreSync:onCloseDocument()
     -- as well on the immediate close-document flow.
     if session_status == "tracking_disabled" then
         self:logInfo("BookloreSync: Tracking disabled for this book - skipping rating/annotation sync on close")
-        return false
+        return closeReturn(false)
     end
 
     -- ── Step 3: Queue / sync rating ───────────────────────────────────────
@@ -5902,6 +6566,8 @@ function BookloreSync:onCloseDocument()
     -- mode: it computes CFIs (while the doc is open) and stores everything in
     -- pending_annotations without making any network calls.
     local ann_synced_now, ann_queued_now, ann_failed_now = 0, 0, 0
+    local bm_synced_now, bm_queued_now, bm_failed_now = 0, 0, 0
+    local close_ctx = nil
     if self.highlights_notes_sync_enabled and pre_file_path then
         local strategy = self.upload_strategy or "on_session"
         local open_doc      = self.ui and self.ui.document
@@ -5950,12 +6616,25 @@ function BookloreSync:onCloseDocument()
             end
         end
 
+        close_ctx = self:createCloseSyncContext({
+            close_started_ms = close_started_ms,
+            session_started_at = pre_session_started_at,
+            doc_path = pre_file_path,
+            file_hash = pre_file_hash,
+            book_id = pre_book_id,
+            end_progress = pre_end_progress,
+            document = open_doc,
+            doc_settings = live_settings,
+            live_annotations = live_annotations,
+            live_bookmarks = live_bookmarks,
+        })
+
         if strategy == "on_session" then
             ann_synced_now, ann_queued_now, ann_failed_now =
-                self:syncHighlightsAndNotes(pre_file_path, pre_book_id, open_doc, live_settings, live_annotations)
+                self:syncHighlightsAndNotes(pre_file_path, pre_book_id, open_doc, live_settings, live_annotations, close_ctx)
         elseif strategy == "on_complete" and pre_end_progress and pre_end_progress >= 99 then
             ann_synced_now, ann_queued_now, ann_failed_now =
-                self:syncHighlightsAndNotes(pre_file_path, pre_book_id, open_doc, live_settings, live_annotations)
+                self:syncHighlightsAndNotes(pre_file_path, pre_book_id, open_doc, live_settings, live_annotations, close_ctx)
         end
         ann_synced_now  = tonumber(ann_synced_now)  or 0
         ann_queued_now  = tonumber(ann_queued_now)  or 0
@@ -5963,57 +6642,76 @@ function BookloreSync:onCloseDocument()
 
         -- Sync bookmarks (same strategy gate as annotations)
         if strategy == "on_session" or (strategy == "on_complete" and pre_end_progress and pre_end_progress >= 99) then
-            self:syncBookmarks(pre_file_path, pre_book_id, open_doc, live_settings, live_bookmarks)
+            bm_synced_now, bm_queued_now, bm_failed_now =
+                self:syncBookmarks(pre_file_path, pre_book_id, open_doc, live_settings, live_bookmarks, close_ctx)
         end
+        bm_synced_now = tonumber(bm_synced_now) or 0
+        bm_queued_now = tonumber(bm_queued_now) or 0
+        bm_failed_now = tonumber(bm_failed_now) or 0
     end
 
-    -- ── Step 5: Fire the combined sync (only if book_id is confirmed) ─────
-    -- All three items are now queued.  Trigger one syncPendingSessions pass
-    -- which will submit session → rating → annotations in the correct order
-    -- (see syncPendingSessions for Phase 0 book_id pre-resolution).
-    -- If book_id is still unknown, everything stays in the pending queues and
-    -- will be picked up on the next online resume or manual sync.
+    -- ── Step 5: Fast-close deferred flush ──────────────────────────────────
+    -- Close handler now persists all pending work first and defers heavy
+    -- network flush slightly, so close returns quickly on large books.
+    -- Existing pending queues and syncPendingSessions pipeline are reused.
     local progress_queued_now = false
     if self.progress_sync_enabled then
         progress_queued_now = self:queueCurrentKoreaderProgress()
     end
 
     if not self.manual_sync_only then
-        if pre_book_id then
-            self:logInfo("BookloreSync: book_id known - triggering post-close sync")
-            -- _requestWifi will prompt if ask_wifi_enable is on and WiFi is off.
-            -- On deny the data stays in the pending queues and will be uploaded
-            -- on the next resume / manual sync.
+        local deferred_scheduled = false
+        local ok_defer, defer_err = pcall(function()
+            deferred_scheduled = self:scheduleDeferredCloseFlush("close_document")
+        end)
+        if not ok_defer then
+            self:logErr("BookloreSync: Failed to schedule deferred close flush:", tostring(defer_err))
+            -- Fail-safe: keep pre-phase behaviour so pending session/progress
+            -- are still uploaded in automatic mode if deferred scheduling breaks.
             self:_requestWifi(_("upload session and annotations"), function()
                 self:syncPendingSessions(false)
             end, function()
-                -- User declined WiFi - show a brief "saved locally" notice so
-                -- they know the data is queued.
-                self:logInfo("BookloreSync: WiFi request declined at close - session queued")
-                if not self.silent_messages then
-                    local parts = { _("Booklore Sync: WiFi not enabled") }
-                    parts[#parts + 1] = _("S: 1 queued")
-                    if ann_queued_now > 0 or ann_synced_now > 0 then
-                        parts[#parts + 1] = T(_("A: %1 queued"), ann_queued_now + ann_synced_now)
-                    end
-                    if progress_queued_now then
-                        parts[#parts + 1] = _("P: 1 queued")
-                    end
-                    parts[#parts + 1] = _("Will sync when WiFi is available")
-                    UIManager:show(InfoMessage:new{
-                        text    = table.concat(parts, "\n"),
-                        timeout = 3,
-                    })
-                end
+                self:logInfo("BookloreSync: WiFi request declined at close (fallback immediate sync path)")
             end)
+        end
+        if pre_book_id then
+            self:logInfo("BookloreSync: book_id known - deferred post-close flush", "scheduled=", tostring(deferred_scheduled))
         else
-            self:logInfo("BookloreSync: book_id unknown - skipping network sync, data stored locally")
-            if not self.silent_messages then
-                -- Build an informative "stored locally" summary.
-                local parts = { _("Book not found in Booklore - saved locally") }
+            self:logInfo("BookloreSync: book_id unknown - data stored locally, deferred flush will retry later")
+        end
+
+        if not self.silent_messages then
+            local parts
+            if pre_book_id then
+                parts = { _("Booklore Sync: Saved locally") }
+                parts[#parts + 1] = _("S: 1 queued")
+                if ann_synced_now > 0 then
+                    parts[#parts + 1] = T(_("A: %1 synced now"), ann_synced_now)
+                end
+                if ann_queued_now > 0 then
+                    parts[#parts + 1] = T(_("A: %1 queued"), ann_queued_now)
+                end
+                if bm_synced_now > 0 then
+                    parts[#parts + 1] = T(_("B: %1 synced now"), bm_synced_now)
+                end
+                if bm_queued_now > 0 then
+                    parts[#parts + 1] = T(_("B: %1 queued"), bm_queued_now)
+                end
+                if bm_failed_now > 0 then
+                    parts[#parts + 1] = T(_("B: %1 failed now"), bm_failed_now)
+                end
+                if progress_queued_now then
+                    parts[#parts + 1] = _("P: 1 queued")
+                end
+                parts[#parts + 1] = _("Will flush shortly after close")
+            else
+                parts = { _("Book not found in Booklore - saved locally") }
                 parts[#parts + 1] = _("S: 1 cached")
                 if ann_queued_now > 0 then
                     parts[#parts + 1] = T(_("A: %1 cached"), ann_queued_now)
+                end
+                if bm_queued_now > 0 then
+                    parts[#parts + 1] = T(_("B: %1 cached"), bm_queued_now)
                 end
                 if pre_live_rating and self.rating_sync_enabled then
                     parts[#parts + 1] = _("R: 1 cached")
@@ -6022,11 +6720,11 @@ function BookloreSync:onCloseDocument()
                     parts[#parts + 1] = _("P: 1 cached")
                 end
                 parts[#parts + 1] = _("Will sync automatically when matched")
-                UIManager:show(InfoMessage:new{
-                    text = table.concat(parts, "\n"),
-                    timeout = 4,
-                })
             end
+            UIManager:show(InfoMessage:new{
+                text = table.concat(parts, "\n"),
+                timeout = 3,
+            })
         end
     elseif session_status == "saved" and not self.silent_messages then
         -- Manual sync only mode: session was queued, inform the user.
@@ -6035,6 +6733,9 @@ function BookloreSync:onCloseDocument()
         parts[#parts + 1] = _("S: 1 queued")
         if ann_queued_now > 0 then
             parts[#parts + 1] = T(_("A: %1 queued"), ann_queued_now)
+        end
+        if bm_queued_now > 0 then
+            parts[#parts + 1] = T(_("B: %1 queued"), bm_queued_now)
         end
         if progress_queued_now then
             parts[#parts + 1] = _("P: 1 queued")
@@ -6046,7 +6747,30 @@ function BookloreSync:onCloseDocument()
         })
     end
 
-    return false
+    local close_book_cache_id = nil
+    if pre_file_path and self.db then
+        close_book_cache_id = self.db:getBookCacheIdByFilePath(pre_file_path)
+    end
+    if close_book_cache_id and self.db then
+        local pending_ann = tonumber(self.db:getPendingAnnotationCountForBook(close_book_cache_id)) or 0
+        local pending_bm = tonumber(self.db:getPendingBookmarkCountForBook(close_book_cache_id)) or 0
+        if pending_ann == 0 and pending_bm == 0 then
+            self:invalidateEpubContext("close_document_no_pending_context_needed", pre_file_path)
+        else
+            self:logInfo(
+                "BookloreSync: Retaining EPUB context cache after close",
+                "pending_annotations=", tostring(pending_ann),
+                "pending_bookmarks=", tostring(pending_bm),
+                "path=", tostring(pre_file_path or "")
+            )
+        end
+    else
+        self:invalidateEpubContext("close_document_no_cache_id", pre_file_path)
+    end
+
+    self:releaseCloseSyncContext(close_ctx, "onCloseDocument_complete")
+
+    return closeReturn(false)
 end
 
 --[[--
@@ -6248,6 +6972,156 @@ function BookloreSync:_requestWifi(context, on_confirm, on_deny)
             safeInvoke(on_deny, "WiFi deny callback")
         end,
     })
+end
+
+function BookloreSync:getPendingSyncTotals()
+    if not self.db then
+        return {
+            sessions = 0,
+            annotations = 0,
+            ratings = 0,
+            bookmarks = 0,
+            progress = 0,
+            deletions = 0,
+            total = 0,
+        }
+    end
+
+    local function safeCount(method_name)
+        local fn = self.db and self.db[method_name]
+        if type(fn) ~= "function" then
+            return 0
+        end
+        local ok, value = pcall(fn, self.db)
+        if not ok then
+            self:logWarn("BookloreSync: Failed to read pending count", tostring(method_name), tostring(value))
+            return 0
+        end
+        return tonumber(value) or 0
+    end
+
+    local sessions = safeCount("getPendingSessionCount")
+    local annotations = safeCount("getPendingAnnotationCount")
+    local ratings = safeCount("getPendingRatingCount")
+    local bookmarks = safeCount("getPendingBookmarkCount")
+    local progress = safeCount("getPendingKoreaderProgressCount")
+
+    local deletions = 0
+    if type(self.db.getPendingDeletionCount) == "function" then
+        deletions = safeCount("getPendingDeletionCount")
+    elseif type(self.db.getPendingDeletions) == "function" then
+        local ok_del, rows = pcall(self.db.getPendingDeletions, self.db)
+        if ok_del and type(rows) == "table" then
+            deletions = #rows
+        elseif not ok_del then
+            self:logWarn("BookloreSync: Failed to read pending deletions", tostring(rows))
+        end
+    end
+
+    local total = sessions + annotations + ratings + bookmarks + progress + deletions
+    return {
+        sessions = sessions,
+        annotations = annotations,
+        ratings = ratings,
+        bookmarks = bookmarks,
+        progress = progress,
+        deletions = deletions,
+        total = total,
+    }
+end
+
+function BookloreSync:scheduleDeferredCloseFlush(reason)
+    if self.manual_sync_only or not self.is_enabled then
+        return false
+    end
+
+    local totals = self:getPendingSyncTotals()
+
+    if totals.total == 0 then
+        self.deferred_close_flush_requested = false
+        self.deferred_close_flush_scheduled = false
+        self.deferred_close_flush_running = false
+        self:logInfo(
+            "BookloreSync: No-op skipped",
+            "component=deferred_close_flush",
+            "reason=no_pending_items",
+            "trigger=", tostring(reason or "unknown"),
+            "outcome=noop_skipped"
+        )
+        return false
+    end
+
+    self.deferred_close_flush_requested = true
+    self.deferred_close_flush_last_queued_ms = self:getTimingNowMs()
+
+    if self.deferred_close_flush_scheduled or self.deferred_close_flush_running then
+        self:logInfo(
+            "BookloreSync: Deferred close flush already queued/running - coalescing",
+            "reason=", tostring(reason or "unknown"),
+            "pending_total=", tostring(totals.total)
+        )
+        return true
+    end
+
+    self.deferred_close_flush_scheduled = true
+    self.deferred_close_flush_seq = (tonumber(self.deferred_close_flush_seq) or 0) + 1
+    local seq = self.deferred_close_flush_seq
+
+    self:logInfo(
+        "BookloreSync: Deferred close flush scheduled",
+        "seq=", tostring(seq),
+        "reason=", tostring(reason or "unknown"),
+        "pending_total=", tostring(totals.total),
+        "outcome=queued_on_close"
+    )
+
+    UIManager:scheduleIn(1, function()
+        self.deferred_close_flush_scheduled = false
+
+        if not self.deferred_close_flush_requested then
+            self:logInfo("BookloreSync: Deferred close flush cancelled before run", "seq=", tostring(seq))
+            return
+        end
+        if self.deferred_close_flush_running then
+            self:logInfo("BookloreSync: Deferred close flush skipped - already running", "seq=", tostring(seq))
+            return
+        end
+
+        local run_started_ms = self:getTimingNowMs()
+        local lag_ms = run_started_ms - (tonumber(self.deferred_close_flush_last_queued_ms) or run_started_ms)
+
+        self:logInfo(
+            "BookloreSync: Deferred close flush starting",
+            "seq=", tostring(seq),
+            "queue_to_start_ms=", tostring(lag_ms)
+        )
+
+        self.deferred_close_flush_running = true
+        self:_requestWifi(_("upload session and annotations"), function()
+            local flush_started_ms = self:getTimingNowMs()
+            self:syncPendingSessions(false)
+            local flush_elapsed_ms = self:getTimingNowMs() - flush_started_ms
+            self.deferred_close_flush_last_completed_ms = self:getTimingNowMs()
+            self.deferred_close_flush_requested = false
+            self.deferred_close_flush_running = false
+            self:logInfo(
+                "BookloreSync: Deferred close flush finished",
+                "seq=", tostring(seq),
+                "flush_elapsed_ms=", tostring(flush_elapsed_ms),
+                "close_to_flush_done_ms=", tostring(self.deferred_close_flush_last_completed_ms - (tonumber(self.deferred_close_flush_last_queued_ms) or self.deferred_close_flush_last_completed_ms)),
+                "outcome=flushed_after_close"
+            )
+        end, function()
+            self.deferred_close_flush_running = false
+            self:logInfo(
+                "BookloreSync: Deferred close flush postponed",
+                "seq=", tostring(seq),
+                "reason=wifi_not_enabled_or_declined"
+            )
+        end)
+    end)
+
+    return true
 end
 
 --[[--
@@ -6468,6 +7342,12 @@ resume time, kick it off now that we're connected.
 ---BookloreSync:onNetworkConnected.
 function BookloreSync:onNetworkConnected()
     if not self.is_enabled then return false end
+
+    if self.deferred_close_flush_requested then
+        self:logInfo("BookloreSync: Network connected with deferred close flush pending - scheduling")
+        self:scheduleDeferredCloseFlush("network_connected")
+    end
+
     if not self.needs_wake_sync then return false end
 
     self:logInfo("BookloreSync: Network connected with wake sync pending - scheduling")
@@ -6494,7 +7374,8 @@ For PDF files a mock CFI anchored to the page number is used.
 @return integer synced_count, integer queued_count, integer failed_count
 --]]
 ---BookloreSync:syncBookmarks.
-function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, live_bookmarks)
+function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, live_bookmarks, close_ctx)
+    local sync_started_ms = self:getTimingNowMs()
     if not doc_path then
         self:logWarn("BookloreSync: syncBookmarks called without doc_path")
         return 0, 0, 0
@@ -6505,6 +7386,16 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, l
     if self.booklore_username == "" or self.booklore_password == "" then
         self:logWarn("BookloreSync: Bookmark sync skipped - credentials not configured")
         return 0, 0, 0
+    end
+
+    if close_ctx and type(close_ctx) == "table" then
+        doc_path = close_ctx.doc_path or doc_path
+        book_id = close_ctx.book_id or book_id
+        document = close_ctx.document or document
+        doc_settings = close_ctx.doc_settings or doc_settings
+        if type(close_ctx.live_bookmarks) == "table" then
+            live_bookmarks = close_ctx.live_bookmarks
+        end
     end
 
     local queue_only = (book_id == nil) or self.manual_sync_only
@@ -6537,20 +7428,53 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, l
         return 0, 0, 0
     end
 
+    local session_started_at = close_ctx and tonumber(close_ctx.session_started_at) or nil
+    local filtered_bookmarks, skipped_pre_session = self:filterEntriesBySessionStart(bookmarks, session_started_at)
+    if skipped_pre_session > 0 then
+        self:logInfo(
+            "BookloreSync: Session-window filter applied",
+            "component=bookmarks",
+            "session_started_at=", tostring(session_started_at),
+            "skipped=", tostring(skipped_pre_session),
+            "kept=", tostring(#filtered_bookmarks)
+        )
+    end
+    bookmarks = filtered_bookmarks
+    if #bookmarks == 0 then
+        self:logInfo(
+            "BookloreSync: No-op skipped",
+            "component=bookmarks",
+            "reason=no_entries_in_session_window",
+            "path=", tostring(doc_path or "")
+        )
+        return 0, 0, 0
+    end
+
     -- Build EPUB spine map for CFI resolution
     local spine = nil
     local html_cache = {}
     local is_epub = doc_path:lower():match("%.epub$") ~= nil
     local is_pdf  = doc_path:lower():match("%.pdf$")  ~= nil
+    local epub_ctx = close_ctx and close_ctx.epub_context or nil
     if is_epub and document then
-        spine = self:buildEpubSpineMap(document)
+        if not epub_ctx then
+            epub_ctx = self:getOrBuildEpubContext(document, doc_path)
+        end
+        spine = epub_ctx and epub_ctx.spine_map or nil
         if not spine then
             self:logWarn("BookloreSync: Could not build EPUB spine map for bookmarks - will skip EPUB CFI")
         end
     end
 
     -- Ensure book_cache_id
-    local book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    local book_cache_id = close_ctx and close_ctx.book_cache_id or nil
+    local used_close_ctx = close_ctx and close_ctx.doc_path == doc_path
+    if used_close_ctx then
+        self:logInfo("BookloreSync: syncBookmarks using shared close context", "path=", tostring(doc_path))
+    end
+    if not book_cache_id then
+        book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
+    end
     if not book_cache_id then
         self.db:saveBookCache(doc_path, "", nil, nil, nil, nil, nil)
         book_cache_id = self.db:getBookCacheIdByFilePath(doc_path)
@@ -6559,6 +7483,31 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, l
         self:logWarn("BookloreSync: Could not obtain book_cache_id for bookmark sync")
         return 0, 0, 0
     end
+    if close_ctx and close_ctx.doc_path == doc_path then
+        close_ctx.book_cache_id = book_cache_id
+    end
+
+    local current_bookmarks_fp = self:computeBookmarksFingerprint(bookmarks)
+    local pending_bm_count = tonumber(self.db:getPendingBookmarkCountForBook(book_cache_id)) or 0
+    local should_skip_noop, skip_reason = self:shouldSkipNoopSync("bookmarks", book_cache_id, current_bookmarks_fp, pending_bm_count)
+    if should_skip_noop then
+        local elapsed_ms = self:getTimingNowMs() - sync_started_ms
+        self:logInfo(
+            "BookloreSync: No-op skipped",
+            "component=bookmarks",
+            "reason=", tostring(skip_reason),
+            "book_cache_id=", tostring(book_cache_id),
+            "path=", tostring(doc_path or ""),
+            "syncBookmarks_total_ms=", tostring(elapsed_ms)
+        )
+        return 0, 0, 0
+    end
+    self:logInfo(
+        "BookloreSync: No-op marker bypass",
+        "component=bookmarks",
+        "reason=", tostring(skip_reason),
+        "book_cache_id=", tostring(book_cache_id)
+    )
 
     local synced_count  = 0
     local queued_count  = 0
@@ -6587,6 +7536,11 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, l
                 cfi = self:buildCfi(bm.pos0, bm.pos0, spine, document, html_cache)
             elseif is_pdf and bm.page then
                 cfi = self:buildMockPdfCfi(bm.page)
+            end
+
+            if not cfi and is_epub and bm.page then
+                cfi = self:buildMockPdfCfi(bm.page)
+                self:logWarn("BookloreSync: Falling back to page-based CFI for bookmark at", tostring(datetime), "page", tostring(bm.page))
             end
 
             if not cfi then
@@ -6664,6 +7618,11 @@ function BookloreSync:syncBookmarks(doc_path, book_id, document, doc_settings, l
         "BookloreSync: Bookmark sync complete - synced=%d queued=%d failed=%d",
         synced_count, queued_count, failed_count
     ))
+    local elapsed_ms = self:getTimingNowMs() - sync_started_ms
+    self:logInfo("BookloreSync: syncBookmarks_total_ms=", tostring(elapsed_ms), "path=", tostring(doc_path))
+
+    self:updateNoopSyncMarker("bookmarks", book_cache_id, current_bookmarks_fp, failed_count, queued_count, queue_only)
+
     return synced_count, queued_count, failed_count
 end
 
@@ -8831,31 +9790,69 @@ function BookloreSync:syncPendingSessions(silent)
     -- ── Phase 1: Ratings ──────────────────────────────────────────────────
     -- Cache is now warm from Phase 0; pending_ratings rows that had nil
     -- book_ids will find their values via getBookCacheById.
-    local ratings_synced, ratings_failed = self:syncPendingRatings(true)
-    ratings_synced = tonumber(ratings_synced) or 0
-    ratings_failed = tonumber(ratings_failed) or 0
+    local pending_ratings_count = tonumber(self.db:getPendingRatingCount()) or 0
+    local ratings_synced, ratings_failed = 0, 0
+    if pending_ratings_count > 0 then
+        ratings_synced, ratings_failed = self:syncPendingRatings(true)
+        ratings_synced = tonumber(ratings_synced) or 0
+        ratings_failed = tonumber(ratings_failed) or 0
+    else
+        self:logInfo("BookloreSync: No-op skipped", "component=syncPendingRatings", "reason=no_pending_ratings")
+    end
 
     -- ── Phase 2: Annotations ──────────────────────────────────────────────
     -- Same warm-cache benefit as Phase 1.
-    local ann_synced, ann_failed, ann_skipped = self:syncPendingAnnotations(true)
-    ann_synced  = tonumber(ann_synced)  or 0
-    ann_failed  = tonumber(ann_failed)  or 0
-    ann_skipped = tonumber(ann_skipped) or 0
+    local pending_annotations_count = tonumber(self.db:getPendingAnnotationCount()) or 0
+    local ann_synced, ann_failed, ann_skipped = 0, 0, 0
+    if pending_annotations_count > 0 then
+        ann_synced, ann_failed, ann_skipped = self:syncPendingAnnotations(true)
+        ann_synced  = tonumber(ann_synced)  or 0
+        ann_failed  = tonumber(ann_failed)  or 0
+        ann_skipped = tonumber(ann_skipped) or 0
+    else
+        self:logInfo("BookloreSync: No-op skipped", "component=syncPendingAnnotations", "reason=no_pending_annotations")
+    end
 
     -- ── Phase 2b: Bookmarks ───────────────────────────────────────────────
-    local bm_synced, bm_failed = self:syncPendingBookmarks(true)
-    bm_synced = tonumber(bm_synced) or 0
-    bm_failed = tonumber(bm_failed) or 0
+    local pending_bookmarks_count = tonumber(self.db:getPendingBookmarkCount()) or 0
+    local bm_synced, bm_failed = 0, 0
+    if pending_bookmarks_count > 0 then
+        bm_synced, bm_failed = self:syncPendingBookmarks(true)
+        bm_synced = tonumber(bm_synced) or 0
+        bm_failed = tonumber(bm_failed) or 0
+    else
+        self:logInfo("BookloreSync: No-op skipped", "component=syncPendingBookmarks", "reason=no_pending_bookmarks")
+    end
 
     -- ── Phase 2c: KOReader Progress ───────────────────────────────────────
-    local prog_synced, prog_failed = self:syncPendingKoreaderProgress(true)
-    prog_synced = tonumber(prog_synced) or 0
-    prog_failed = tonumber(prog_failed) or 0
+    local pending_progress_count = tonumber(self.db:getPendingKoreaderProgressCount()) or 0
+    local prog_synced, prog_failed = 0, 0
+    if pending_progress_count > 0 then
+        prog_synced, prog_failed = self:syncPendingKoreaderProgress(true)
+        prog_synced = tonumber(prog_synced) or 0
+        prog_failed = tonumber(prog_failed) or 0
+    else
+        self:logInfo("BookloreSync: No-op skipped", "component=syncPendingKoreaderProgress", "reason=no_pending_progress")
+    end
 
     -- ── Phase 2d: Deletions ───────────────────────────────────────────────
-    local del_synced, del_failed = self:syncPendingDeletions(true)
-    del_synced = tonumber(del_synced) or 0
-    del_failed = tonumber(del_failed) or 0
+    local pending_deletions_count = 0
+    if type(self.db.getPendingDeletionCount) == "function" then
+        pending_deletions_count = tonumber(self.db:getPendingDeletionCount()) or 0
+    elseif type(self.db.getPendingDeletions) == "function" then
+        local ok_del, del_rows = pcall(self.db.getPendingDeletions, self.db)
+        if ok_del and type(del_rows) == "table" then
+            pending_deletions_count = #del_rows
+        end
+    end
+    local del_synced, del_failed = 0, 0
+    if pending_deletions_count > 0 then
+        del_synced, del_failed = self:syncPendingDeletions(true)
+        del_synced = tonumber(del_synced) or 0
+        del_failed = tonumber(del_failed) or 0
+    else
+        self:logInfo("BookloreSync: No-op skipped", "component=syncPendingDeletions", "reason=no_pending_deletions")
+    end
 
     -- ── Phase 3: Sessions ─────────────────────────────────────────────────
     local pending_count = self.db:getPendingSessionCount()

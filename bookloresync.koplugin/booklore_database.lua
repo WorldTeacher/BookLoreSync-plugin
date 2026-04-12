@@ -17,6 +17,9 @@ local Database = {
     conn = nil,
 }
 
+local BUSY_TIMEOUT_MS = 5000
+local SAVE_BOOK_CACHE_BUSY_RETRIES = 3
+
 Database.migrations = {
     [1] = {
         [[
@@ -947,6 +950,15 @@ function Database:init(db_name)
     end
     
     self.conn = conn
+
+    local busy_ok, busy_err = pcall(function()
+        self.conn:exec(string.format("PRAGMA busy_timeout = %d", BUSY_TIMEOUT_MS))
+    end)
+    if not busy_ok then
+        self.plugin:logWarn("BookloreSync Database: Could not set busy_timeout:", busy_err)
+    else
+        self.plugin:logDbg("BookloreSync Database: busy_timeout set to", BUSY_TIMEOUT_MS, "ms")
+    end
     
     self.conn:exec("PRAGMA foreign_keys = ON")
     
@@ -1339,7 +1351,7 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
     
     self.plugin:logDbg("BookloreSync Database: After conversion, book_id:", book_id, "type:", type(book_id))
     
-    local stmt = self.conn:prepare([[
+    local sql = [[
         INSERT INTO book_cache (file_path, file_hash, book_id, title, author, isbn10, isbn13, server_pagecount, last_accessed)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
         ON CONFLICT(file_path) DO UPDATE SET
@@ -1352,21 +1364,62 @@ function Database:saveBookCache(file_path, file_hash, book_id, title, author, is
             server_pagecount = excluded.server_pagecount,
             last_accessed = excluded.last_accessed,
             updated_at = CAST(strftime('%s', 'now') AS INTEGER)
-    ]])
-    
-    if not stmt then
-        self.plugin:logErr("BookloreSync Database: Failed to prepare statement:", self.conn:errmsg())
-        return false
+    ]]
+
+    local function executeSave()
+        local stmt = self.conn:prepare(sql)
+        if not stmt then
+            return false, "prepare", self.conn:errmsg()
+        end
+
+        stmt:bind(file_path, file_hash, book_id, title, author, isbn10, isbn13, server_pagecount)
+        local result = stmt:step()
+        stmt:close()
+
+        if result ~= SQ3.DONE and result ~= SQ3.OK then
+            return false, "step", self.conn:errmsg()
+        end
+
+        return true
     end
-    
-    stmt:bind(file_path, file_hash, book_id, title, author, isbn10, isbn13, server_pagecount)
-    
-    local result = stmt:step()
-    stmt:close()
-    
-    if result ~= SQ3.DONE and result ~= SQ3.OK then
-        self.plugin:logErr("BookloreSync Database: Failed to save book cache:", self.conn:errmsg())
-        return false
+
+    local ok, phase, err = executeSave()
+    if not ok then
+        local lower_err = tostring(err or ""):lower()
+        local is_busy = lower_err:find("database is locked", 1, true)
+            or lower_err:find("busy", 1, true)
+
+        if is_busy then
+            local ffi_sleep_ok, ffiutil = pcall(require, "ffi/util")
+            local retry = 0
+            while retry < SAVE_BOOK_CACHE_BUSY_RETRIES and not ok do
+                retry = retry + 1
+                self.plugin:logWarn(
+                    "BookloreSync Database: saveBookCache busy, retry",
+                    retry,
+                    "of",
+                    SAVE_BOOK_CACHE_BUSY_RETRIES,
+                    "for",
+                    file_path
+                )
+
+                if ffi_sleep_ok and ffiutil and type(ffiutil.sleep) == "function" then
+                    ffiutil.sleep(0.05 * retry)
+                end
+
+                ok, phase, err = executeSave()
+            end
+        end
+
+        if not ok then
+            self.plugin:logErr(
+                "BookloreSync Database: Failed to save book cache:",
+                tostring(err),
+                "phase:",
+                tostring(phase)
+            )
+            return false
+        end
     end
     
     self.plugin:logDbg("BookloreSync Database: Book cache saved successfully")

@@ -1,3 +1,41 @@
+# [4.1.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.0.1...4.1.0) (2026-04-12)
+
+
+### Bug Fixes
+
+* **ci:** add openssl-dev to lua-tests before_script for dependency installation ([43a4e82](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/43a4e82a80bb7e1f8ed70b5b864f1b8ca74cffa2))
+* **ci:** add production stage to CI pipeline ([145fe57](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/145fe57035c282f962617247a30b195fbfcb6b6d))
+* **ci:** change stages of Lua formatting and validation checks from test to build ([967d4e0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/967d4e08cf25aa6f3f55706f4d8a0651ebe5e8c5))
+* **ci:** update lua-format-check image to specific version 2.4.1 ([4a34974](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/4a3497432c043f8cb834a4867aeeed1b65838c3e))
+* **ci:** update lua-format-check to download Stylua for musl and improve version check ([3102d2a](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/3102d2a7fe0d1862e5093f4bf6677483a9d1c0c4))
+* **ci:** update lua-format-check to download Stylua for x86_64 musl ([749d594](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/749d5949d0e400653b71ff35ba6839284dab5f02))
+* **ci:** update lua-format-check to download Stylua version 2.4.1 directly ([d43d8b6](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d43d8b6a242563db69fe191b96b5aca5a4984f25))
+* **ci:** update lua-format-check to use alpine image and install Stylua dynamically ([fec576c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/fec576cf120b58bb38ecb770cfdc21d364e99a38))
+* **ci:** update lua-tests before_script to install additional Lua dependencies and add random UUID generation ([704acf1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/704acf16fdc2fa3b0ab24d6640dbdd39b40b9db0))
+* **ci:** update lua-tests before_script to use a multi-line command for installing dependencies ([9912fc6](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/9912fc6a7b4ef7ff51cbc9b8808d87eb111e0b95))
+* **ci:** update lua-tests before_script to use quotes for command execution ([d6f253d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d6f253d78e97da2b55b3e74c281a5dbef2a5d184))
+* **ci:** update stages for Lua formatting and validation checks to run in the test stage ([b2448c0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/b2448c083eff85221feeedae2160358e4cd715e1))
+* **ci:** update workflow rules for CI pipeline to include push events on develop and main branches ([e5a5a32](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/e5a5a32f131f5870de646c0b783c8cc7da1aefbe))
+* **localization:** remove outdated translation for shelf sync ([ec14a00](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/ec14a00970b06015db12d92ec599d3cd63fa82a4))
+* **localization:** update translations for shelf sync and related settings ([fa84ad5](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/fa84ad5cbfbfdf9a5fb8b90996948f5dd24bf543))
+* **localization:** update translations for shelf sync settings ([852b1b5](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/852b1b51632413dcffd83bd1c9243587c652546f))
+* **menu:** rename shelf downloads menu to shelf sync for clarity ([9d28142](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/9d28142ba3c0d2b7dc5ae48c23481388ef308a71))
+* **menu:** restructure main menu items for improved organization and clarity ([e4e9e09](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/e4e9e09a15e85883144d11797efc19c8c0fce393))
+* **progress sync:** update session location normalization help text for clarity and detail ([c4f59ce](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/c4f59ce94af36cd47a7c4a4dca57091a4b6bded0))
+* **progress:** add functions to build and push KOReader progress payload ([ce6102e](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/ce6102ec322ffa1155efd480897c083632da038c))
+* **sync:** no longer stores local state on open ([cf7bc3c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/cf7bc3c743b412d7f15d7891d3892b1f18eb3200))
+* **tests:** enhance Lua test coverage reporting and setup ([601fbe2](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/601fbe2683701ea3e59f4aa86fde3cec5ee5032f))
+* **tests:** fix tests ([a6b7455](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a6b745597eec21bdaebf15fec780b2d2efedef73))
+* **ui:** fix reading sessions in show data, progress decimals ([c1a4bac](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/c1a4baca9aebaee91eafd38194e8312fbe76e1c5))
+
+
+### Features
+
+* **ci:** add Lua formatting, translation validation, and test stages to CI pipeline ([8a268b9](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/8a268b9e21bdcb9171dcbe694fc607de4f7f9146))
+* **perf:** improve performance for sync, exit, periodic progress ([51dcdbf](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/51dcdbf45171562963a0699b31b55154df9892cd))
+* **sync:** add progress sync gestures ([1f28f0a](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/1f28f0aa66bbdb475370ba6f7346d0095d715803))
+* **sync:** add session location normalization and metadata resync functionality ([9abb0ae](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/9abb0ae9e2ab4e018de25820ea7756bd9362507f))
+
 ## [4.0.1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.0.0...4.0.1) (2026-04-05)
 
 

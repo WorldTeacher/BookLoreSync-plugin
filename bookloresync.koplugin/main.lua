@@ -2983,16 +2983,14 @@ function BookloreSync:fileDialogShowStoredData(file_path)
 
     local book_cache_id = book.id
 
-    -- Sessions: koreader_book_id in historical_sessions == book_cache.id
-    local all_sessions = self.db:getHistoricalSessionsForBook(book_cache_id)
-    local total_sessions = #all_sessions
-    local synced_sessions = 0
-    for _, s in ipairs(all_sessions) do
-        if (tonumber(s.synced) or 0) == 1 then
-            synced_sessions = synced_sessions + 1
-        end
-    end
-    local unsynced_sessions = total_sessions - synced_sessions
+    local session_counts = self.db:getStoredSessionCountsForBook(
+        book_cache_id,
+        book.book_id,
+        book.file_hash
+    )
+    local synced_sessions = tonumber(session_counts.synced) or 0
+    local unsynced_sessions = tonumber(session_counts.pending) or 0
+    local total_sessions = tonumber(session_counts.total) or (synced_sessions + unsynced_sessions)
 
     -- Annotations
     local synced_ann   = self.db:getSyncedAnnotationCountForBook(book_cache_id)
@@ -3007,7 +3005,7 @@ function BookloreSync:fileDialogShowStoredData(file_path)
 
     local lines = {}
     table.insert(lines, book_title)
-    table.insert(lines, string.rep("─", 40))
+    table.insert(lines, string.rep("-", 40))
     table.insert(lines, "")
     if is_matched then
         table.insert(lines, _("Server ID:") .. " " .. tostring(book.book_id))
@@ -4970,7 +4968,7 @@ function BookloreSync:confirmApplyRemoteKoreaderProgress(remote, direction, on_a
         return false
     end
 
-    local percent = math.floor(((tonumber(remote.percentage) or 0) * 100) + 0.5)
+    local percent = string.format("%.1f", (tonumber(remote.percentage) or 0) * 100)
     local device_name = tostring(remote.device or _("Unknown device"))
     local prompt
     if direction == "forward" then

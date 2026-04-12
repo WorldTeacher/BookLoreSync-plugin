@@ -12,7 +12,21 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 ## Unreleased
 
-- **Progress sync:** Remote KOReader progress entries at `0%` are now ignored during pull, so they are not offered as a "sync to" option and do not overwrite current reading position.
+### Features
+
+- **Progress sync actions:** Added dispatcher actions for **Pull Current Book Progress** and **Push Current Book Progress** so progress can be triggered manually from gestures/buttons.
+- **Progress location normalization:** Added optional normalization of session start/end locations to server page-count scale, plus metadata re-sync support for better page alignment.
+
+### Improvements
+
+- **Shelf sync naming:** Updated menu labels from "Shelf Downloads" to **Shelf Sync** for clearer navigation.
+- **Sync/runtime performance:** Reduced overhead in sync paths (including periodic progress updates and exit handling).
+
+### Bug fixes
+
+- **Progress pull safety:** Remote KOReader progress entries at `0%` are ignored during pull, so they are not offered as a sync target and do not overwrite local state.
+- **Progress prompt precision:** Progress conflict prompts now show percentage values with one decimal place.
+- **Stored Data session counts:** The **Show Stored Data** view now reports reading session totals correctly for synced/pending entries.
 
 ---
 

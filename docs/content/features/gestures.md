@@ -6,7 +6,7 @@ weight = 6
 
 # Gestures and Buttons
 
-The plugin does not define any gestures of its own. Instead, it registers four **dispatcher actions** with KOReader's built-in dispatcher system. You can then assign any of those actions to whatever input you prefer - a swipe, a tap zone, a hardware button, or a KOReader profile.
+The plugin does not define any gestures of its own. Instead, it registers **seven dispatcher actions** with KOReader's built-in dispatcher system. You can then assign any of those actions to whatever input you prefer - a swipe, a tap zone, a hardware button, or a KOReader profile.
 
 ---
 
@@ -18,6 +18,9 @@ The plugin does not define any gestures of its own. Instead, it registers four *
 | Sync Pending Sessions | Immediately uploads all queued sessions, ratings, and annotations. |
 | Toggle Manual Sync Only | Switches between automatic sync (after every session) and manual sync (only when triggered). |
 | Test Connection | Runs a connection test and shows the result as a notification. |
+| Sync Shelf | Triggers a shelf sync immediately. |
+| Pull Current Book Progress | Pulls remote progress for the currently open book and applies conflict strategy rules. |
+| Push Current Book Progress | Queues and uploads current-book progress immediately. |
 
 ---
 

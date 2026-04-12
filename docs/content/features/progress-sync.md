@@ -35,7 +35,7 @@ Go to:
 
 **Tools → BookLore Sync → What to Sync → Progress Sync**
 
-Enable **Automatically keep documents in sync**.
+Enable **Automatically sync progress**.
 
 When disabled, no progress pull or push operations are performed.
 
@@ -51,6 +51,8 @@ Two toggles control when remote progress is checked:
 | Pull progress on resume | On | Checks remote progress after wake/resume (only if Wi-Fi is already connected) |
 
 If there is no remote progress for a book (`404` from the endpoint), this is treated as normal and reading continues with local state.
+
+If remote progress exists but the fetched percentage is `0%`, the plugin skips applying it and does not show it as a sync target.
 
 ---
 
@@ -93,6 +95,12 @@ Use **Periodically sync every # pages** to set the page-turn threshold:
 - Open/close snapshots are still queued even when periodic updates are disabled.
 
 To avoid excessive API traffic, page-triggered uploads are debounced (25 seconds minimum between pushes).
+
+### Optional: normalize session locations
+
+If your BookLore server page count differs from KOReader's internal page count, enable **Normalize session locations**.
+
+When enabled, only session `startLocation` and `endLocation` are scaled to server page-count metadata before upload. Progress percentages are not modified.
 
 ---
 

@@ -6,7 +6,7 @@ weight = 7
 
 # File Manager Actions
 
-The plugin adds five entries to the KOReader file manager's long-press (hold) context menu. These actions are available for any supported book file (EPUB, PDF, CBZ, CBR).
+The plugin adds entries to the KOReader file manager's long-press (hold) context menu. These actions are available for any supported book file (EPUB, PDF, CBZ, CBR).
 
 ![KOReader long press menu](../book-long-press-menu.png)
 ---
@@ -103,6 +103,8 @@ See also: [Session Tracking → Per-book tracking toggle](@/features/session-tra
 Shows cached plugin data for the selected book from the local SQLite database.
 
 This action is read-only. It is useful when you want to inspect what the plugin currently knows about a book (for example, matching state or cached metadata) before attempting a sync or re-match.
+
+The reading session section reports synced and pending totals from both local history and pending queues.
 
 ---
 

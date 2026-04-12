@@ -22,10 +22,15 @@ if ! command -v luacov-cobertura &>/dev/null; then
     exit 1
 fi
 
+LUAROCKS_BIN="$(command -v luarocks-5.4 || command -v luarocks || true)"
+if [ -n "${LUAROCKS_BIN:-}" ]; then
+    eval "$($LUAROCKS_BIN --lua-version=5.4 path 2>/dev/null || $LUAROCKS_BIN path)"
+fi
+
 rm -f luacov.stats.out luacov.report.out coverage.xml
 
 echo "Running Busted test suite"
-busted --output utfTerminal --pattern "_spec%.lua$" test
+busted --coverage --output utfTerminal --pattern "_spec%.lua$" test
 
 echo "Generating luacov text report"
 luacov

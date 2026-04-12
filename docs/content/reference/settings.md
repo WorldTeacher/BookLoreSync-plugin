@@ -53,6 +53,7 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 | `progress_sync_forward_strategy` | string | `"prompt"` | Strategy when remote progress is newer: `"silent"`, `"prompt"`, or `"disable"` |
 | `progress_sync_backward_strategy` | string | `"disable"` | Strategy when remote progress is older: `"silent"`, `"prompt"`, or `"disable"` |
 | `progress_sync_set_read_on_rating` | boolean | `false` | Queue forced 100% progress when rating is submitted |
+| `progress_sync_normalize_session_locations` | boolean | `false` | Normalize session `startLocation` / `endLocation` to server page-count scale before upload (progress percentage is unchanged) |
 
 ---
 

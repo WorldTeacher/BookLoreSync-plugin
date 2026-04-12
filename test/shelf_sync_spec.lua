@@ -24,6 +24,7 @@ end
 package.preload["dispatcher"]           = function() return { registerAction = function() end } end
 package.preload["apps/filemanager/filemanager"] = function() return { instance = nil } end
 package.preload["ui/widget/eventlistener"]      = function() return {} end
+package.preload["ui/event"]                     = function() return { new = function(_, o) return o or {} end } end
 package.preload["ui/widget/infomessage"]        = function() return { new = function(_, o) return o or {} end } end
 package.preload["ui/widget/inputdialog"]        = function() return { new = function(_, o) return o or {} end } end
 package.preload["ui/widget/confirmbox"]         = function() return { new = function(_, o) return o or {} end } end
@@ -36,6 +37,7 @@ package.preload["ui/widget/buttondialog"] = function()
 end
 package.preload["ui/widget/menu"]               = function() return { new = function(_, o) return o or {} end } end
 package.preload["ui/network/manager"]           = function() return { isOnline = function() return false end } end
+package.preload["device"]                       = function() return { isAndroid = function() return false end, canExecuteScript = function() return true end, performHapticFeedback = function() end } end
 package.preload["luasettings"]                  = function() return { open = function() return { readSetting = function() return nil end } end } end
 package.preload["booklore_settings"]            = function() return { new = function() return {} end } end
 package.preload["hardcover_api_client"]         = function() return { new = function() return {} end } end
@@ -73,6 +75,8 @@ package.preload["json"]                         = function()
     -- Very minimal JSON decoder using load() with a JSON→Lua transform.
     -- Handles only the subset produced by encode_val above.
     local lua_src = s
+      :gsub("%[", "{")
+      :gsub("%]", "}")
       :gsub("null",  "nil")
       :gsub('"([^"]+)"%s*:', '["%1"]=')
     local fn, err = load("return " .. lua_src)
@@ -192,6 +196,16 @@ package.preload["ffi/sha2"] = function()
   return { md5 = function(s) return "deadbeef" end }
 end
 
+package.preload["ffi"] = function()
+  return {}
+end
+
+package.preload["random"] = function()
+  return {
+    random = function(_, _) return 1 end,
+  }
+end
+
 -- These must be pre-stubbed so that require("main") at module-load time
 -- doesn't try to load the real implementation (which needs KOReader C libs).
 -- Per-test stubs installed in each `it` block override package.loaded at
@@ -262,6 +276,11 @@ local function make_plugin(overrides)
       saveSetting = function() end,
       flush       = function() end,
     },
+    api = {
+      getBookFileSize = function()
+        return nil, "not implemented"
+      end,
+    },
     logInfo = function() end,
     logWarn = function() end,
     logErr  = function() end,
@@ -282,7 +301,7 @@ local function make_lfs_stub(opts)
     attributes = function(path, attr)
       if attr == "mode" then
         if files[path] then return "file" end
-        if path:find("/tmp/test-dl") and dir_exists then return "directory" end
+        if path == "/tmp/test-dl" and dir_exists then return "directory" end
         return nil
       end
       return nil
@@ -600,10 +619,18 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       })
     end
     package.preload["booklore_database"] = function()
-      return make_db_stub()
+      return make_db_stub({
+        cached = { [old_file] = { book_id = 5 } },
+      })
     end
 
     local p = make_plugin({ delete_removed_shelf_books = true })
+    p.db.getBookByFilePath = function(_, fp)
+      if fp == old_file then
+        return { book_id = 5 }
+      end
+      return nil
+    end
     local removed = {}
     local real_remove = os.remove
     os.remove = function(path) table.insert(removed, path); return true end
@@ -635,6 +662,12 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     end
 
     local p = make_plugin({ delete_removed_shelf_books = true })
+    p.db.getBookByBookId = function(_, bid)
+      if tonumber(bid) == 2 then
+        return { book_id = 2, file_path = gone_file }
+      end
+      return nil
+    end
     local removed = {}
     local real_remove = os.remove
     os.remove = function(path) table.insert(removed, path); return true end
@@ -816,8 +849,9 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       { id = 2, title = "NewBook", extension = "epub" },
     }
 
+    local old_filepath = "/tmp/test-dl/OldBook_1.epub"
     package.preload["libs/libkoreader-lfs"] = function()
-      return make_lfs_stub({ files = {} })
+      return make_lfs_stub({ files = { [old_filepath] = true } })
     end
     package.preload["booklore_api_client"] = function()
       return make_api_stub({ books = curr_books, download_ok = true })
@@ -825,6 +859,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     package.preload["booklore_database"] = function()
       return make_db_stub({
         shelf_state = { books_json = json.encode(prev_books), synced_at = 1000 },
+        cached = { [old_filepath] = { book_id = 1 } },
       })
     end
 
@@ -860,7 +895,10 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     local gone_file = "/tmp/test-dl/GoneBook_2.epub"
 
     package.preload["libs/libkoreader-lfs"] = function()
-      return make_lfs_stub({ files = { [gone_file] = true } })
+      return make_lfs_stub({
+        files = { [gone_file] = true },
+        dir_entries = { "GoneBook_2.epub" },
+      })
     end
     package.preload["booklore_api_client"] = function()
       return make_api_stub({ books = curr_books })
@@ -868,11 +906,24 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     package.preload["booklore_database"] = function()
       return make_db_stub({
         shelf_state = { books_json = json.encode(prev_books), synced_at = 1000 },
+        cached = { [gone_file] = { book_id = 2 } },
         cached_by_id = { [2] = { book_id = 2, file_path = gone_file } },
       })
     end
 
     local p = make_plugin({ delete_removed_shelf_books = true })
+    p.db.getBookByBookId = function(_, bid)
+      if tonumber(bid) == 2 then
+        return { book_id = 2, file_path = gone_file }
+      end
+      return nil
+    end
+    p.db.getBookByFilePath = function(_, fp)
+      if fp == gone_file then
+        return { book_id = 2, file_path = gone_file }
+      end
+      return nil
+    end
     local removed = {}
     local real_remove = os.remove
     os.remove = function(path) table.insert(removed, path); return true end

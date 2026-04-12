@@ -1075,20 +1075,36 @@ msgstr ""
 msgid "Configure KOReader document-position sync with Booklore."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3144
-msgid "Automatically keep documents in sync"
+#: bookloresync.koplugin/main.lua:3245
+msgid "Automatically sync progress"
 msgstr ""
 
 #: bookloresync.koplugin/main.lua:3145
 msgid "Automatically keep document position in sync across devices."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3154
-msgid "Automatic document sync enabled"
+#: bookloresync.koplugin/main.lua:3255
+msgid "Automatic progress sync enabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3154
-msgid "Automatic document sync disabled"
+#: bookloresync.koplugin/main.lua:3255
+msgid "Automatic progress sync disabled"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:3428
+msgid "Normalize session locations"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:3429
+msgid "When enabled, start/end session locations are converted to the server page-count scale so the displayed book page is correct instead of using KOReader-provided pages. This needs page count metadata from the server, which can be re-synced in Sync & Cache -> Advanced. Progress percentages are unchanged."
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:3445
+msgid "Session location normalization enabled"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:3446
+msgid "Session location normalization disabled"
 msgstr ""
 
 #: bookloresync.koplugin/main.lua:3160
@@ -1668,6 +1684,39 @@ msgstr ""
 msgid ""
 "Run this when you re-created the library and all IDs have changed. Resets "
 "all stored book IDs and re-resolves them from the server."
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:3933
+msgid "Re-sync Stored Metadata"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:3934
+msgid "Re-fetch metadata for all cached books that already have a Booklore ID. Updates fields like server pagecount for existing cache entries."
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:8078
+msgid ""
+"This will re-fetch metadata for all matched cached books from the server.\n"
+"\n"
+"Use this to refresh stored metadata such as server pagecount.\n"
+"\n"
+"Continue?"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:8079
+msgid "Re-sync Metadata"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:8090
+msgid "No network connection. Metadata refresh skipped."
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:8135
+msgid "No matched cached books found."
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:8143
+msgid "Metadata refresh complete: %1 updated, %2 failed."
 msgstr ""
 
 #: bookloresync.koplugin/main.lua:3923 bookloresync.koplugin/main.lua:3929

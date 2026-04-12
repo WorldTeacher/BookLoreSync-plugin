@@ -2148,6 +2148,89 @@ function Database:getHistoricalSessionStats()
     return stats
 end
 
+---Database:getStoredSessionCountsForBook.
+function Database:getStoredSessionCountsForBook(book_cache_id, book_id, book_hash)
+    local historical_conditions = {}
+    local historical_binds = {}
+
+    if book_cache_id then
+        table.insert(historical_conditions, "koreader_book_id = ?")
+        table.insert(historical_binds, tonumber(book_cache_id))
+    end
+    if book_id then
+        table.insert(historical_conditions, "book_id = ?")
+        table.insert(historical_binds, tonumber(book_id))
+    end
+    if book_hash and book_hash ~= "" then
+        table.insert(historical_conditions, "book_hash = ?")
+        table.insert(historical_binds, tostring(book_hash))
+    end
+
+    if #historical_conditions == 0 then
+        return { synced = 0, pending = 0, total = 0 }
+    end
+
+    local historical_query = string.format([[
+        SELECT
+            SUM(CASE WHEN synced = 1 THEN 1 ELSE 0 END) as synced_count,
+            SUM(CASE WHEN synced = 0 THEN 1 ELSE 0 END) as unsynced_count,
+            COUNT(*) as total_count
+        FROM historical_sessions
+        WHERE %s
+    ]], table.concat(historical_conditions, " OR "))
+
+    local historical_stmt = self.conn:prepare(historical_query)
+    if not historical_stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare historical session counts statement:", self.conn:errmsg())
+        return { synced = 0, pending = 0, total = 0 }
+    end
+
+    historical_stmt:bind(unpack(historical_binds))
+
+    local historical_synced = 0
+    local historical_unsynced = 0
+    for row in historical_stmt:rows() do
+        historical_synced = tonumber(row[1]) or 0
+        historical_unsynced = tonumber(row[2]) or 0
+        break
+    end
+    historical_stmt:close()
+
+    local pending_conditions = {}
+    local pending_binds = {}
+    if book_id then
+        table.insert(pending_conditions, "book_id = ?")
+        table.insert(pending_binds, tonumber(book_id))
+    end
+    if book_hash and book_hash ~= "" then
+        table.insert(pending_conditions, "book_hash = ?")
+        table.insert(pending_binds, tostring(book_hash))
+    end
+
+    local pending_sessions = 0
+    if #pending_conditions > 0 then
+        local pending_query = string.format([[SELECT COUNT(*) FROM pending_sessions WHERE %s]], table.concat(pending_conditions, " OR "))
+        local pending_stmt = self.conn:prepare(pending_query)
+        if pending_stmt then
+            pending_stmt:bind(unpack(pending_binds))
+            for row in pending_stmt:rows() do
+                pending_sessions = tonumber(row[1]) or 0
+                break
+            end
+            pending_stmt:close()
+        else
+            self.plugin:logErr("BookloreSync Database: Failed to prepare pending session counts statement:", self.conn:errmsg())
+        end
+    end
+
+    local pending_total = historical_unsynced + pending_sessions
+    return {
+        synced = historical_synced,
+        pending = pending_total,
+        total = historical_synced + pending_total,
+    }
+end
+
 ---Database:markHistoricalSessionSynced.
 function Database:markHistoricalSessionSynced(session_id)
     local stmt = self.conn:prepare([[

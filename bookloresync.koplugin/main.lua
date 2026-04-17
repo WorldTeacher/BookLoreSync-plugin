@@ -463,6 +463,7 @@ function BookloreSync:init()
     self.deferred_close_flush_seq = 0
     self.deferred_close_flush_last_queued_ms = 0
     self.deferred_close_flush_last_completed_ms = 0
+    self.resume_pending_flush_scheduled = false
 
     -- Migrate old settings to new preset system if needed
     if not self.sync_mode then
@@ -7385,6 +7386,63 @@ function BookloreSync:onSuspend()
 end
 
 --[[--
+In automatic mode, schedule a delayed post-resume check for pending sessions.
+
+This covers the common suspend/resume path where sessions are queued during
+suspend but no close-document flush runs. If sessions are still pending after
+resume, we queue a deferred flush immediately when online, or mark it as
+requested so onNetworkConnected can flush as soon as WiFi is available.
+
+@param delay_seconds number|nil Delay before checking pending sessions (default: 3)
+--]]
+function BookloreSync:scheduleResumePendingSessionUpload(delay_seconds)
+    if not self.is_enabled or self.manual_sync_only then
+        return false
+    end
+    if self.sync_mode ~= "automatic" then
+        return false
+    end
+    if self.resume_pending_flush_scheduled then
+        self:logDbg("BookloreSync: Resume pending-session flush already scheduled")
+        return false
+    end
+
+    local delay = tonumber(delay_seconds) or 3
+    if delay < 0 then delay = 0 end
+
+    self.resume_pending_flush_scheduled = true
+    self:logInfo("BookloreSync: Scheduling resume pending-session check in", tostring(delay), "seconds")
+
+    UIManager:scheduleIn(delay, function()
+        self.resume_pending_flush_scheduled = false
+
+        if not self.is_enabled or self.manual_sync_only or self.sync_mode ~= "automatic" then
+            return
+        end
+        if not self.db or type(self.db.getPendingSessionCount) ~= "function" then
+            return
+        end
+
+        local pending_sessions = tonumber(self.db:getPendingSessionCount()) or 0
+        if pending_sessions <= 0 then
+            self:logInfo("BookloreSync: Resume pending-session check found no queued sessions")
+            return
+        end
+
+        self:logInfo("BookloreSync: Resume pending-session check found", tostring(pending_sessions), "queued session(s)")
+
+        if NetworkMgr:isConnected() then
+            self:scheduleDeferredCloseFlush("resume_pending_sessions")
+        else
+            self.deferred_close_flush_requested = true
+            self:logInfo("BookloreSync: Resume pending-session upload deferred until network reconnect")
+        end
+    end)
+
+    return true
+end
+
+--[[--
 Handler for when the device resumes from suspend
 --]]
 ---BookloreSync:onResume.
@@ -7394,6 +7452,8 @@ function BookloreSync:onResume()
     end
 
     self:logInfo("BookloreSync: Device resuming")
+
+    self:scheduleResumePendingSessionUpload(3)
 
     -- Cooldown guard: skip auto-sync if we ran one less than 5 minutes ago.
     -- Exception: if sessions/progress are pending, force a resume sync to avoid

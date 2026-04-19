@@ -157,3 +157,5 @@ See **Sync Behavior** in the settings menu for:
 - Auto-sync on suspend
 - Connect WiFi on suspend
 - Ask to enable WiFi
+
+With **Automatic** mode (or **Custom** with both suspend toggles enabled), suspend now queues and attempts to upload both the current session and current progress immediately.

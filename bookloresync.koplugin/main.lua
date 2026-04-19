@@ -392,8 +392,21 @@ function BookloreSync:init()
     self.progress_sync_last_push_ts = 0
     self.progress_sync_page_counter = 0
     self.progress_sync_last_page = -1
+    self.progress_sync_page_update_primed = false
     self.progress_sync_last_page_turn_timestamp = 0
     self.progress_sync_ignore_next_page_event = false
+    self.progress_sync_debounce_seconds = tonumber(self.settings:readSetting("progress_sync_debounce_seconds"))
+    if self.progress_sync_debounce_seconds == nil then
+        self.progress_sync_debounce_seconds = PROGRESS_API_DEBOUNCE_SECONDS
+    end
+    if self.progress_sync_debounce_seconds < 0 then
+        self.progress_sync_debounce_seconds = 0
+    end
+    self.progress_sync_fasttrack_in_flight = false
+    self.progress_sync_background_flush_scheduled = false
+    self.progress_sync_background_flush_running = false
+    self.progress_sync_background_idle_seconds = 2
+    self.progress_sync_background_interval_seconds = 2
     self.progress_sync_device_id = G_reader_settings:readSetting("device_id")
     self.progress_pull_on_open = self.settings:readSetting("progress_pull_on_open")
     if self.progress_pull_on_open == nil then
@@ -3547,8 +3560,15 @@ function BookloreSync:fileDialogShowStoredData(file_path)
     table.insert(lines, "")
     if is_matched then
         table.insert(lines, _("Server ID:") .. " " .. tostring(book.book_id))
+        local server_pagecount = tonumber(book.server_pagecount)
+        if server_pagecount and server_pagecount > 0 then
+            table.insert(lines, _("Server pagecount:") .. " " .. tostring(server_pagecount))
+        else
+            table.insert(lines, _("Server pagecount:") .. " " .. _("(unknown)"))
+        end
     else
         table.insert(lines, _("Server ID:") .. " " .. _("(not matched)"))
+        table.insert(lines, _("Server pagecount:") .. " " .. _("(not matched)"))
     end
     table.insert(lines, "")
     table.insert(lines, "── " .. _("Reading Sessions") .. " ──")
@@ -4085,49 +4105,46 @@ function BookloreSync:addToMainMenu(menu_items)
                 },
                 keep_menu_open = true,
             },
+        },
+    }
+
+    local what_to_sync_advanced_menu = {
+        text = _("Advanced"),
+        sub_item_table = {
             {
-                text = _("Advanced"),
-                enabled_func = function()
-                    return self.progress_sync_enabled
+                text = _("Normalize session locations"),
+                help_text = _("When enabled, start/end session locations are converted to the server page-count scale so the displayed book page is correct instead of using KOReader-provided pages. This needs page count metadata from the server, which can be re-synced in Sync & Cache -> Advanced. Progress percentages are unchanged."),
+                checked_func = function()
+                    return self.progress_sync_normalize_session_locations
                 end,
-                sub_item_table = {
-                    {
-                        text = _("Normalize session locations"),
-                        help_text = _("When enabled, start/end session locations are converted to the server page-count scale so the displayed book page is correct instead of using KOReader-provided pages. This needs page count metadata from the server, which can be re-synced in Sync & Cache -> Advanced. Progress percentages are unchanged."),
-                        checked_func = function()
-                            return self.progress_sync_normalize_session_locations
-                        end,
-                        callback = function()
-                            self.progress_sync_normalize_session_locations = not self.progress_sync_normalize_session_locations
-                            self.settings:saveSetting("progress_sync_normalize_session_locations", self.progress_sync_normalize_session_locations)
-                            self.settings:flush()
-                            UIManager:show(InfoMessage:new{
-                                text = self.progress_sync_normalize_session_locations
-                                    and _("Session location normalization enabled")
-                                    or _("Session location normalization disabled"),
-                                timeout = 2,
-                            })
-                        end,
-                        keep_menu_open = true,
-                    },
-                    {
-                        text = _("Set book to read on rating"),
-                        help_text = _("When a rating is submitted, queue progress as 100% for sync, even if the real reading progress is lower."),
-                        checked_func = function()
-                            return self.progress_sync_set_read_on_rating
-                        end,
-                        callback = function()
-                            self.progress_sync_set_read_on_rating = not self.progress_sync_set_read_on_rating
-                            self.settings:saveSetting("progress_sync_set_read_on_rating", self.progress_sync_set_read_on_rating)
-                            self.settings:flush()
-                            UIManager:show(InfoMessage:new{
-                                text = self.progress_sync_set_read_on_rating and _("Set book to read on rating enabled") or _("Set book to read on rating disabled"),
-                                timeout = 2,
-                            })
-                        end,
-                        keep_menu_open = true,
-                    },
-                },
+                callback = function()
+                    self.progress_sync_normalize_session_locations = not self.progress_sync_normalize_session_locations
+                    self.settings:saveSetting("progress_sync_normalize_session_locations", self.progress_sync_normalize_session_locations)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.progress_sync_normalize_session_locations
+                            and _("Session location normalization enabled")
+                            or _("Session location normalization disabled"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("Set book to read on rating"),
+                help_text = _("When a rating is submitted, queue progress as 100% for sync, even if the real reading progress is lower."),
+                checked_func = function()
+                    return self.progress_sync_set_read_on_rating
+                end,
+                callback = function()
+                    self.progress_sync_set_read_on_rating = not self.progress_sync_set_read_on_rating
+                    self.settings:saveSetting("progress_sync_set_read_on_rating", self.progress_sync_set_read_on_rating)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.progress_sync_set_read_on_rating and _("Set book to read on rating enabled") or _("Set book to read on rating disabled"),
+                        timeout = 2,
+                    })
+                end,
                 keep_menu_open = true,
             },
         },
@@ -4194,6 +4211,11 @@ function BookloreSync:addToMainMenu(menu_items)
             progress_sync_menu,
             Settings:buildRatingMenu(self),
             annotations_and_bookmarks_menu,
+            {
+                text = "────────────────",
+                enabled = false,
+            },
+            what_to_sync_advanced_menu,
         },
         hold_callback = function()
             showSectionHelp(
@@ -5309,8 +5331,6 @@ function BookloreSync:pushCurrentKoreaderProgressDirect(payload)
         return false, "WiFi is not connected"
     end
 
-    self.api:init(self.server_url, self.username, self.password, self.db)
-
     local ok, body_or_err = self.api:updateKoReaderProgress(payload)
     if not ok then
         return false, body_or_err
@@ -5330,6 +5350,96 @@ function BookloreSync:pushCurrentKoreaderProgressDirect(payload)
     end
 
     return true, body_or_err
+end
+
+---BookloreSync:requestFastTrackProgressPush.
+function BookloreSync:requestFastTrackProgressPush(payload)
+    if self.progress_sync_fasttrack_in_flight then
+        self:logDbg("BookloreSync: Fast-track progress push skipped - in flight")
+        return false
+    end
+
+    self.progress_sync_fasttrack_in_flight = true
+    UIManager:scheduleIn(0, function()
+        local ok, err = pcall(function()
+            local done = self:pushCurrentKoreaderProgressFastTrack(payload)
+            if done then
+                self.progress_sync_last_push_ts = os.time()
+            end
+        end)
+        if not ok then
+            self:logWarn("BookloreSync: Fast-track progress push background task failed:", tostring(err))
+        end
+        self.progress_sync_fasttrack_in_flight = false
+    end)
+
+    return true
+end
+
+---BookloreSync:scheduleBackgroundProgressFlush.
+function BookloreSync:scheduleBackgroundProgressFlush(reason)
+    if self.progress_sync_background_flush_scheduled then
+        self:logDbg("BookloreSync: Progress background flush already scheduled, reason:", tostring(reason or "unknown"))
+        return false
+    end
+
+    self.progress_sync_background_flush_scheduled = true
+    local interval = tonumber(self.progress_sync_background_interval_seconds) or 2
+    if interval < 1 then interval = 1 end
+
+    self:logInfo("BookloreSync: Scheduling background progress flush in", tostring(interval), "s; reason:", tostring(reason or "unknown"))
+    UIManager:scheduleIn(interval, function()
+        self.progress_sync_background_flush_scheduled = false
+        self:runBackgroundProgressFlush(reason)
+    end)
+    return true
+end
+
+---BookloreSync:runBackgroundProgressFlush.
+function BookloreSync:runBackgroundProgressFlush(reason)
+    if self.progress_sync_background_flush_running then
+        self:logDbg("BookloreSync: Background progress flush skipped - already running")
+        return false
+    end
+    if not self.progress_sync_enabled or self.manual_sync_only then
+        return false
+    end
+    if not NetworkMgr:isConnected() then
+        self:logDbg("BookloreSync: Background progress flush skipped - offline")
+        return false
+    end
+
+    local now = os.time()
+    local idle_for = now - (tonumber(self.progress_sync_last_page_turn_timestamp) or now)
+    local idle_needed = tonumber(self.progress_sync_background_idle_seconds) or 2
+    if idle_for < idle_needed then
+        self:logDbg("BookloreSync: Background progress flush deferred - reader active (idle", tostring(idle_for), "s)")
+        self:scheduleBackgroundProgressFlush("reader_active")
+        return false
+    end
+
+    self.progress_sync_background_flush_running = true
+    UIManager:scheduleIn(0, function()
+        local ok, synced, failed = pcall(function()
+            return self:syncPendingKoreaderProgress(true, 1)
+        end)
+
+        if ok then
+            self:logInfo("BookloreSync: Background progress flush done; reason=", tostring(reason or "unknown"), "synced=", tostring(synced or 0), "failed=", tostring(failed or 0))
+            if (tonumber(synced) or 0) > 0 then
+                self.progress_sync_last_push_ts = os.time()
+            end
+            if self.db and (self.db:getPendingKoreaderProgressCount() or 0) > 0 then
+                self:scheduleBackgroundProgressFlush("pending_remaining")
+            end
+        else
+            self:logWarn("BookloreSync: Background progress flush crashed:", tostring(synced))
+        end
+
+        self.progress_sync_background_flush_running = false
+    end)
+
+    return true
 end
 
 --[[--
@@ -5473,6 +5583,32 @@ function BookloreSync:queueCurrentKoreaderProgress()
         self:logWarn("BookloreSync: Failed to queue KOReader progress for hash:", book_hash)
     end
     return ok
+end
+
+---BookloreSync:queueKoreaderProgressPayload.
+function BookloreSync:queueKoreaderProgressPayload(payload)
+    if not self.progress_sync_enabled then
+        return false
+    end
+    if not self.db or type(payload) ~= "table" then
+        return false
+    end
+
+    local queued = self.db:addPendingKoreaderProgress({
+        book_cache_id = payload.book_cache_id,
+        book_hash = tostring(payload.book_hash or payload.document or ""),
+        progress = tostring(payload.progress or payload.location or "0"),
+        percentage = tonumber(payload.percentage) or 0,
+        location = tostring(payload.location or payload.progress or "0"),
+        device = tostring(payload.device or (Device and Device.model) or "KOReader"),
+        device_id = tostring(payload.device_id or self.progress_sync_device_id or "unknown"),
+        timestamp = tonumber(payload.timestamp) or os.time(),
+    })
+
+    if queued then
+        self:logInfo("BookloreSync: Queued periodic progress for background flush; hash:", tostring(payload.book_hash or payload.document), "percentage:", tostring(payload.percentage))
+    end
+    return queued
 end
 
 --[[--
@@ -6177,6 +6313,12 @@ function BookloreSync:startSession()
     }
     
     self:logInfo("BookloreSync: Session started for '", book_title, "' at", start_progress, "% (location:", start_location, ")")
+
+    -- Re-initialize API client at session start so periodic progress pushes do
+    -- not pay init cost on every page-based sync trigger.
+    if self.api then
+        self.api:init(self.server_url, self.username, self.password, self.db)
+    end
 end
 
 --[[--
@@ -6305,6 +6447,7 @@ function BookloreSync:onReaderReady()
     else
         self.progress_sync_last_page = -1
     end
+    self.progress_sync_page_update_primed = false
     self.progress_sync_last_page_turn_timestamp = os.time()
 
     -- Pull-only on open: allow remote catch-up without recording local state.
@@ -6331,6 +6474,14 @@ function BookloreSync:onPageUpdate(page)
 
     if self.progress_sync_ignore_next_page_event then
         self.progress_sync_ignore_next_page_event = false
+        return false
+    end
+
+    -- Prime the page-update baseline once per open so initial render updates
+    -- do not count as a user page turn or trigger a progress push.
+    if not self.progress_sync_page_update_primed then
+        self.progress_sync_page_update_primed = true
+        self.progress_sync_last_page = page
         return false
     end
 
@@ -6362,30 +6513,32 @@ function BookloreSync:onPageUpdate(page)
         payload = self:buildKoreaderProgressPayloadForPage(page, os.time())
     end
 
-    local debounce_seconds = PROGRESS_API_DEBOUNCE_SECONDS
-    if threshold <= 1 then
+    local debounce_seconds = tonumber(self.progress_sync_debounce_seconds)
+    if debounce_seconds == nil then
+        debounce_seconds = PROGRESS_API_DEBOUNCE_SECONDS
+    end
+    if debounce_seconds < 0 then
         debounce_seconds = 0
     end
-
     local now = os.time()
     if debounce_seconds > 0 and now - (self.progress_sync_last_push_ts or 0) < debounce_seconds then
         return false
     end
 
     if self.manual_sync_only then
-        local queued = self:queueCurrentKoreaderProgress()
+        local queued = payload and self:queueKoreaderProgressPayload(payload) or self:queueCurrentKoreaderProgress()
         if queued then
             self.progress_sync_last_push_ts = now
         end
     else
         self:_requestWifi(_("sync reading progress"), function()
-            local done = self:pushCurrentKoreaderProgressFastTrack(payload)
-            if done then
-                self.progress_sync_last_push_ts = os.time()
+            local queued = payload and self:queueKoreaderProgressPayload(payload) or self:queueCurrentKoreaderProgress()
+            if queued then
+                self:scheduleBackgroundProgressFlush("page_update")
             end
         end, function()
             self:logInfo("BookloreSync: WiFi request declined on page-update progress sync - queueing")
-            local queued = self:queueCurrentKoreaderProgress(payload)
+            local queued = payload and self:queueKoreaderProgressPayload(payload) or self:queueCurrentKoreaderProgress()
             if queued then
                 self.progress_sync_last_push_ts = os.time()
             end
@@ -7209,19 +7362,37 @@ function BookloreSync:onSuspend()
 
     if self.force_push_session_on_suspend then
         self:logInfo("BookloreSync: Force push on suspend enabled")
-        
+
+        -- In automatic suspend-sync mode, queue current progress right now and
+        -- flush immediately so session/progress are uploaded on suspend instead
+        -- of waiting for deferred wake/close pipelines.
+        if self.progress_sync_enabled then
+            local queued_progress = self:queueCurrentKoreaderProgress()
+            self:logInfo("BookloreSync: Suspend progress queue result:", tostring(queued_progress))
+        end
+
         if self.connect_network_on_suspend then
-            -- When ask_wifi_enable is on, prompt before enabling WiFi.
-            -- On deny, we still attempt syncPendingSessions (it will be a
-            -- no-op if offline, data stays queued).
-            self:_requestWifi(_("sync sessions on suspend"), function()
-                self:logInfo("BookloreSync: Network ready - force syncing pending sessions on suspend")
-                self:syncPendingSessions(true)
-            end, function()
-                self:logInfo("BookloreSync: WiFi request declined on suspend - sessions remain queued")
-            end)
+            -- Automatic suspend sync should actively try to bring WiFi up.
+            -- If ask_wifi_enable is enabled we keep the permission prompt;
+            -- otherwise we connect directly.
+            if self.ask_wifi_enable then
+                self:_requestWifi(_("sync sessions and progress on suspend"), function()
+                    self:logInfo("BookloreSync: Network ready - force syncing pending sessions/progress on suspend")
+                    self:syncPendingSessions(true)
+                end, function()
+                    self:logInfo("BookloreSync: WiFi request declined on suspend - data remains queued")
+                end)
+            else
+                local connected = NetworkMgr:isConnected() or self:connectNetwork()
+                if connected then
+                    self:logInfo("BookloreSync: Network ready - force syncing pending sessions/progress on suspend")
+                    self:syncPendingSessions(true)
+                else
+                    self:logInfo("BookloreSync: Could not connect WiFi on suspend - data remains queued")
+                end
+            end
         else
-            self:logInfo("BookloreSync: Force syncing pending sessions on suspend")
+            self:logInfo("BookloreSync: Force syncing pending sessions/progress on suspend")
             self:syncPendingSessions(true)
         end
     else
@@ -7243,17 +7414,32 @@ function BookloreSync:onResume()
     self:logInfo("BookloreSync: Device resuming")
 
     -- Cooldown guard: skip auto-sync if we ran one less than 5 minutes ago.
-    -- Prevents hammering the server on rapid suspend/resume cycles (e.g. when
-    -- the user is navigating menus with sleep-timer enabled).
+    -- Exception: if sessions/progress are pending, force a resume sync to avoid
+    -- leaving deferred close data queued until a later trigger.
+    local totals = self:getPendingSyncTotals()
+    local pending_sessions = tonumber(totals and totals.sessions) or 0
+    local pending_progress = tonumber(totals and totals.progress) or 0
+    local has_pending_resume_critical = (pending_sessions > 0) or (pending_progress > 0)
+
     local now = os.time()
-    if self.last_auto_sync_time and (now - self.last_auto_sync_time) < 300 then
+    local cooldown_active = self.last_auto_sync_time and (now - self.last_auto_sync_time) < 300
+    if cooldown_active and not has_pending_resume_critical then
         self:logInfo("BookloreSync: Skipping resume auto-sync (cooldown active, last run",
                      (now - self.last_auto_sync_time), "s ago)")
     else
         self.last_auto_sync_time = now
 
         if not self.manual_sync_only then
-            self:logInfo("BookloreSync: Attempting background sync on resume")
+            if cooldown_active and has_pending_resume_critical then
+                self:logInfo(
+                    "BookloreSync: Cooldown overridden on resume due to pending items",
+                    "sessions=", tostring(pending_sessions),
+                    "progress=", tostring(pending_progress)
+                )
+            else
+                self:logInfo("BookloreSync: Attempting background sync on resume")
+            end
+
             -- Use _requestWifi so that if the ask_wifi_enable option is on the
             -- user is prompted before we try to connect.  On deny the sync is
             -- silently skipped (data remains queued for the next opportunity).
@@ -9647,8 +9833,9 @@ On failure we increment retry_count and keep it queued.
 @return integer synced_count, integer failed_count
 --]]
 ---BookloreSync:syncPendingKoreaderProgress.
-function BookloreSync:syncPendingKoreaderProgress(silent)
+function BookloreSync:syncPendingKoreaderProgress(silent, max_rows)
     silent = silent or false
+    max_rows = tonumber(max_rows) or 0
 
     if not self.db then
         return 0, 0
@@ -9662,7 +9849,12 @@ function BookloreSync:syncPendingKoreaderProgress(silent)
     local synced_count = 0
     local failed_count = 0
 
+    local processed = 0
     for _, row in ipairs(rows) do
+        if max_rows > 0 and processed >= max_rows then
+            break
+        end
+        processed = processed + 1
         local payload = {
             timestamp = tonumber(row.timestamp) or os.time(),
             document = tostring(row.book_hash),
@@ -10174,6 +10366,19 @@ function BookloreSync:_saveBookCacheMatch(book, selected_result)
     local book_title = type(selected_result) == "table" and selected_result.title or nil
     local isbn10     = type(selected_result) == "table" and selected_result.isbn10 or nil
     local isbn13     = type(selected_result) == "table" and selected_result.isbn13 or nil
+    local server_pagecount = nil
+    if type(selected_result) == "table" then
+        local raw_pagecount = selected_result.pagecount
+        if raw_pagecount == nil then
+            raw_pagecount = selected_result.server_pagecount
+        end
+        local parsed_pagecount = tonumber(raw_pagecount)
+        if parsed_pagecount and parsed_pagecount > 0 then
+            -- Keep parsing lightweight and defensive here; saveBookCache()
+            -- performs final normalization/rounding/validation.
+            server_pagecount = parsed_pagecount
+        end
+    end
 
     if not book_id then
         UIManager:show(InfoMessage:new{
@@ -10187,7 +10392,7 @@ function BookloreSync:_saveBookCacheMatch(book, selected_result)
     local ok = self.db:saveBookCache(
         book.file_path, book.file_hash or "",
         book_id, book_title or book.title, book.author,
-        isbn10, isbn13
+        isbn10, isbn13, server_pagecount
     )
 
     if not ok then
@@ -10201,16 +10406,16 @@ function BookloreSync:_saveBookCacheMatch(book, selected_result)
     self:logInfo("BookloreSync: Saved manual match - file:", book.file_path,
                  "book_id:", book_id)
 
-    -- Advance to the next unmatched book
-    self.bk_matching_index = self.bk_matching_index + 1
-
     -- Kick off a sync so pending annotations/ratings/sessions for this book
     -- are uploaded right away.  Run silently so the UI just shows the next
     -- book-match dialog without interruption.
     self:syncPendingSessions(true)
 
-    -- Show the next match
-    self:_showNextBookCacheMatch()
+    -- Continue batch matching flow only when that state is active.
+    if self.bk_unmatched_books and self.bk_matching_index then
+        self.bk_matching_index = self.bk_matching_index + 1
+        self:_showNextBookCacheMatch()
+    end
 end
 
 --[[--

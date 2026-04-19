@@ -14,7 +14,7 @@ weight = 0
 
 ## What does it do?
 
-When you read a book in KOReader, the plugin silently records your session - when you started, when you stopped, how many pages you covered, and your current progress. When you close the book (or the device wakes from sleep), it uploads that session to your BookLore server.
+When you read a book in KOReader, the plugin silently records your session - when you started, when you stopped, how many pages you covered, and your current progress. When you close the book, it uploads that session to your BookLore server.
 
 If you are offline, sessions are queued locally and uploaded the next time a connection is available.
 
@@ -82,4 +82,3 @@ The plugin works with any book format that KOReader can open:
 - **EPUB** - full support, including EPUB CFI generation for precise annotation positioning.
 - **PDF** - page-based progress tracking, rating sync, and annotation sync with mock CFI.
 - **CBZ / CBR** - comic/archive formats with page-based tracking. Annotations are not supported.
-

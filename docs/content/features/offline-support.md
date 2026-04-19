@@ -91,6 +91,7 @@ Pending sessions are synced automatically in these situations:
 
 | Trigger | Behaviour |
 |---------|-----------|
+| **Device suspend** | If **Auto-sync on suspend** is enabled, session + current progress are queued and upload is attempted immediately |
 | **Session end** | Sync attempted after every valid session (if not in Manual Sync Only mode) |
 | **Device resume** | Deferred background sync 15 seconds after device wakes from sleep |
 | **Network connected** | Immediate sync when network becomes available (if a wake sync was pending) |
@@ -109,7 +110,7 @@ If the **Ask before enabling WiFi** setting is on, the plugin will show a confir
 - **Confirm** - WiFi is enabled and the sync proceeds.
 - **Cancel** - WiFi is not enabled. The session stays queued and will be uploaded the next time a sync is triggered while WiFi is already on.
 
-This prompt appears before any sync attempt that would require enabling WiFi, including session-end syncs, wake syncs, and manually triggered syncs.
+This prompt appears before any sync attempt that would require enabling WiFi, including suspend auto-sync, session-end syncs, wake syncs, and manually triggered syncs.
 
 To configure this, see **Tools → BookLore Sync → Sync Behavior → Ask to enable WiFi**.
 

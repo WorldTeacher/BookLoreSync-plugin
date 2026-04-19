@@ -1,3 +1,16 @@
+## [4.1.1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.1.0...4.1.1) (2026-04-19)
+
+
+### Bug Fixes
+
+* **sync:** enhance auto-sync on suspend to queue and upload session/progress immediately ([d0ee003](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d0ee0037aac1bc881c3e92d97c3af870dff69650))
+* **upload:** upload sessions on resume from sleep ([4e4421d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/4e4421d9cda537e17b47afd824bb5f813490e979))
+
+
+### Performance Improvements
+
+* **sync:** change upload to be deferred ([c3078c6](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/c3078c6d5b7c82009ffeb090cfa0fe676dcf6bab))
+
 # [4.1.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.0.1...4.1.0) (2026-04-12)
 
 

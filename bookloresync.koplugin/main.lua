@@ -7362,19 +7362,37 @@ function BookloreSync:onSuspend()
 
     if self.force_push_session_on_suspend then
         self:logInfo("BookloreSync: Force push on suspend enabled")
-        
+
+        -- In automatic suspend-sync mode, queue current progress right now and
+        -- flush immediately so session/progress are uploaded on suspend instead
+        -- of waiting for deferred wake/close pipelines.
+        if self.progress_sync_enabled then
+            local queued_progress = self:queueCurrentKoreaderProgress()
+            self:logInfo("BookloreSync: Suspend progress queue result:", tostring(queued_progress))
+        end
+
         if self.connect_network_on_suspend then
-            -- When ask_wifi_enable is on, prompt before enabling WiFi.
-            -- On deny, we still attempt syncPendingSessions (it will be a
-            -- no-op if offline, data stays queued).
-            self:_requestWifi(_("sync sessions on suspend"), function()
-                self:logInfo("BookloreSync: Network ready - force syncing pending sessions on suspend")
-                self:syncPendingSessions(true)
-            end, function()
-                self:logInfo("BookloreSync: WiFi request declined on suspend - sessions remain queued")
-            end)
+            -- Automatic suspend sync should actively try to bring WiFi up.
+            -- If ask_wifi_enable is enabled we keep the permission prompt;
+            -- otherwise we connect directly.
+            if self.ask_wifi_enable then
+                self:_requestWifi(_("sync sessions and progress on suspend"), function()
+                    self:logInfo("BookloreSync: Network ready - force syncing pending sessions/progress on suspend")
+                    self:syncPendingSessions(true)
+                end, function()
+                    self:logInfo("BookloreSync: WiFi request declined on suspend - data remains queued")
+                end)
+            else
+                local connected = NetworkMgr:isConnected() or self:connectNetwork()
+                if connected then
+                    self:logInfo("BookloreSync: Network ready - force syncing pending sessions/progress on suspend")
+                    self:syncPendingSessions(true)
+                else
+                    self:logInfo("BookloreSync: Could not connect WiFi on suspend - data remains queued")
+                end
+            end
         else
-            self:logInfo("BookloreSync: Force syncing pending sessions on suspend")
+            self:logInfo("BookloreSync: Force syncing pending sessions/progress on suspend")
             self:syncPendingSessions(true)
         end
     else

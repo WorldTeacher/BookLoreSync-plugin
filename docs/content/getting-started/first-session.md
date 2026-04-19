@@ -82,7 +82,7 @@ GET /api/v1/books/search?isbn=<isbn>
 
 A result from the ISBN search is only accepted if the server returns an exact match (`matchScore == 1`). If no exact match is found, or if no ISBN is embedded in the file, the user is shown a brief notification.
 
-If the server is unreachable when you open the book, the session is saved with `book_id = NULL`. When the plugin next attempts to sync (on resume, on the next session end, or via manual sync), it re-queries the server using the cached hash to resolve the ID before uploading.
+If the server is unreachable when you open the book, the session is saved with `book_id = NULL`. When the plugin next attempts to sync (on the next automatic sync trigger, on the next session end, or via manual sync), it re-queries the server using the cached hash to resolve the ID before uploading.
 
 See [Features → Book ID Resolution](@/features/book-id-resolution.md) for the full details, including how to embed ISBNs into your book files so the fallback can work.
 

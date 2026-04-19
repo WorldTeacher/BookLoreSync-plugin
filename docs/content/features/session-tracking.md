@@ -47,7 +47,7 @@ The plugin hooks into four KOReader events:
 |-------|---------|--------|
 | `onReaderReady` | Book opens | Start new session |
 | `onCloseDocument` | Book closes | End session, validate, queue |
-| `onSuspend` | Device sleeps | End session, validate, queue |
+| `onSuspend` | Device sleeps | End session, validate, queue, then immediate sync attempt when suspend auto-sync is enabled |
 | `onResume` | Device wakes | Start new session, sync pending |
 
 ---
@@ -98,11 +98,16 @@ This means a reading period that spans a sleep event is split into **two session
 
 ### Resume cooldown
 
-To avoid flooding the server when a device suspends and resumes rapidly (e.g., repeated short sleep events), the plugin enforces a **5-minute cooldown** between auto-syncs triggered by resume. If a resume event occurs within 5 minutes of the last auto-sync, the sync is deferred rather than run immediately.
+To avoid flooding the server when a device suspends and resumes rapidly (e.g., repeated short sleep events), the plugin enforces a **5-minute cooldown** between auto-syncs triggered by resume.
+
+- If no queued sessions/progress exist, a resume inside the cooldown window skips auto-sync.
+- If queued sessions or progress exist, the cooldown is overridden and the pending data is synced.
 
 ### Deferred wake sync
 
 When the device wakes, the plugin schedules a sync to run **15 seconds after resume**. This gives the network time to reconnect before the upload is attempted. If the network is not yet available after 15 seconds, the session stays queued and will be picked up when connectivity is detected.
+
+This wake path is a fallback/background path. With **Auto-sync on suspend** enabled, the plugin already attempts to upload session and progress during suspend.
 
 ### Network-connected sync
 

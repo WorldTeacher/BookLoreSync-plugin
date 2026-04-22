@@ -4191,6 +4191,38 @@ function Database:savePluginSetting(key, value)
 end
 
 --[[--
+Delete a single plugin setting from the plugin_settings table.
+
+@param key string Setting key
+@return boolean success
+--]]
+---Database:deletePluginSetting.
+function Database:deletePluginSetting(key)
+    if not key then
+        self.plugin:logErr("BookloreSync Database: deletePluginSetting called without key")
+        return false
+    end
+    key = tostring(key)
+
+    local stmt = self.conn:prepare("DELETE FROM plugin_settings WHERE key = ?")
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare deletePluginSetting:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function() stmt:bind(key) end)
+    if not ok then
+        self.plugin:logErr("BookloreSync Database: Bind failed in deletePluginSetting:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
+--[[--
 Return all plugin settings as a key→value Lua table.
 
 Values are deserialised to their native Lua types (boolean, number, or string)

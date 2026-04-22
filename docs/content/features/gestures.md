@@ -16,7 +16,7 @@ The plugin does not define any gestures of its own. Instead, it registers **seve
 |---|---|
 | Toggle BookLore Sync | Enables or disables the plugin. No sessions are tracked while it is disabled. |
 | Sync Pending Sessions | Immediately uploads all queued sessions, ratings, and annotations. |
-| Toggle Manual Sync Only | Switches between automatic sync (after every session) and manual sync (only when triggered). |
+| Toggle Manual Sync Only | Switches between **Automatic** mode (syncs in background, including suspend/resume paths) and **Manual only (cache everything)** mode (queue only, sync when triggered). |
 | Test Connection | Runs a connection test and shows the result as a notification. |
 | Sync Shelf | Triggers a shelf sync immediately. |
 | Pull Current Book Progress | Pulls remote progress for the currently open book and applies conflict strategy rules. |

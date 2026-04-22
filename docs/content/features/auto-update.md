@@ -34,6 +34,9 @@ To disable auto-check, toggle off **Auto-check for updates** in:
 
 If **Use Dev Builds** is enabled, startup auto-check for stable releases is skipped. Manual **Check for Updates** uses the URL from `dev-build.location` instead.
 
+> **Note:** The **Use Dev Builds** toggle is only shown when `dev-build.location` exists in the plugin directory.
+> If the file is missing at startup, the plugin automatically disables the dev-build channel (`use_dev_builds = false`).
+
 ---
 
 ## Manual update check

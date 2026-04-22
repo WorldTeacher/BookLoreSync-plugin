@@ -32,7 +32,7 @@ flowchart TD
     D{"Passes validation?"}
     E["Discard session"]
     F["Save to pending_sessions"]
-    G{"Manual Sync Only?"}
+    G{"Manual mode active?"}
     H["Upload to server"]
     H2["Stays in queue"]
 
@@ -109,7 +109,8 @@ When the device goes to sleep (suspend), the plugin behaves as if the book was c
 When the device wakes up (resume):
 
 - A new session starts from the current position.
-- Any pending sessions in the queue are synced silently in the background. (Depends on settings)
+- In **Automatic** mode, pending sessions in the queue are synced silently in the background.
+- In **Manual only (cache everything)** mode, pending sessions remain queued until you run **Sync Pending Now**.
 
 This means a single uninterrupted reading period that spans a suspend/resume cycle is recorded as **two sessions**: one before sleep, one after.
 

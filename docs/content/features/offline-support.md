@@ -91,9 +91,9 @@ Pending sessions are synced automatically in these situations:
 
 | Trigger | Behaviour |
 |---------|-----------|
-| **Device suspend** | If **Auto-sync on suspend** is enabled, session + current progress are queued and upload is attempted immediately |
-| **Session end** | Sync attempted after every valid session (if not in Manual Sync Only mode) |
-| **Device resume** | Deferred background sync 15 seconds after device wakes from sleep |
+| **Device suspend** | In **Automatic** sync mode, session + current progress are queued and upload is attempted immediately |
+| **Session end** | In **Automatic** sync mode, sync is attempted after every valid session |
+| **Device resume** | In **Automatic** sync mode, deferred background sync runs 15 seconds after wake |
 | **Network connected** | Immediate sync when network becomes available (if a wake sync was pending) |
 | **Manual Sync Now** | Triggered by **Tools → BookLore Sync → Sync & Cache → Sync Pending Now** |
 | **Dispatcher action** | `SyncBooklorePending` can be assigned to a button or gesture |
@@ -102,17 +102,40 @@ Pending sessions are synced automatically in these situations:
 
 ## WiFi confirmation prompt
 
-If the **Ask before enabling WiFi** setting is on, the plugin will show a confirmation dialog before attempting to enable WiFi for a sync:
+BookLore Sync no longer uses a WiFi confirmation prompt setting.
 
-> **Enable WiFi now?**
-> A sync is ready to run. Enable WiFi to upload pending sessions?
+- In **Automatic** sync mode, sync actions may enable/connect WiFi automatically when needed.
+- In **Manual only (cache everything)** mode, automatic network sync is disabled and data remains queued until you run a manual sync action.
 
-- **Confirm** - WiFi is enabled and the sync proceeds.
-- **Cancel** - WiFi is not enabled. The session stays queued and will be uploaded the next time a sync is triggered while WiFi is already on.
+---
 
-This prompt appears before any sync attempt that would require enabling WiFi, including suspend auto-sync, session-end syncs, wake syncs, and manually triggered syncs.
+## Post-sync WiFi handling
 
-To configure this, see **Tools → BookLore Sync → Sync Behavior → Ask to enable WiFi**.
+Post-sync WiFi handling is separate from sync-mode selection.
+
+When a sync action enables WiFi, the plugin delegates WiFi teardown to KOReader's native network lifecycle. The KOReader setting under **Action when done with Wi-Fi** is respected:
+
+- **Leave on**
+- **Turn off**
+- **Prompt**
+
+This behavior is applied for manual actions that can enable WiFi:
+
+- **Sync Pending Now**
+- **Pull current book progress**
+- **Push current book progress**
+
+The post-sync action only runs when WiFi was initially off. If WiFi was already connected before the action, the plugin does not change WiFi state.
+
+### AirPlane Mode integration
+
+If the community **AirPlane Mode** plugin is active (`airplanemode = true` in KOReader settings), BookLore Sync does not attempt to enable WiFi.
+
+In that state, network actions are skipped and queued items remain pending until AirPlane Mode is disabled.
+
+When you manually run **Sync Pending Now** while AirPlane Mode is active, the plugin shows:
+
+> **AirPlane Mode is enabled - pending items remain queued**
 
 ---
 

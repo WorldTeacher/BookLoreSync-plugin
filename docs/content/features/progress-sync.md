@@ -123,10 +123,12 @@ Use **Sync & Cache → View Pending Sessions** to inspect pending and synced pro
 
 ---
 
-## Interaction with Manual Sync Only
+## Interaction with sync mode
 
 If **Manual only (cache everything)** is active:
 
 - Progress snapshots are still queued locally.
 - No automatic upload is attempted.
 - Upload occurs when you run **Sync Pending Now**.
+
+In **Automatic** mode, pending progress is uploaded automatically by normal background sync triggers (session end, suspend, and resume), and can also be uploaded via manual sync actions.

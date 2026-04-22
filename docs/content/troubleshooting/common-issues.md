@@ -101,6 +101,16 @@ If **Manual Sync Only** is enabled, sessions will accumulate in the queue until 
 
 **Tools → BookLore Sync → Sync Behavior** → confirm **Manual only (cache everything)** is off.
 
+**Check 6 - AirPlane Mode plugin:**
+
+If KOReader AirPlane Mode is enabled, BookLore Sync will not enable WiFi.
+
+In that state, running **Sync Pending Now** keeps items queued and shows:
+
+> **AirPlane Mode is enabled - pending items remain queued**
+
+Disable AirPlane Mode, reconnect WiFi, then run sync again.
+
 ---
 
 ## Book not found on server

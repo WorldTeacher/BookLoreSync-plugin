@@ -153,9 +153,7 @@ Sync mode and upload timing are configured separately in:
 
 See **Sync Behavior** in the settings menu for:
 
-- Automatic / Manual / Custom mode
-- Auto-sync on suspend
-- Connect WiFi on suspend
-- Ask to enable WiFi
+- Automatic mode
+- Manual only (cache everything) mode
 
-With **Automatic** mode (or **Custom** with both suspend toggles enabled), suspend now queues and attempts to upload both the current session and current progress immediately.
+With **Automatic** mode, suspend queues and attempts to upload both the current session and current progress immediately.

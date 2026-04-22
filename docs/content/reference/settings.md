@@ -61,11 +61,10 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `sync_mode` | string | *(derived)* | High-level sync mode: `"automatic"` (sync on suspend + WiFi connect enabled), `"manual"` (queue only; sync via **Sync & Cache → Sync Pending Now**), or `"custom"` (manual configuration of the two flags below). Derived from `manual_sync_only` and `force_push_session_on_suspend`/`connect_network_on_suspend` on first run; saved explicitly after that. |
+| `sync_mode` | string | *(derived)* | High-level sync mode: `"automatic"` (sync on suspend + WiFi connect enabled) or `"manual"` (queue only; sync via **Sync & Cache → Sync Pending Now**). Legacy/custom values are migrated to one of these modes. |
 | `manual_sync_only` | boolean | `false` | When `true`, sessions are queued but not auto-uploaded; requires manual **Sync & Cache → Sync Pending Now**. Set automatically when `sync_mode` is `"manual"`. |
-| `force_push_session_on_suspend` | boolean | `false` | When `true`, suspend queues the current session/progress and immediately attempts upload via `syncPendingSessions`. Set automatically when `sync_mode` is `"automatic"`; also available as a custom toggle when `sync_mode` is `"custom"`. |
-| `connect_network_on_suspend` | boolean | `false` | When `true`, suspend sync actively tries to bring WiFi up before uploading (works with `force_push_session_on_suspend`). Set automatically when `sync_mode` is `"automatic"`; also available as a custom toggle when `sync_mode` is `"custom"`. |
-| `ask_wifi_enable` | boolean | `false` | When `true`, shows a confirmation dialog before enabling WiFi for a sync (including suspend auto-sync). In the UI this toggle is disabled while `sync_mode` is `"manual"`. |
+| `force_push_session_on_suspend` | boolean | `false` | When `true`, suspend queues the current session/progress and immediately attempts upload via `syncPendingSessions`. Set automatically from `sync_mode`. |
+| `connect_network_on_suspend` | boolean | `false` | When `true`, suspend sync actively tries to bring WiFi up before uploading (works with `force_push_session_on_suspend`). Set automatically from `sync_mode`. |
 
 ---
 
@@ -121,7 +120,7 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `auto_update_check` | boolean | `true` | Check for updates once per day at startup |
-| `use_dev_builds` | boolean | `false` | Use the dev-build update channel defined by `dev-build.location` instead of stable GitHub releases |
+| `use_dev_builds` | boolean | `false` | Use the dev-build update channel defined by `dev-build.location` instead of stable GitHub releases. If `dev-build.location` is missing at startup, this setting is reset to `false`. |
 | `last_update_check` | integer | `0` | Unix timestamp of the last update check (set automatically) |
 
 ---

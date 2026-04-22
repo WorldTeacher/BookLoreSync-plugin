@@ -191,6 +191,19 @@ function DbSettings:saveSetting(key, value)
     return success
 end
 
+---DbSettings:deleteSetting.
+function DbSettings:deleteSetting(key)
+    if type(self._db.deletePluginSetting) ~= "function" then
+        logger.err("BookloreSync: deleteSetting not supported by database backend")
+        return false
+    end
+    local success = self._db:deletePluginSetting(key)
+    if not success then
+        logger.err("BookloreSync: Failed to delete setting:", key)
+    end
+    return success
+end
+
 -- No-op: SQLite writes are atomic and immediate, no flush needed.
 ---DbSettings:flush.
 function DbSettings:flush()
@@ -238,6 +251,35 @@ function BookloreSync:getDevBuildDownloadURL()
     end
 
     return url, nil
+end
+
+---BookloreSync:hasDevBuildLocationFile.
+function BookloreSync:hasDevBuildLocationFile()
+    if not self.plugin_dir or self.plugin_dir == "" then
+        return false
+    end
+
+    local location_path = self.plugin_dir .. "/dev-build.location"
+    local fh = io.open(location_path, "r")
+    if not fh then
+        return false
+    end
+
+    fh:close()
+    return true
+end
+
+---BookloreSync:isAirplaneModeActive.
+function BookloreSync:isAirplaneModeActive()
+    if not G_reader_settings then
+        return false
+    end
+
+    local ok_apm, apm = pcall(function()
+        return G_reader_settings:readSetting("airplanemode")
+    end)
+
+    return ok_apm and apm == true
 end
 
 ---BookloreSync:init.
@@ -419,11 +461,13 @@ function BookloreSync:init()
     self.progress_sync_forward_strategy = self.settings:readSetting("progress_sync_forward_strategy") or PROGRESS_SYNC_STRATEGY.PROMPT
     self.progress_sync_backward_strategy = self.settings:readSetting("progress_sync_backward_strategy") or PROGRESS_SYNC_STRATEGY.DISABLE
 
-    self.force_push_session_on_suspend = self.settings:readSetting("force_push_session_on_suspend") or false
-    self.connect_network_on_suspend    = self.settings:readSetting("connect_network_on_suspend")    or false
-    self.manual_sync_only              = self.settings:readSetting("manual_sync_only")              or false
-    self.sync_mode                     = self.settings:readSetting("sync_mode") -- "automatic", "manual", or "custom"
-    self.ask_wifi_enable               = self.settings:readSetting("ask_wifi_enable")               or false
+    local legacy_force_push_on_suspend = self.settings:readSetting("force_push_session_on_suspend") or false
+    local legacy_connect_network_on_suspend = self.settings:readSetting("connect_network_on_suspend") or false
+    local legacy_manual_sync_only = self.settings:readSetting("manual_sync_only") or false
+    self.sync_mode = self.settings:readSetting("sync_mode") -- "automatic" or "manual"
+    self.manual_sync_only = false
+    self.force_push_session_on_suspend = false
+    self.connect_network_on_suspend = false
 
     -- Shelf sync settings
     self.booklore_shelf_name         = self.settings:readSetting("booklore_shelf_name")  or "KOReader"
@@ -464,16 +508,27 @@ function BookloreSync:init()
     self.deferred_close_flush_last_queued_ms = 0
     self.deferred_close_flush_last_completed_ms = 0
 
-    -- Migrate old settings to new preset system if needed
-    if not self.sync_mode then
-        if self.manual_sync_only then
+    -- Enforce two-mode sync model and migrate legacy/custom settings.
+    if self.sync_mode ~= "automatic" and self.sync_mode ~= "manual" then
+        if legacy_manual_sync_only then
             self.sync_mode = "manual"
-        elseif self.force_push_session_on_suspend and self.connect_network_on_suspend then
+        elseif legacy_force_push_on_suspend and legacy_connect_network_on_suspend then
             self.sync_mode = "automatic"
         else
-            self.sync_mode = "custom"
+            -- Safety-first default for legacy/custom setups.
+            self.sync_mode = "manual"
         end
-        self.settings:saveSetting("sync_mode", self.sync_mode)
+    end
+    self:setSyncMode(self.sync_mode)
+
+    -- Remove retired setting keys from previous sync-mode model.
+    if self.db and type(self.db.deletePluginSetting) == "function" then
+        local ok_delete, delete_err = pcall(function()
+            self.db:deletePluginSetting("ask_wifi_enable")
+        end)
+        if not ok_delete then
+            self:logWarn("BookloreSync: Failed to delete retired setting ask_wifi_enable:", tostring(delete_err))
+        end
     end
 
     self.historical_sync_ack = self.settings:readSetting("historical_sync_ack") or false
@@ -546,6 +601,13 @@ function BookloreSync:init()
     self.use_dev_builds = self.settings:readSetting("use_dev_builds")
     if self.use_dev_builds == nil then
         self.use_dev_builds = false
+    end
+
+    if self.use_dev_builds and not self:hasDevBuildLocationFile() then
+        self.use_dev_builds = false
+        self.settings:saveSetting("use_dev_builds", false)
+        self.settings:flush()
+        self:logInfo("BookloreSync: Disabled dev-build channel (dev-build.location missing)")
     end
     
     self.last_update_check = self.settings:readSetting("last_update_check") or 0
@@ -792,7 +854,9 @@ function BookloreSync:onPullBookloreCurrentBookProgress()
             text = _("WiFi not enabled - pull skipped"),
             timeout = 2,
         })
-    end)
+    end, {
+        disable_wifi_when_done = true,
+    })
     return true
 end
 
@@ -840,7 +904,9 @@ function BookloreSync:onPushBookloreCurrentBookProgress()
             text = _("WiFi not enabled - push skipped"),
             timeout = 2,
         })
-    end)
+    end, {
+        disable_wifi_when_done = true,
+    })
     return true
 end
 
@@ -862,11 +928,20 @@ function BookloreSync:onSyncBooklorePending()
         self:_requestWifi(_("sync pending items"), function()
             self:syncPendingSessions()
         end, function()
+            if self:isAirplaneModeActive() then
+                UIManager:show(InfoMessage:new{
+                    text = _("AirPlane Mode is enabled - pending items remain queued"),
+                    timeout = 2,
+                })
+                return
+            end
             UIManager:show(InfoMessage:new{
                 text = _("WiFi not enabled - pending items remain queued"),
                 timeout = 2,
             })
-        end)
+        end, {
+            disable_wifi_when_done = true,
+        })
     else
         if pending_count == 0 then
             UIManager:show(InfoMessage:new{
@@ -912,6 +987,7 @@ function BookloreSync:toggleManualSyncOnly()
     end
     
     self.settings:flush()
+    self:setSyncMode(self.manual_sync_only and "manual" or "automatic")
     local message
     if self.manual_sync_only then
         message = _("Manual sync only: sessions will be cached until you sync pending sessions manually")
@@ -926,27 +1002,23 @@ end
 
 ---BookloreSync:setSyncMode.
 function BookloreSync:setSyncMode(mode)
-    self.sync_mode = mode
-    self.settings:saveSetting("sync_mode", mode)
-    
-    -- Apply preset values
-    if mode == "automatic" then
+    local resolved_mode = (mode == "automatic") and "automatic" or "manual"
+    self.sync_mode = resolved_mode
+    self.settings:saveSetting("sync_mode", resolved_mode)
+
+    if resolved_mode == "automatic" then
         self.manual_sync_only = false
         self.force_push_session_on_suspend = true
         self.connect_network_on_suspend = true
-    elseif mode == "manual" then
+    else
         self.manual_sync_only = true
         self.force_push_session_on_suspend = false
         self.connect_network_on_suspend = false
     end
-    -- custom mode: leave individual settings as-is
-    
-    if mode ~= "custom" then
-        self.settings:saveSetting("manual_sync_only", self.manual_sync_only)
-        self.settings:saveSetting("force_push_session_on_suspend", self.force_push_session_on_suspend)
-        self.settings:saveSetting("connect_network_on_suspend", self.connect_network_on_suspend)
-    end
-    
+
+    self.settings:saveSetting("manual_sync_only", self.manual_sync_only)
+    self.settings:saveSetting("force_push_session_on_suspend", self.force_push_session_on_suspend)
+    self.settings:saveSetting("connect_network_on_suspend", self.connect_network_on_suspend)
     self.settings:flush()
 end
 
@@ -3788,7 +3860,7 @@ function BookloreSync:addToMainMenu(menu_items)
 
     local sync_mode_menu = {
         text = _("Sync Mode"),
-        help_text = _("Choose when sessions are automatically synced to the server."),
+        help_text = _("Choose between automatic syncing and manual queue-only mode."),
         sub_item_table = {
             {
                 text = _("Automatic (sync on suspend + WiFi)"),
@@ -3819,66 +3891,6 @@ function BookloreSync:addToMainMenu(menu_items)
                     })
                 end,
                 keep_menu_open = true,
-            },
-            {
-                text = _("Custom"),
-                help_text = _("Configure individual sync options manually."),
-                checked_func = function()
-                    return self.sync_mode == "custom"
-                end,
-                callback = function()
-                    self:setSyncMode("custom")
-                    UIManager:show(InfoMessage:new{
-                        text = _("Sync mode set to Custom"),
-                        timeout = 2,
-                    })
-                end,
-                keep_menu_open = true,
-            },
-            {
-                text = _("Custom Options:"),
-                enabled_func = function()
-                    return self.sync_mode == "custom"
-                end,
-                enabled = false,
-            },
-            {
-                text = _("  Auto-sync on suspend"),
-                help_text = _("Automatically sync the current reading session and all pending sessions when the device suspends."),
-                enabled_func = function()
-                    return self.sync_mode == "custom"
-                end,
-                checked_func = function()
-                    return self.force_push_session_on_suspend
-                end,
-                callback = function()
-                    self.force_push_session_on_suspend = not self.force_push_session_on_suspend
-                    self.settings:saveSetting("force_push_session_on_suspend", self.force_push_session_on_suspend)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.force_push_session_on_suspend and _("Auto-sync on suspend enabled") or _("Auto-sync on suspend disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("  Connect WiFi on suspend"),
-                help_text = _("Automatically enable WiFi and attempt to connect when the device suspends. Waits up to 15 seconds for connection."),
-                enabled_func = function()
-                    return self.sync_mode == "custom"
-                end,
-                checked_func = function()
-                    return self.connect_network_on_suspend
-                end,
-                callback = function()
-                    self.connect_network_on_suspend = not self.connect_network_on_suspend
-                    self.settings:saveSetting("connect_network_on_suspend", self.connect_network_on_suspend)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.connect_network_on_suspend and _("Connect WiFi on suspend enabled") or _("Connect WiFi on suspend disabled"),
-                        timeout = 2,
-                    })
-                end,
             },
         },
     }
@@ -4167,39 +4179,13 @@ function BookloreSync:addToMainMenu(menu_items)
         table.insert(annotations_and_bookmarks_menu.sub_item_table, bookmarks_menu.sub_item_table[1])
     end
 
-    local sync_behavior_items = {}
-    for _, item in ipairs(sync_mode_menu.sub_item_table or {}) do
-        table.insert(sync_behavior_items, item)
-    end
-    table.insert(sync_behavior_items, {
-        text = _("Ask to enable WiFi"),
-        help_text = _("When enabled, the plugin will ask for your permission before turning on WiFi for syncing. On confirm, the action proceeds; on skip, syncs are deferred (queued for the next opportunity) and lookups are skipped."),
-        enabled_func = function()
-            return self.sync_mode ~= "manual"
-        end,
-        checked_func = function()
-            return self.ask_wifi_enable
-        end,
-        callback = function()
-            self.ask_wifi_enable = not self.ask_wifi_enable
-            self.settings:saveSetting("ask_wifi_enable", self.ask_wifi_enable)
-            self.settings:flush()
-            UIManager:show(InfoMessage:new{
-                text = self.ask_wifi_enable
-                    and _("Ask to enable WiFi: on")
-                    or  _("Ask to enable WiFi: off"),
-                timeout = 2,
-            })
-        end,
-    })
-
     local sync_behavior_menu = {
         text = _("Sync Behavior"),
-        sub_item_table = sync_behavior_items,
+        sub_item_table = sync_mode_menu.sub_item_table,
         hold_callback = function()
             showSectionHelp(
                 _("Sync Behavior"),
-                _("Choose automatic/manual/custom sync mode and configure WiFi prompting behavior.")
+                _("Choose automatic syncing or manual queue-only mode.")
             )
         end,
     }
@@ -4496,7 +4482,9 @@ function BookloreSync:addToMainMenu(menu_items)
                             text    = _("WiFi not enabled - pending items remain queued"),
                             timeout = 2,
                         })
-                    end)
+                    end, {
+                        disable_wifi_when_done = true,
+                    })
                 end,
             },
             {
@@ -4796,16 +4784,6 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("Use Dev Builds"),
-                help_text = _("Install development builds from dev-build.location in the plugin folder."),
-                checked_func = function()
-                    return self.use_dev_builds
-                end,
-                callback = function()
-                    self:toggleUseDevBuilds()
-                end,
-            },
-            {
                 text = _("Clear Update Cache"),
                 help_text = _("Force a fresh check by clearing cached release info"),
                 keep_menu_open = true,
@@ -4821,6 +4799,20 @@ function BookloreSync:addToMainMenu(menu_items)
             )
         end,
     })
+
+    if self:hasDevBuildLocationFile() then
+        local about_updates_menu = base_menu[#base_menu]
+        table.insert(about_updates_menu.sub_item_table, 4, {
+            text = _("Use Dev Builds"),
+            help_text = _("Install development builds from dev-build.location in the plugin folder."),
+            checked_func = function()
+                return self.use_dev_builds
+            end,
+            callback = function()
+                self:toggleUseDevBuilds()
+            end,
+        })
+    end
 
     menu_items.booklore_sync = {
         text = _("Booklore Sync"),
@@ -6934,6 +6926,11 @@ Used when "Connect network on suspend" is enabled.
 --]]
 ---BookloreSync:connectNetwork.
 function BookloreSync:connectNetwork()
+    if self:isAirplaneModeActive() then
+        self:logWarn("BookloreSync: Refusing network connect while AirPlane Mode is active")
+        return false
+    end
+
     ---isNetworkConnected.
     local function isNetworkConnected()
         if not NetworkMgr or type(NetworkMgr.isConnected) ~= "function" then
@@ -7024,28 +7021,66 @@ function BookloreSync:connectNetwork()
     return false
 end
 
+---BookloreSync:disconnectNetwork.
+function BookloreSync:disconnectNetwork()
+    if not NetworkMgr then
+        return false
+    end
+
+    local manager_calls = {
+        { "turnOffWifi" },
+        { "disableWifi" },
+        { "setWifiEnabled", false },
+        { "setWifiState", false },
+        { "requestWifiOff" },
+        { "disconnect" },
+        { "releaseIP" },
+    }
+
+    local unpack_fn = table.unpack or unpack
+    local attempted = false
+
+    for _, call in ipairs(manager_calls) do
+        local method = call[1]
+        if type(NetworkMgr[method]) == "function" then
+            local args = {}
+            for i = 2, #call do
+                args[#args + 1] = call[i]
+            end
+            attempted = true
+            self:logInfo("BookloreSync: Trying NetworkMgr WiFi-disable method:", method)
+            local ok_call, call_result = pcall(NetworkMgr[method], NetworkMgr, unpack_fn(args))
+            if ok_call and call_result ~= false then
+                return true
+            elseif not ok_call then
+                self:logWarn("BookloreSync: NetworkMgr WiFi-disable method failed:", method, tostring(call_result))
+            end
+        end
+    end
+
+    if not attempted then
+        self:logWarn("BookloreSync: No supported NetworkMgr WiFi-disable method found")
+    end
+
+    return false
+end
+
 --[[--
-Ask the user for permission to enable WiFi, then run the action.
+Ensure WiFi is available, then run the action.
 
-When `ask_wifi_enable` is disabled this is a straight pass-through: if WiFi
-is already connected `on_confirm` is called immediately; otherwise
-`on_confirm` is called as-is and the downstream sync methods handle being
-offline gracefully (they leave data in the pending queues).
-
-When `ask_wifi_enable` is enabled and WiFi is *not* currently connected the
-user is prompted with a ConfirmBox:
-  • Enable  → enable WiFi via `connectNetwork()`, then call `on_confirm`.
-  • Skip    → call `on_deny` (callers use this to skip or queue the action).
-
-The `context` string is displayed in the prompt so the user knows *why* the
-plugin wants WiFi (e.g. "sync sessions", "upload annotation").
+Behavior is automatic-only: if WiFi is already connected `on_confirm` is
+called immediately; otherwise the plugin attempts to enable/connect WiFi via
+`connectNetwork()`, then calls `on_confirm` only when connected.
 
 @param context    Short description of the action that needs WiFi.
 @param on_confirm Callback invoked when WiFi is (or becomes) available.
-@param on_deny    Callback invoked when the user declines (may be nil).
+@param on_deny    Callback invoked when WiFi cannot be enabled (may be nil).
+@param opts       Optional table; set `disable_wifi_when_done=true` to
+                  request a best-effort WiFi disable after successful run
+                  when WiFi was initially disconnected.
 --]]--
 ---BookloreSync:_requestWifi.
-function BookloreSync:_requestWifi(context, on_confirm, on_deny)
+function BookloreSync:_requestWifi(context, on_confirm, on_deny, opts)
     if type(on_confirm) ~= "function" then
         on_confirm = function() end
     end
@@ -7065,64 +7100,91 @@ function BookloreSync:_requestWifi(context, on_confirm, on_deny)
         return true
     end
 
+    if self:isAirplaneModeActive() then
+        self:logInfo("BookloreSync: AirPlane Mode active; skipping WiFi request for:", context or "<unknown>")
+        UIManager:show(InfoMessage:new{
+            text = _("AirPlane Mode is enabled - network sync skipped"),
+            timeout = 2,
+        })
+        safeInvoke(on_deny, "WiFi deny callback")
+        return
+    end
+
+    local ok_connected, was_connected = pcall(function()
+        return NetworkMgr and type(NetworkMgr.isConnected) == "function" and NetworkMgr:isConnected() or false
+    end)
+    was_connected = ok_connected and was_connected or false
+
+    local function maybeDisableWifiAfterAction()
+        if not (opts and opts.disable_wifi_when_done) then
+            return
+        end
+        if was_connected then
+            return
+        end
+
+        -- Prefer KOReader's native before/after WiFi-action lifecycle so the
+        -- global "Action when done with Wi-Fi" setting (leave on/turn off/prompt)
+        -- is respected and network events are emitted consistently.
+        if type(NetworkMgr.afterWifiAction) == "function" then
+            local ok_after, after_err = pcall(function()
+                if type(NetworkMgr.setBeforeActionFlag) == "function" then
+                    NetworkMgr:setBeforeActionFlag()
+                end
+                NetworkMgr:afterWifiAction()
+            end)
+            if ok_after then
+                self:logInfo("BookloreSync: Completed KOReader after-WiFi action")
+                return
+            end
+            self:logWarn("BookloreSync: afterWifiAction failed, falling back to direct disable:", tostring(after_err))
+        end
+
+        local ok_disconnect, disconnected = pcall(function()
+            return self:disconnectNetwork()
+        end)
+        if not ok_disconnect then
+            self:logWarn("BookloreSync: WiFi disable after action crashed:", tostring(disconnected))
+            return
+        end
+        if disconnected then
+            self:logInfo("BookloreSync: WiFi disabled after action completion")
+        else
+            self:logWarn("BookloreSync: Could not disable WiFi after action completion")
+        end
+    end
+
     -- WiFi already up - proceed immediately without any prompt.
     if NetworkMgr:isConnected() then
         safeInvoke(on_confirm, "WiFi confirm callback")
+        maybeDisableWifiAfterAction()
         return
     end
 
-    -- Feature disabled - proceed without prompting.  The downstream sync
-    -- methods handle being offline gracefully (they skip network calls and
-    -- leave data in the pending queues).  Only callers that intentionally
-    -- want to enable WiFi (e.g. onSuspend with connect_network_on_suspend)
-    -- should pass a context; the prompt is the only new behaviour here.
-    if not self.ask_wifi_enable then
+    self:logInfo("BookloreSync: Auto-enabling WiFi for:", context or "<unknown>")
+    local ok_connect, ok = pcall(function()
+        return self:connectNetwork()
+    end)
+    if not ok_connect then
+        self:logErr("BookloreSync: WiFi auto-enable attempt crashed:", tostring(ok))
+        UIManager:show(InfoMessage:new{
+            text    = _("Failed to enable WiFi"),
+            timeout = 2,
+        })
+        safeInvoke(on_deny, "WiFi deny callback")
+        return
+    end
+    if ok then
         safeInvoke(on_confirm, "WiFi confirm callback")
-        return
-    end
-
-    -- Feature enabled - show a confirm dialog.
-    local prompt_text
-    if context and context ~= "" then
-        prompt_text = T(_("WiFi is required to %1.\n\nEnable WiFi now?"), context)
+        maybeDisableWifiAfterAction()
     else
-        prompt_text = _("WiFi is required for Booklore Sync.\n\nEnable WiFi now?")
+        self:logWarn("BookloreSync: WiFi auto-enable failed")
+        UIManager:show(InfoMessage:new{
+            text    = _("Could not connect to WiFi"),
+            timeout = 2,
+        })
+        safeInvoke(on_deny, "WiFi deny callback")
     end
-
-    UIManager:show(ConfirmBox:new{
-        text        = prompt_text,
-        ok_text     = _("Enable"),
-        cancel_text = _("Skip"),
-        ok_callback = function()
-            self:logInfo("BookloreSync: User approved WiFi enable for:", context or "<unknown>")
-            local ok_connect, ok = pcall(function()
-                return self:connectNetwork()
-            end)
-            if not ok_connect then
-                self:logErr("BookloreSync: WiFi connection attempt crashed:", tostring(ok))
-                UIManager:show(InfoMessage:new{
-                    text    = _("Failed to enable WiFi"),
-                    timeout = 2,
-                })
-                safeInvoke(on_deny, "WiFi deny callback")
-                return
-            end
-            if ok then
-                safeInvoke(on_confirm, "WiFi confirm callback")
-            else
-                self:logWarn("BookloreSync: WiFi enable approved but connection failed")
-                UIManager:show(InfoMessage:new{
-                    text    = _("Could not connect to WiFi"),
-                    timeout = 2,
-                })
-                safeInvoke(on_deny, "WiFi deny callback")
-            end
-        end,
-        cancel_callback = function()
-            self:logInfo("BookloreSync: User declined WiFi enable for:", context or "<unknown>")
-            safeInvoke(on_deny, "WiFi deny callback")
-        end,
-    })
 end
 
 function BookloreSync:getPendingSyncTotals()
@@ -7372,24 +7434,12 @@ function BookloreSync:onSuspend()
         end
 
         if self.connect_network_on_suspend then
-            -- Automatic suspend sync should actively try to bring WiFi up.
-            -- If ask_wifi_enable is enabled we keep the permission prompt;
-            -- otherwise we connect directly.
-            if self.ask_wifi_enable then
-                self:_requestWifi(_("sync sessions and progress on suspend"), function()
-                    self:logInfo("BookloreSync: Network ready - force syncing pending sessions/progress on suspend")
-                    self:syncPendingSessions(true)
-                end, function()
-                    self:logInfo("BookloreSync: WiFi request declined on suspend - data remains queued")
-                end)
+            local connected = NetworkMgr:isConnected() or self:connectNetwork()
+            if connected then
+                self:logInfo("BookloreSync: Network ready - force syncing pending sessions/progress on suspend")
+                self:syncPendingSessions(true)
             else
-                local connected = NetworkMgr:isConnected() or self:connectNetwork()
-                if connected then
-                    self:logInfo("BookloreSync: Network ready - force syncing pending sessions/progress on suspend")
-                    self:syncPendingSessions(true)
-                else
-                    self:logInfo("BookloreSync: Could not connect WiFi on suspend - data remains queued")
-                end
+                self:logInfo("BookloreSync: Could not connect WiFi on suspend - data remains queued")
             end
         else
             self:logInfo("BookloreSync: Force syncing pending sessions/progress on suspend")
@@ -7440,10 +7490,7 @@ function BookloreSync:onResume()
                 self:logInfo("BookloreSync: Attempting background sync on resume")
             end
 
-            -- Use _requestWifi so that if the ask_wifi_enable option is on the
-            -- user is prompted before we try to connect.  On deny the sync is
-            -- silently skipped (data remains queued for the next opportunity).
-            self:_requestWifi(_("sync pending sessions"), function()
+            local function runResumeSyncNow()
                 -- Safer ordering on resume: pull first, then push pending.
                 -- Avoids uploading stale local progress before reading remote.
                 if self.progress_sync_enabled and self.progress_pull_on_resume and NetworkMgr:isConnected() then
@@ -7453,7 +7500,7 @@ function BookloreSync:onResume()
                 self:syncPendingSessions(true)
 
                 -- Flag a deferred wake-sync so the shelf can be updated once
-                -- the network is fully up.  If WiFi is already connected,
+                -- the network is fully up. If WiFi is already connected,
                 -- schedule it directly; otherwise onNetworkConnected will pick it up.
                 if self.auto_sync_shelf_on_resume then
                     self.needs_wake_sync = true
@@ -7465,6 +7512,10 @@ function BookloreSync:onResume()
 
                 self:logInfo("BookloreSync: Checking for unmatched books")
                 self:resolveUnmatchedBooks(true)
+            end
+
+            self:_requestWifi(_("sync pending sessions"), function()
+                runResumeSyncNow()
             end, function()
                 self:logInfo("BookloreSync: WiFi request declined on resume - sync skipped")
             end)

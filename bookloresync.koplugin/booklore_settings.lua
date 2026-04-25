@@ -873,6 +873,7 @@ function Settings:exportSettings(parent)
         session_detection_mode        = parent.session_detection_mode,
         progress_decimal_places       = parent.progress_decimal_places,
         network_connect_timeout_seconds = parent.network_connect_timeout_seconds,
+        network_connect_run_until_connect = parent.network_connect_run_until_connect,
         force_push_session_on_suspend = parent.force_push_session_on_suspend,
         connect_network_on_suspend    = parent.connect_network_on_suspend,
         sync_mode                     = parent.sync_mode,

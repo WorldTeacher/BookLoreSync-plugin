@@ -473,6 +473,10 @@ function BookloreSync:init()
     if self.network_connect_timeout_seconds < 1 then
         self.network_connect_timeout_seconds = 1
     end
+    self.network_connect_run_until_connect = self.settings:readSetting("network_connect_run_until_connect")
+    if self.network_connect_run_until_connect == nil then
+        self.network_connect_run_until_connect = false
+    end
     self.manual_sync_only = false
     self.force_push_session_on_suspend = false
     self.connect_network_on_suspend = false
@@ -3875,9 +3879,25 @@ function BookloreSync:addToMainMenu(menu_items)
                     return T(_("WiFi connect timeout (seconds) (%1)"), tostring(self.network_connect_timeout_seconds or DEFAULT_NETWORK_CONNECT_TIMEOUT_SECONDS))
                 end,
                 help_text = _("How long to wait for WiFi to become connected after enabling it, before giving up. Increase this on slower devices."),
+                enabled_func = function()
+                    return not self.network_connect_run_until_connect
+                end,
                 keep_menu_open = true,
                 callback = function()
                     Settings:configureNetworkConnectTimeout(self)
+                end,
+            },
+            {
+                text = _("Run until connect"),
+                help_text = _("Disable plugin-side connect timeout and wait until WiFi connects or the underlying network stack times out on its own."),
+                checked_func = function()
+                    return self.network_connect_run_until_connect
+                end,
+                keep_menu_open = true,
+                callback = function()
+                    self.network_connect_run_until_connect = not self.network_connect_run_until_connect
+                    self.settings:saveSetting("network_connect_run_until_connect", self.network_connect_run_until_connect)
+                    self.settings:flush()
                 end,
             },
             {
@@ -7016,10 +7036,11 @@ function BookloreSync:connectNetwork()
     if timeout < 1 then
         timeout = 1
     end
+    local run_until_connect = self.network_connect_run_until_connect == true
     local elapsed = 0
     local check_interval = 0.5
 
-    while elapsed < timeout do
+    while run_until_connect or elapsed < timeout do
         if isNetworkConnected() then
             self:logInfo("BookloreSync: Network connected successfully after", elapsed, "seconds")
             return true
@@ -7045,7 +7066,11 @@ function BookloreSync:connectNetwork()
         elapsed = elapsed + check_interval
     end
 
-    self:logWarn("BookloreSync: Network connection timeout after", timeout, "seconds")
+    if run_until_connect then
+        self:logWarn("BookloreSync: Network connect wait ended before connection was established")
+    else
+        self:logWarn("BookloreSync: Network connection timeout after", timeout, "seconds")
+    end
     return false
 end
 

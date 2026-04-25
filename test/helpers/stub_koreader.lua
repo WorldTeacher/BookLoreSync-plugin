@@ -26,6 +26,7 @@ local STUB_KEYS = {
   "random",
   "ffi",
   "ffi/util",
+  "libs/libkoreader-lfs",
   "string.buffer",
   "ui/trapper",
   "device",
@@ -90,7 +91,11 @@ local function install()
   end
 
   package.preload["ui/network/manager"] = function()
-    return { isOnline = function() return false end }
+    return {
+      isOnline = function() return false end,
+      isConnected = function() return false end,
+      getNetworkInterfaceName = function() return "" end,
+    }
   end
 
   package.preload["ui/uimanager"] = function()
@@ -199,6 +204,19 @@ local function install()
       readAllFromFD           = function() return fake_result end,
       writeToFD               = function(_, data) fake_result = data end,
       terminateSubProcess     = function() end,
+    }
+  end
+
+  package.preload["libs/libkoreader-lfs"] = function()
+    return {
+      attributes = function()
+        return nil
+      end,
+      dir = function()
+        return function()
+          return nil
+        end
+      end,
     }
   end
 

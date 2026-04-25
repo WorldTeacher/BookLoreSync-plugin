@@ -111,6 +111,13 @@ In that state, running **Sync Pending Now** keeps items queued and shows:
 
 Disable AirPlane Mode, reconnect WiFi, then run sync again.
 
+If **Integrations → Airplanemode plugin → Switch sync mode based on airplane status** is enabled, note that this feature overrides your Sync Mode selection:
+
+- AirPlane Mode ON forces Sync Mode to **Manual**
+- AirPlane Mode OFF forces Sync Mode to **Automatic**
+
+You can disable that integration toggle if you want to control Sync Mode manually.
+
 ---
 
 ## Book not found on server

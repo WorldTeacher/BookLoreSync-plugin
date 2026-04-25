@@ -151,6 +151,7 @@ end
 
 local BATCH_UPLOAD_SIZE = 100  -- max sessions per batch upload
 local PROGRESS_API_DEBOUNCE_SECONDS = 25
+local DEFAULT_NETWORK_CONNECT_TIMEOUT_SECONDS = 15
 local PROGRESS_SYNC_STRATEGY = {
     SILENT = "silent",
     PROMPT = "prompt",
@@ -465,6 +466,13 @@ function BookloreSync:init()
     local legacy_connect_network_on_suspend = self.settings:readSetting("connect_network_on_suspend") or false
     local legacy_manual_sync_only = self.settings:readSetting("manual_sync_only") or false
     self.sync_mode = self.settings:readSetting("sync_mode") -- "automatic" or "manual"
+    self.network_connect_timeout_seconds = tonumber(self.settings:readSetting("network_connect_timeout_seconds"))
+    if self.network_connect_timeout_seconds == nil then
+        self.network_connect_timeout_seconds = DEFAULT_NETWORK_CONNECT_TIMEOUT_SECONDS
+    end
+    if self.network_connect_timeout_seconds < 1 then
+        self.network_connect_timeout_seconds = 1
+    end
     self.manual_sync_only = false
     self.force_push_session_on_suspend = false
     self.connect_network_on_suspend = false
@@ -3863,6 +3871,16 @@ function BookloreSync:addToMainMenu(menu_items)
         help_text = _("Choose between automatic syncing and manual queue-only mode."),
         sub_item_table = {
             {
+                text_func = function()
+                    return T(_("WiFi connect timeout (seconds) (%1)"), tostring(self.network_connect_timeout_seconds or DEFAULT_NETWORK_CONNECT_TIMEOUT_SECONDS))
+                end,
+                help_text = _("How long to wait for WiFi to become connected after enabling it, before giving up. Increase this on slower devices."),
+                keep_menu_open = true,
+                callback = function()
+                    Settings:configureNetworkConnectTimeout(self)
+                end,
+            },
+            {
                 text = _("Automatic (sync on suspend + WiFi)"),
                 help_text = _("Automatically sync sessions when device suspends. Enables WiFi and attempts connection before syncing."),
                 checked_func = function()
@@ -4573,7 +4591,7 @@ function BookloreSync:addToMainMenu(menu_items)
             },
             {
                 text = _("Clear Cache"),
-                help_text = _("Delete all cached book hashes and file path mappings. This will not affect pending sessions. The cache will be rebuilt as you read."),
+                help_text = _("Delete cached book hashes and file path mappings. Entries still referenced by pending annotations/ratings/bookmarks are retained to preserve queued sync data."),
                 enabled_func = function()
                     if not self.db then
                         return false
@@ -4583,11 +4601,18 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
                 callback = function()
                     if self.db then
-                        self.db:clearBookCache()
-                        UIManager:show(InfoMessage:new{
-                            text = _("Local book cache cleared"),
-                            timeout = 2,
-                        })
+                        local ok = self.db:clearBookCache()
+                        if ok then
+                            UIManager:show(InfoMessage:new{
+                                text = _("Local book cache cleared"),
+                                timeout = 2,
+                            })
+                        else
+                            UIManager:show(InfoMessage:new{
+                                text = _("Failed to clear local book cache"),
+                                timeout = 3,
+                            })
+                        end
                     end
                 end,
             },
@@ -6987,7 +7012,10 @@ function BookloreSync:connectNetwork()
     local ok_ffi, ffiutil = pcall(require, "ffi/util")
     local sleep_available = ok_ffi and ffiutil and type(ffiutil.sleep) == "function"
 
-    local timeout = 15
+    local timeout = tonumber(self.network_connect_timeout_seconds) or DEFAULT_NETWORK_CONNECT_TIMEOUT_SECONDS
+    if timeout < 1 then
+        timeout = 1
+    end
     local elapsed = 0
     local check_interval = 0.5
 

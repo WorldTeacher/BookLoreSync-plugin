@@ -4064,38 +4064,44 @@ function BookloreSync:addToMainMenu(menu_items)
         help_text = _("Choose between automatic syncing and manual queue-only mode."),
         sub_item_table = {
             {
-                text_func = function()
-                    return T(_("WiFi connect timeout (seconds) (%1)"), tostring(self.network_connect_timeout_seconds or DEFAULT_NETWORK_CONNECT_TIMEOUT_SECONDS))
-                end,
-                help_text = _("How long to wait for WiFi to become connected after enabling it, before giving up. Increase this on slower devices."),
-                enabled_func = function()
-                    return not self.network_connect_run_until_connect
-                end,
-                keep_menu_open = true,
-                callback = function()
-                    Settings:configureNetworkConnectTimeout(self)
-                end,
-            },
-            {
-                text = _("Run until connect"),
-                help_text = _("Disable plugin-side connect timeout and wait until WiFi connects or the underlying network stack times out on its own."),
-                checked_func = function()
-                    return self.network_connect_run_until_connect
-                end,
-                keep_menu_open = true,
-                callback = function()
-                    self.network_connect_run_until_connect = not self.network_connect_run_until_connect
-                    self.settings:saveSetting("network_connect_run_until_connect", self.network_connect_run_until_connect)
-                    self.settings:flush()
-                end,
-            },
-            {
-                text = _("Sync delay after connect"),
-                help_text = _("Wait this many seconds after network becomes connected before running sync requests. Useful on devices where routing/DNS is not immediately ready after WiFi connect."),
-                keep_menu_open = true,
-                callback = function()
-                    Settings:configureSyncDelayAfterConnect(self)
-                end,
+                text = _("Networking"),
+                help_text = _("Configure WiFi connection behavior for sync actions."),
+                sub_item_table = {
+                    {
+                        text_func = function()
+                            return T(_("WiFi connect timeout (seconds) (%1)"), tostring(self.network_connect_timeout_seconds or DEFAULT_NETWORK_CONNECT_TIMEOUT_SECONDS))
+                        end,
+                        help_text = _("How long to wait for WiFi to become connected after enabling it, before giving up. Increase this on slower devices."),
+                        enabled_func = function()
+                            return not self.network_connect_run_until_connect
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            Settings:configureNetworkConnectTimeout(self)
+                        end,
+                    },
+                    {
+                        text = _("Sync delay after connect"),
+                        help_text = _("Wait this many seconds after network becomes connected before running sync requests. Useful on devices where routing/DNS is not immediately ready after WiFi connect."),
+                        keep_menu_open = true,
+                        callback = function()
+                            Settings:configureSyncDelayAfterConnect(self)
+                        end,
+                    },
+                    {
+                        text = _("Run until connect"),
+                        help_text = _("Disable plugin-side connect timeout and wait until WiFi connects or the underlying network stack times out on its own."),
+                        checked_func = function()
+                            return self.network_connect_run_until_connect
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            self.network_connect_run_until_connect = not self.network_connect_run_until_connect
+                            self.settings:saveSetting("network_connect_run_until_connect", self.network_connect_run_until_connect)
+                            self.settings:flush()
+                        end,
+                    },
+                },
             },
             {
                 text = _("Automatic (sync on suspend + WiFi)"),

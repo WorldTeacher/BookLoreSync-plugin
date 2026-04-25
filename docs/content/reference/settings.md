@@ -62,9 +62,12 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `sync_mode` | string | *(derived)* | High-level sync mode: `"automatic"` (sync on suspend + WiFi connect enabled) or `"manual"` (queue only; sync via **Sync & Cache → Sync Pending Now**). Legacy/custom values are migrated to one of these modes. |
+| `network_connect_timeout_seconds` | integer | `15` | Maximum time (seconds) to wait for WiFi to become connected after enabling it. Increase this on slower devices or networks. |
+| `network_connect_run_until_connect` | boolean | `false` | When `true`, disables the plugin-side connect timeout and keeps waiting for connection until the underlying network stack resolves or times out itself. |
 | `manual_sync_only` | boolean | `false` | When `true`, sessions are queued but not auto-uploaded; requires manual **Sync & Cache → Sync Pending Now**. Set automatically when `sync_mode` is `"manual"`. |
-| `force_push_session_on_suspend` | boolean | `false` | When `true`, suspend queues the current session/progress and immediately attempts upload via `syncPendingSessions`. Set automatically from `sync_mode`. |
-| `connect_network_on_suspend` | boolean | `false` | When `true`, suspend sync actively tries to bring WiFi up before uploading (works with `force_push_session_on_suspend`). Set automatically from `sync_mode`. |
+| `force_push_session_on_suspend` | boolean | `false` | When `true`, suspend queues the current session/progress and attempts immediate upload via `syncPendingSessions` **if network is already connected**. Set automatically from `sync_mode`. |
+| `connect_network_on_suspend` | boolean | `false` | Legacy compatibility flag derived from `sync_mode`. Current suspend/resume background flow does not actively connect WiFi; it runs only when already connected. |
+| `airplanemode_sync_mode_enabled` | boolean | `false` | Enables Airplanemode integration. When enabled and plugin is installed, Sync Mode is automatically overridden by airplane status (ON → `manual`, OFF → `automatic`). |
 
 ---
 

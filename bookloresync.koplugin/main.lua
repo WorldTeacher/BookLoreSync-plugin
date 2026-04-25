@@ -66,6 +66,7 @@ end
 local T = require("ffi/util").template
 local ffi = require("ffi")
 local ffiutil = require("ffi/util")
+local lfs = require("libs/libkoreader-lfs")
 local strbuf  = require("string.buffer")
 local Trapper = require("ui/trapper")
 
@@ -157,6 +158,8 @@ local PROGRESS_SYNC_STRATEGY = {
     PROMPT = "prompt",
     DISABLE = "disable",
 }
+
+local DEFAULT_SYNC_DELAY_AFTER_CONNECT_SECONDS = 0
 
 --[[--
 
@@ -276,11 +279,137 @@ function BookloreSync:isAirplaneModeActive()
         return false
     end
 
-    local ok_apm, apm = pcall(function()
-        return G_reader_settings:readSetting("airplanemode")
-    end)
+    local candidate_keys = {
+        "airplanemode",
+        "airplane_mode",
+        "airplaneMode",
+    }
 
-    return ok_apm and apm == true
+    for _, key in ipairs(candidate_keys) do
+        local ok_apm, apm = pcall(function()
+            return G_reader_settings:readSetting(key)
+        end)
+
+        if ok_apm and (apm == true or apm == 1 or apm == "1" or apm == "true") then
+            return true
+        end
+    end
+
+    return false
+end
+
+---BookloreSync:isAirplaneModePluginInstalled.
+function BookloreSync:isAirplaneModePluginInstalled()
+    local seen = {}
+    local candidates = {}
+
+    local function normalizePath(path)
+        if type(path) ~= "string" then
+            return nil
+        end
+        local trimmed = path:gsub("/*$", "")
+        if trimmed == "" then
+            return nil
+        end
+        return trimmed
+    end
+
+    local function addCandidate(path)
+        local normalized = normalizePath(path)
+        if not normalized or seen[normalized] then
+            return
+        end
+        seen[normalized] = true
+        table.insert(candidates, normalized)
+    end
+
+    local function addRootCandidates(root)
+        local normalized_root = normalizePath(root)
+        if not normalized_root then
+            return
+        end
+        addCandidate(normalized_root .. "/plugins/airplanemode.koplugin")
+        addCandidate(normalized_root .. "/airplanemode.koplugin")
+    end
+
+    addRootCandidates(DataStorage:getDataDir())
+    addRootCandidates(DataStorage:getSettingsDir())
+
+    local function parentDir(path)
+        local normalized = normalizePath(path)
+        if not normalized then
+            return nil
+        end
+        local parent = normalized:match("^(.*)/[^/]+$")
+        return normalizePath(parent)
+    end
+
+    if self and self.path then
+        addRootCandidates(parentDir(self.path))
+    end
+    if self and self.plugin_dir then
+        addRootCandidates(parentDir(self.plugin_dir))
+    end
+
+    for _, path in ipairs(candidates) do
+        local attrs = lfs.attributes(path)
+        if attrs and attrs.mode == "directory" then
+            return true
+        end
+    end
+
+    return false
+end
+
+---BookloreSync:isNetworkConnected.
+function BookloreSync:isNetworkConnected()
+    if not NetworkMgr then
+        return false
+    end
+
+    local checks = {
+        "isConnected",
+        "isOnline",
+    }
+
+    for _, method in ipairs(checks) do
+        if type(NetworkMgr[method]) == "function" then
+            local ok, connected = pcall(NetworkMgr[method], NetworkMgr)
+            if not ok then
+                ok, connected = pcall(NetworkMgr[method])
+            end
+            if ok and connected then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+---BookloreSync:showAirplaneModePluginMissingWarning.
+function BookloreSync:showAirplaneModePluginMissingWarning()
+    UIManager:show(InfoMessage:new{
+        text = _("Airplanemode plugin is not installed"),
+        timeout = 2,
+    })
+end
+
+---BookloreSync:applyAirplaneModeSyncModeIntegration.
+function BookloreSync:applyAirplaneModeSyncModeIntegration()
+    if not self.airplanemode_sync_mode_enabled then
+        return
+    end
+
+    if not self:isAirplaneModePluginInstalled() then
+        return
+    end
+
+    local desired_mode = self:isAirplaneModeActive() and "manual" or "automatic"
+    if self.sync_mode ~= desired_mode then
+        self:logInfo("BookloreSync: Airplanemode integration switching sync mode to", desired_mode)
+        self:setSyncMode(desired_mode)
+    end
 end
 
 ---BookloreSync:init.
@@ -461,6 +590,13 @@ function BookloreSync:init()
     end
     self.progress_sync_forward_strategy = self.settings:readSetting("progress_sync_forward_strategy") or PROGRESS_SYNC_STRATEGY.PROMPT
     self.progress_sync_backward_strategy = self.settings:readSetting("progress_sync_backward_strategy") or PROGRESS_SYNC_STRATEGY.DISABLE
+    self.sync_delay_after_connect_seconds = tonumber(self.settings:readSetting("sync_delay_after_connect_seconds"))
+    if self.sync_delay_after_connect_seconds == nil then
+        self.sync_delay_after_connect_seconds = DEFAULT_SYNC_DELAY_AFTER_CONNECT_SECONDS
+    end
+    if self.sync_delay_after_connect_seconds < 0 then
+        self.sync_delay_after_connect_seconds = 0
+    end
 
     local legacy_force_push_on_suspend = self.settings:readSetting("force_push_session_on_suspend") or false
     local legacy_connect_network_on_suspend = self.settings:readSetting("connect_network_on_suspend") or false
@@ -480,6 +616,10 @@ function BookloreSync:init()
     self.manual_sync_only = false
     self.force_push_session_on_suspend = false
     self.connect_network_on_suspend = false
+    self.airplanemode_sync_mode_enabled = self.settings:readSetting("airplanemode_sync_mode_enabled")
+    if self.airplanemode_sync_mode_enabled == nil then
+        self.airplanemode_sync_mode_enabled = false
+    end
 
     -- Shelf sync settings
     self.booklore_shelf_name         = self.settings:readSetting("booklore_shelf_name")  or "KOReader"
@@ -822,6 +962,18 @@ function BookloreSync:registerDispatcherActions()
 end
 
 ---BookloreSync:onSyncBookloreShelf.
+function BookloreSync:showWifiUnavailableInfo(wifi_text, airplane_text, timeout)
+    local message = wifi_text
+    if self:isAirplaneModeActive() then
+        message = airplane_text or _("Airplane mode is enabled - network action skipped")
+    end
+    UIManager:show(InfoMessage:new{
+        text = message,
+        timeout = timeout or 2,
+    })
+end
+
+---BookloreSync:onSyncBookloreShelf.
 function BookloreSync:onSyncBookloreShelf()
     if not (self.booklore_username and self.booklore_username ~= "" and
             self.booklore_password and self.booklore_password ~= "") then
@@ -831,8 +983,50 @@ function BookloreSync:onSyncBookloreShelf()
         })
         return true
     end
-    UIManager:scheduleIn(0.1, function()
-        self:syncFromBookloreShelf(false)
+    local was_connected = self:isNetworkConnected()
+
+    self:_requestWifi(_("sync Booklore shelf"), function()
+        self:syncFromBookloreShelf(false, function()
+            if was_connected then
+                return
+            end
+
+            -- Respect KOReader's global post-WiFi policy (leave on / turn off / prompt)
+            -- after shelf sync actually completes.
+            local handled = false
+            if type(NetworkMgr.afterWifiAction) == "function" then
+                local ok_after, after_err = pcall(function()
+                    if type(NetworkMgr.setBeforeActionFlag) == "function" then
+                        NetworkMgr:setBeforeActionFlag()
+                    end
+                    NetworkMgr:afterWifiAction()
+                end)
+                if ok_after then
+                    handled = true
+                    self:logInfo("BookloreSync: Shelf sync completed KOReader after-WiFi action")
+                else
+                    self:logWarn("BookloreSync: Shelf sync post-WiFi action failed:", tostring(after_err))
+                end
+            end
+
+            if not handled then
+                local ok_disconnect, disconnected = pcall(function()
+                    return self:disconnectNetwork()
+                end)
+                if not ok_disconnect then
+                    self:logWarn("BookloreSync: Shelf sync fallback WiFi disable crashed:", tostring(disconnected))
+                elseif disconnected then
+                    self:logInfo("BookloreSync: Shelf sync disabled WiFi via fallback")
+                else
+                    self:logWarn("BookloreSync: Shelf sync could not disable WiFi via fallback")
+                end
+            end
+        end)
+    end, function()
+        self:showWifiUnavailableInfo(
+            _("WiFi not enabled - shelf sync skipped"),
+            _("Airplane mode is enabled - shelf sync skipped")
+        )
     end)
     return true
 end
@@ -862,10 +1056,10 @@ function BookloreSync:onPullBookloreCurrentBookProgress()
     self:_requestWifi(_("pull current book progress"), function()
         self:pullKoreaderProgress(true)
     end, function()
-        UIManager:show(InfoMessage:new{
-            text = _("WiFi not enabled - pull skipped"),
-            timeout = 2,
-        })
+        self:showWifiUnavailableInfo(
+            _("WiFi not enabled - pull skipped"),
+            _("Airplane mode is enabled - pull skipped")
+        )
     end, {
         disable_wifi_when_done = true,
     })
@@ -912,10 +1106,10 @@ function BookloreSync:onPushBookloreCurrentBookProgress()
             })
         end
     end, function()
-        UIManager:show(InfoMessage:new{
-            text = _("WiFi not enabled - push skipped"),
-            timeout = 2,
-        })
+        self:showWifiUnavailableInfo(
+            _("WiFi not enabled - push skipped"),
+            _("Airplane mode is enabled - push skipped")
+        )
     end, {
         disable_wifi_when_done = true,
     })
@@ -940,17 +1134,10 @@ function BookloreSync:onSyncBooklorePending()
         self:_requestWifi(_("sync pending items"), function()
             self:syncPendingSessions()
         end, function()
-            if self:isAirplaneModeActive() then
-                UIManager:show(InfoMessage:new{
-                    text = _("AirPlane Mode is enabled - pending items remain queued"),
-                    timeout = 2,
-                })
-                return
-            end
-            UIManager:show(InfoMessage:new{
-                text = _("WiFi not enabled - pending items remain queued"),
-                timeout = 2,
-            })
+            self:showWifiUnavailableInfo(
+                _("WiFi not enabled - pending items remain queued"),
+                _("Airplane mode is enabled - pending items remain queued")
+            )
         end, {
             disable_wifi_when_done = true,
         })
@@ -3758,6 +3945,8 @@ end
 
 ---BookloreSync:addToMainMenu.
 function BookloreSync:addToMainMenu(menu_items)
+    self:applyAirplaneModeSyncModeIntegration()
+
     local function showSectionHelp(title, body)
         UIManager:show(InfoMessage:new{
             text = T(_("%1\n\n%2"), title, body),
@@ -3901,9 +4090,18 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Sync delay after connect"),
+                help_text = _("Wait this many seconds after network becomes connected before running sync requests. Useful on devices where routing/DNS is not immediately ready after WiFi connect."),
+                keep_menu_open = true,
+                callback = function()
+                    Settings:configureSyncDelayAfterConnect(self)
+                end,
+            },
+            {
                 text = _("Automatic (sync on suspend + WiFi)"),
                 help_text = _("Automatically sync sessions when device suspends. Enables WiFi and attempts connection before syncing."),
                 checked_func = function()
+                    self:applyAirplaneModeSyncModeIntegration()
                     return self.sync_mode == "automatic"
                 end,
                 callback = function()
@@ -3919,6 +4117,7 @@ function BookloreSync:addToMainMenu(menu_items)
                 text = _("Manual only (cache everything)"),
                 help_text = _("Cache all sessions and prevent automatic syncing. Use 'Sync Pending Now' when ready to upload."),
                 checked_func = function()
+                    self:applyAirplaneModeSyncModeIntegration()
                     return self.sync_mode == "manual"
                 end,
                 callback = function()
@@ -4516,10 +4715,10 @@ function BookloreSync:addToMainMenu(menu_items)
                     self:_requestWifi(_("sync pending items"), function()
                         self:syncPendingSessions()
                     end, function()
-                        UIManager:show(InfoMessage:new{
-                            text    = _("WiFi not enabled - pending items remain queued"),
-                            timeout = 2,
-                        })
+                        self:showWifiUnavailableInfo(
+                            _("WiFi not enabled - pending items remain queued"),
+                            _("Airplane mode is enabled - pending items remain queued")
+                        )
                     end, {
                         disable_wifi_when_done = true,
                     })
@@ -4549,33 +4748,33 @@ function BookloreSync:addToMainMenu(menu_items)
                     return stats and stats.unmatched > 0
                 end,
                 callback = function()
-                    if not NetworkMgr:isConnected() then
-                        UIManager:show(InfoMessage:new{
-                            text = _("No network connection"),
-                            timeout = 2,
-                        })
-                        return
-                    end
-                    local resolved = self:resolveUnmatchedBooks(false)
-                    if not resolved or resolved == 0 then
-                        local stats = self.db:getBookCacheStats()
-                        local remaining = stats and stats.unmatched or 0
-                        if remaining > 0 then
-                            UIManager:show(ConfirmBox:new{
-                                text = T(_("No new matches found (%1 still unmatched).\n\nDo you want to manually match the books?"), remaining),
-                                ok_text = _("Yes"),
-                                cancel_text = _("No"),
-                                ok_callback = function()
-                                    self:_startBookCacheMatching()
-                                end,
-                            })
-                        else
-                            UIManager:show(InfoMessage:new{
-                                text = _("All books matched"),
-                                timeout = 2,
-                            })
+                    self:_requestWifi(_("resolve unmatched books"), function()
+                        local resolved = self:resolveUnmatchedBooks(false)
+                        if not resolved or resolved == 0 then
+                            local stats = self.db:getBookCacheStats()
+                            local remaining = stats and stats.unmatched or 0
+                            if remaining > 0 then
+                                UIManager:show(ConfirmBox:new{
+                                    text = T(_("No new matches found (%1 still unmatched).\n\nDo you want to manually match the books?"), remaining),
+                                    ok_text = _("Yes"),
+                                    cancel_text = _("No"),
+                                    ok_callback = function()
+                                        self:_startBookCacheMatching()
+                                    end,
+                                })
+                            else
+                                UIManager:show(InfoMessage:new{
+                                    text = _("All books matched"),
+                                    timeout = 2,
+                                })
+                            end
                         end
-                    end
+                    end, function()
+                        self:showWifiUnavailableInfo(
+                            _("WiFi not enabled - matching skipped"),
+                            _("Airplane mode is enabled - matching skipped")
+                        )
+                    end)
                 end,
             },
             {
@@ -4704,7 +4903,14 @@ function BookloreSync:addToMainMenu(menu_items)
                 return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
             end,
             callback = function()
-                self:matchHistoricalData()
+                self:_requestWifi(_("match historical sessions"), function()
+                    self:matchHistoricalData()
+                end, function()
+                    self:showWifiUnavailableInfo(
+                        _("WiFi not enabled - historical matching skipped"),
+                        _("Airplane mode is enabled - historical matching skipped")
+                    )
+                end)
             end,
         },
         {
@@ -4721,7 +4927,16 @@ function BookloreSync:addToMainMenu(menu_items)
                 return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
             end,
             callback = function()
-                self:resyncHistoricalData()
+                self:_requestWifi(_("re-sync all historical sessions"), function()
+                    self:resyncHistoricalData()
+                end, function()
+                    self:showWifiUnavailableInfo(
+                        _("WiFi not enabled - historical re-sync skipped"),
+                        _("Airplane mode is enabled - historical re-sync skipped")
+                    )
+                end, {
+                    disable_wifi_when_done = true,
+                })
             end,
         },
         {
@@ -4731,14 +4946,30 @@ function BookloreSync:addToMainMenu(menu_items)
                 return self.server_url ~= "" and self.booklore_username ~= "" and self.booklore_password ~= "" and self.is_enabled
             end,
             callback = function()
-                self:syncRematchedSessions()
+                self:_requestWifi(_("sync re-matched sessions"), function()
+                    self:syncRematchedSessions()
+                end, function()
+                    self:showWifiUnavailableInfo(
+                        _("WiFi not enabled - re-matched sync skipped"),
+                        _("Airplane mode is enabled - re-matched sync skipped")
+                    )
+                end, {
+                    disable_wifi_when_done = true,
+                })
             end,
         },
         {
             text = _("Manual Matching"),
             help_text = _("Manually search for and match a book to a Booklore entry."),
             callback = function()
-                self:manualMatching()
+                self:_requestWifi(_("manual matching"), function()
+                    self:manualMatching()
+                end, function()
+                    self:showWifiUnavailableInfo(
+                        _("WiFi not enabled - manual matching skipped"),
+                        _("Airplane mode is enabled - manual matching skipped")
+                    )
+                end)
             end,
         },
     }
@@ -4766,6 +4997,52 @@ function BookloreSync:addToMainMenu(menu_items)
         },
     }
 
+    local airplanemode_menu = {
+        text = _("Airplanemode plugin"),
+        help_text = _("Integrate Booklore sync mode with KOReader's Airplanemode plugin."),
+        sub_item_table = {
+            {
+                text = _("Switch sync mode based on airplane status"),
+                help_text = _("When entering file manager: if airplane mode is ON, set sync mode to Manual; if OFF, set sync mode to Automatic."),
+                checked_func = function()
+                    return self.airplanemode_sync_mode_enabled
+                end,
+                enabled_func = function()
+                    return self:isAirplaneModePluginInstalled()
+                end,
+                callback = function()
+                    if not self:isAirplaneModePluginInstalled() then
+                        self:showAirplaneModePluginMissingWarning()
+                        return
+                    end
+
+                    self.airplanemode_sync_mode_enabled = not self.airplanemode_sync_mode_enabled
+                    self.settings:saveSetting("airplanemode_sync_mode_enabled", self.airplanemode_sync_mode_enabled)
+                    self.settings:flush()
+
+                    if self.airplanemode_sync_mode_enabled then
+                        UIManager:show(InfoMessage:new{
+                            text = _("Airplanemode integration enabled. This overrides Sync Mode based on airplane status."),
+                            timeout = 3,
+                        })
+                        self:applyAirplaneModeSyncModeIntegration()
+                    end
+                end,
+                keep_menu_open = true,
+            },
+            {
+                text = _("Airplanemode plugin not installed"),
+                enabled_func = function()
+                    return not self:isAirplaneModePluginInstalled()
+                end,
+                callback = function()
+                    self:showAirplaneModePluginMissingWarning()
+                end,
+                keep_menu_open = true,
+            },
+        },
+    }
+
     local import_matching_menu = {
         text = _("Import & Matching"),
         sub_item_table = import_matching_items,
@@ -4781,11 +5058,12 @@ function BookloreSync:addToMainMenu(menu_items)
         text = _("Integrations"),
         sub_item_table = {
             hardcover_menu,
+            airplanemode_menu,
         },
         hold_callback = function()
             showSectionHelp(
                 _("Integrations"),
-                _("Configure external integrations. Currently includes Hardcover integration.")
+                _("Configure external integrations, including Hardcover and Airplanemode plugin integration.")
             )
         end,
     }
@@ -6466,6 +6744,7 @@ Handler for when a document is opened and ready
 ---BookloreSync:onReaderReady.
 function BookloreSync:onReaderReady()
     self:logInfo("BookloreSync: Reader ready")
+    self:applyAirplaneModeSyncModeIntegration()
 
     if self.ui and self.ui.document and self.ui.document.file then
         local open_path = self.ui.document.file
@@ -6957,6 +7236,7 @@ function BookloreSync:onCloseDocument()
     end
 
     self:releaseCloseSyncContext(close_ctx, "onCloseDocument_complete")
+    self:applyAirplaneModeSyncModeIntegration()
 
     return closeReturn(false)
 end
@@ -6972,20 +7252,11 @@ Used when "Connect network on suspend" is enabled.
 ---BookloreSync:connectNetwork.
 function BookloreSync:connectNetwork()
     if self:isAirplaneModeActive() then
-        self:logWarn("BookloreSync: Refusing network connect while AirPlane Mode is active")
+        self:logWarn("BookloreSync: Refusing network connect while airplane mode is active")
         return false
     end
 
-    ---isNetworkConnected.
-    local function isNetworkConnected()
-        if not NetworkMgr or type(NetworkMgr.isConnected) ~= "function" then
-            return false
-        end
-        local ok_connected, connected = pcall(NetworkMgr.isConnected, NetworkMgr)
-        return ok_connected and connected and true or false
-    end
-
-    if isNetworkConnected() then
+    if self:isNetworkConnected() then
         self:logInfo("BookloreSync: Network already connected")
         return true
     end
@@ -7041,7 +7312,7 @@ function BookloreSync:connectNetwork()
     local check_interval = 0.5
 
     while run_until_connect or elapsed < timeout do
-        if isNetworkConnected() then
+        if self:isNetworkConnected() then
             self:logInfo("BookloreSync: Network connected successfully after", elapsed, "seconds")
             return true
         end
@@ -7057,7 +7328,7 @@ function BookloreSync:connectNetwork()
             -- In that case, avoid crashing and fall back to a single best-effort
             -- connectivity check after requesting WiFi.
             self:logWarn("BookloreSync: Sleep utility unavailable while waiting for network")
-            if isNetworkConnected() then
+            if self:isNetworkConnected() then
                 self:logInfo("BookloreSync: Network connected successfully (fallback check)")
                 return true
             end
@@ -7134,6 +7405,8 @@ called immediately; otherwise the plugin attempts to enable/connect WiFi via
 --]]--
 ---BookloreSync:_requestWifi.
 function BookloreSync:_requestWifi(context, on_confirm, on_deny, opts)
+    local deny_callback_provided = type(on_deny) == "function"
+
     if type(on_confirm) ~= "function" then
         on_confirm = function() end
     end
@@ -7154,19 +7427,18 @@ function BookloreSync:_requestWifi(context, on_confirm, on_deny, opts)
     end
 
     if self:isAirplaneModeActive() then
-        self:logInfo("BookloreSync: AirPlane Mode active; skipping WiFi request for:", context or "<unknown>")
-        UIManager:show(InfoMessage:new{
-            text = _("AirPlane Mode is enabled - network sync skipped"),
-            timeout = 2,
-        })
+        self:logInfo("BookloreSync: Airplane mode active; skipping WiFi request for:", context or "<unknown>")
+        if not deny_callback_provided then
+            UIManager:show(InfoMessage:new{
+                text = _("Airplane mode is enabled - network sync skipped"),
+                timeout = 2,
+            })
+        end
         safeInvoke(on_deny, "WiFi deny callback")
         return
     end
 
-    local ok_connected, was_connected = pcall(function()
-        return NetworkMgr and type(NetworkMgr.isConnected) == "function" and NetworkMgr:isConnected() or false
-    end)
-    was_connected = ok_connected and was_connected or false
+    local was_connected = self:isNetworkConnected()
 
     local function maybeDisableWifiAfterAction()
         if not (opts and opts.disable_wifi_when_done) then
@@ -7208,7 +7480,9 @@ function BookloreSync:_requestWifi(context, on_confirm, on_deny, opts)
     end
 
     -- WiFi already up - proceed immediately without any prompt.
-    if NetworkMgr:isConnected() then
+    local connected_before_request = self:isNetworkConnected()
+
+    if connected_before_request then
         safeInvoke(on_confirm, "WiFi confirm callback")
         maybeDisableWifiAfterAction()
         return
@@ -7228,6 +7502,20 @@ function BookloreSync:_requestWifi(context, on_confirm, on_deny, opts)
         return
     end
     if ok then
+        local delay_seconds = tonumber(self.sync_delay_after_connect_seconds) or DEFAULT_SYNC_DELAY_AFTER_CONNECT_SECONDS
+        if delay_seconds > 0 then
+            self:logInfo("BookloreSync: Delaying sync after connect for", tostring(delay_seconds), "seconds")
+            local ok_sleep, local_ffiutil = pcall(require, "ffi/util")
+            if ok_sleep and local_ffiutil and type(local_ffiutil.sleep) == "function" then
+                pcall(local_ffiutil.sleep, delay_seconds)
+            else
+                UIManager:scheduleIn(delay_seconds, function()
+                    safeInvoke(on_confirm, "WiFi confirm callback")
+                    maybeDisableWifiAfterAction()
+                end)
+                return
+            end
+        end
         safeInvoke(on_confirm, "WiFi confirm callback")
         maybeDisableWifiAfterAction()
     else
@@ -7398,6 +7686,8 @@ function BookloreSync:onSuspend()
     if not self.is_enabled then
         return false
     end
+
+    self:applyAirplaneModeSyncModeIntegration()
     
     self:logInfo("BookloreSync: Device suspending")
 
@@ -7487,12 +7777,11 @@ function BookloreSync:onSuspend()
         end
 
         if self.connect_network_on_suspend then
-            local connected = NetworkMgr:isConnected() or self:connectNetwork()
-            if connected then
+            if self:isNetworkConnected() then
                 self:logInfo("BookloreSync: Network ready - force syncing pending sessions/progress on suspend")
                 self:syncPendingSessions(true)
             else
-                self:logInfo("BookloreSync: Could not connect WiFi on suspend - data remains queued")
+                self:logInfo("BookloreSync: Network not connected on suspend - skip connect attempt, data remains queued")
             end
         else
             self:logInfo("BookloreSync: Force syncing pending sessions/progress on suspend")
@@ -7513,6 +7802,8 @@ function BookloreSync:onResume()
     if not self.is_enabled then
         return false
     end
+
+    self:applyAirplaneModeSyncModeIntegration()
 
     self:logInfo("BookloreSync: Device resuming")
 
@@ -7546,7 +7837,7 @@ function BookloreSync:onResume()
             local function runResumeSyncNow()
                 -- Safer ordering on resume: pull first, then push pending.
                 -- Avoids uploading stale local progress before reading remote.
-                if self.progress_sync_enabled and self.progress_pull_on_resume and NetworkMgr:isConnected() then
+                if self.progress_sync_enabled and self.progress_pull_on_resume and self:isNetworkConnected() then
                     self:pullKoreaderProgress(false)
                 end
 
@@ -7557,7 +7848,7 @@ function BookloreSync:onResume()
                 -- schedule it directly; otherwise onNetworkConnected will pick it up.
                 if self.auto_sync_shelf_on_resume then
                     self.needs_wake_sync = true
-                    if NetworkMgr:isConnected() then
+                    if self:isNetworkConnected() then
                         self:logInfo("BookloreSync: WiFi already connected on resume, scheduling delayed wake sync")
                         self:_scheduleWakeSync()
                     end
@@ -7567,11 +7858,11 @@ function BookloreSync:onResume()
                 self:resolveUnmatchedBooks(true)
             end
 
-            self:_requestWifi(_("sync pending sessions"), function()
+            if self:isNetworkConnected() then
                 runResumeSyncNow()
-            end, function()
-                self:logInfo("BookloreSync: WiFi request declined on resume - sync skipped")
-            end)
+            else
+                self:logInfo("BookloreSync: Resume sync skipped (network disconnected, no connect attempt)")
+            end
         end
     end
 
@@ -7610,7 +7901,7 @@ function BookloreSync:_scheduleWakeSync()
             self.needs_wake_sync = false
             return
         end
-        if not NetworkMgr:isConnected() then
+        if not self:isNetworkConnected() then
             self:logInfo("BookloreSync: Wake sync postponed (network disconnected)")
             return
         end
@@ -9547,14 +9838,15 @@ function BookloreSync:rematchAllBooksInCache()
                 timeout = 2,
             })
             UIManager:scheduleIn(0.5, function()
-                if not NetworkMgr:isConnected() then
-                    UIManager:show(InfoMessage:new{
-                        text = _("No network connection. Books will be re-matched on next sync."),
-                        timeout = 3,
-                    })
-                    return
-                end
-                self:resolveUnmatchedBooks(false)
+                self:_requestWifi(_("re-match all books in cache"), function()
+                    self:resolveUnmatchedBooks(false)
+                end, function()
+                    self:showWifiUnavailableInfo(
+                        _("WiFi not enabled. Books will be re-matched on next sync."),
+                        _("Airplane mode is enabled. Books will be re-matched on next sync."),
+                        3
+                    )
+                end)
             end)
         end,
     })
@@ -9577,7 +9869,17 @@ function BookloreSync:resyncStoredMetadata()
         ok_text = _("Re-sync Metadata"),
         cancel_text = _("Cancel"),
         ok_callback = function()
-            self:_runStoredMetadataResync()
+            self:_requestWifi(_("re-sync stored metadata"), function()
+                self:_runStoredMetadataResync()
+            end, function()
+                self:showWifiUnavailableInfo(
+                    _("WiFi not enabled. Metadata refresh skipped."),
+                    _("Airplane mode is enabled. Metadata refresh skipped."),
+                    3
+                )
+            end, {
+                disable_wifi_when_done = true,
+            })
         end,
     })
 end
@@ -9585,14 +9887,6 @@ end
 ---BookloreSync:_runStoredMetadataResync.
 function BookloreSync:_runStoredMetadataResync()
     if not self.db then
-        return
-    end
-
-    if not NetworkMgr:isConnected() then
-        UIManager:show(InfoMessage:new{
-            text = _("No network connection. Metadata refresh skipped."),
-            timeout = 3,
-        })
         return
     end
 
@@ -10040,7 +10334,7 @@ function BookloreSync:syncPendingSessions(silent)
     local sessions = self.db:getPendingSessions(100)
     local resolved_count = 0
 
-    local network_ok = NetworkMgr:isConnected()
+    local network_ok = self:isNetworkConnected()
 
     for _, session in ipairs(sessions) do
         if session.bookHash and not session.bookId then
@@ -10333,6 +10627,19 @@ runs can resolve and upload the queued items automatically.
 ---BookloreSync:_startBookCacheMatching.
 function BookloreSync:_startBookCacheMatching()
     if not self.db then return end
+
+    if not self:isNetworkConnected() then
+        self:_requestWifi(_("manual matching for unmatched books"), function()
+            self:_startBookCacheMatching()
+        end, function()
+            self:showWifiUnavailableInfo(
+                _("WiFi not enabled - manual matching skipped"),
+                _("Airplane mode is enabled - manual matching skipped")
+            )
+        end)
+        return
+    end
+
     local unmatched = self.db:getAllUnmatchedBooks()
     if not unmatched or #unmatched == 0 then
         UIManager:show(InfoMessage:new{
@@ -10536,7 +10843,7 @@ function BookloreSync:resolveUnmatchedBooks(silent)
         return
     end
     
-    if not NetworkMgr:isConnected() then
+    if not self:isNetworkConnected() then
         self:logInfo("BookloreSync: No network connection, skipping book resolution")
         return
     end
@@ -11964,6 +12271,18 @@ function BookloreSync:manualMatching()
     end
     if self.booklore_username == "" or self.booklore_password == "" then
         UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
+        return
+    end
+
+    if not self:isNetworkConnected() then
+        self:_requestWifi(_("manual matching"), function()
+            self:manualMatching()
+        end, function()
+            self:showWifiUnavailableInfo(
+                _("WiFi not enabled - manual matching skipped"),
+                _("Airplane mode is enabled - manual matching skipped")
+            )
+        end)
         return
     end
 

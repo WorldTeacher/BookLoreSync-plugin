@@ -508,6 +508,41 @@ function Settings:configureNetworkConnectTimeout(parent)
     UIManager:show(widget)
 end
 
+---Settings:configureSyncDelayAfterConnect.
+function Settings:configureSyncDelayAfterConnect(parent)
+    local SpinWidget = require("ui/widget/spinwidget")
+    local widget = SpinWidget:new{
+        text = _("Wait this many seconds after WiFi is connected before running sync."),
+        value = parent.sync_delay_after_connect_seconds or 0,
+        value_min = 0,
+        value_max = 300,
+        value_step = 1,
+        value_hold_step = 5,
+        ok_text = _("Set"),
+        title_text = _("Sync delay after connect (seconds)"),
+        default_value = 0,
+        callback = function(spin)
+            local n = math.floor(tonumber(spin.value) or 0)
+            if n < 0 then n = 0 end
+            local success = parent.settings:saveSetting("sync_delay_after_connect_seconds", n)
+            if success ~= false then
+                parent.sync_delay_after_connect_seconds = n
+                parent.settings:flush()
+                UIManager:show(InfoMessage:new{
+                    text = T(_("Sync delay after connect set to %1s"), tostring(n)),
+                    timeout = 2,
+                })
+            else
+                UIManager:show(InfoMessage:new{
+                    text = _("Failed to save setting. Check logs for details."),
+                    timeout = 3,
+                })
+            end
+        end,
+    }
+    UIManager:show(widget)
+end
+
 ---Settings:showVersion.
 function Settings:showVersion(parent)
     local version_info = require("plugin_version")
@@ -874,6 +909,7 @@ function Settings:exportSettings(parent)
         progress_decimal_places       = parent.progress_decimal_places,
         network_connect_timeout_seconds = parent.network_connect_timeout_seconds,
         network_connect_run_until_connect = parent.network_connect_run_until_connect,
+        sync_delay_after_connect_seconds = parent.sync_delay_after_connect_seconds,
         force_push_session_on_suspend = parent.force_push_session_on_suspend,
         connect_network_on_suspend    = parent.connect_network_on_suspend,
         sync_mode                     = parent.sync_mode,

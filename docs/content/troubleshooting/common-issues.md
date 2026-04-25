@@ -87,6 +87,14 @@ If this also fails, check the KOReader log for network errors:
 grep BookloreSync /tmp/koreader.log | grep -i "error\|fail\|timeout"
 ```
 
+If you frequently see WiFi timeout errors on this step, tune networking timing:
+
+**Tools → BookLore Sync → Sync Behavior → Networking**
+
+- Increase **WiFi connect timeout (seconds)**
+- Optionally enable **Run until connect**
+- Add a small **Sync delay after connect** (for slow DNS/routing bring-up)
+
 **Check 4 - Validate session thresholds:**
 
 Sessions are discarded silently if they fail validation. If you are reading for less than 30 seconds (default minimum duration) or fewer than 5 pages (default minimum pages), sessions will not be saved.
@@ -101,7 +109,7 @@ If **Manual Sync Only** is enabled, sessions will accumulate in the queue until 
 
 **Tools → BookLore Sync → Sync Behavior** → confirm **Manual only (cache everything)** is off.
 
-**Check 6 - AirPlane Mode plugin:**
+**Check 6 - Airplane mode plugin:**
 
 If KOReader AirPlane Mode is enabled, BookLore Sync will not enable WiFi.
 

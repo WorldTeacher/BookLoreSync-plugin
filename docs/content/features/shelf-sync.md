@@ -213,4 +213,4 @@ When **Delete removed shelf books** is enabled and a book is deleted during sync
 
 ## Credits
 
-Shelf sync was originally contributed by [cporcellijr/BookLoreSync-plugin](https://github.com/cporcellijr/BookLoreSync-plugin) and has since been significantly reworked with a three-phase subprocess architecture, ID-tagged filenames with original-filename and title-derived modes, improved SDR sidecar detection and cleanup, a two-way deletion flow, and a cancellable progress dialog.
+Shelf sync was originally contributed by the BookLoreSync community implementation and has since been significantly reworked with a three-phase subprocess architecture, ID-tagged filenames with original-filename and title-derived modes, improved SDR sidecar detection and cleanup, a two-way deletion flow, and a cancellable progress dialog.

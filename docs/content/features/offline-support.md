@@ -110,7 +110,7 @@ BookLore Sync no longer uses a WiFi confirmation prompt setting.
 
 You can tune startup timing for flaky networks in:
 
-**Tools → BookLore Sync → Sync Behavior → Sync delay after connect**
+**Tools → BookLore Sync → Sync Behavior → Networking → Sync delay after connect**
 
 This adds a configurable wait (seconds) after WiFi connect succeeds and before sync requests are sent.
 
@@ -145,7 +145,7 @@ For interactive matching workflows, WiFi is enabled/connect-on-demand but intent
 
 The post-sync action only runs when WiFi was initially off. If WiFi was already connected before the action, the plugin does not change WiFi state.
 
-### AirPlane Mode integration
+### Airplane mode integration
 
 If the community **AirPlane Mode** plugin is active (`airplanemode = true` in KOReader settings), BookLore Sync does not attempt to enable WiFi.
 

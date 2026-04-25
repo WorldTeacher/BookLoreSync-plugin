@@ -10,7 +10,7 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 ---
 
-## Unreleased
+## 4.0.1 - 4.2.0
 
 ### Features
 
@@ -21,12 +21,15 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 - **Shelf sync naming:** Updated menu labels from "Shelf Downloads" to **Shelf Sync** for clearer navigation.
 - **Sync/runtime performance:** Reduced overhead in sync paths (including periodic progress updates and exit handling).
+- **Sync Behavior menu:** Grouped WiFi connection options under **Sync Behavior → Networking** for clearer configuration flow.
+- **Network tuning controls:** Added configurable WiFi connect timeout, optional "run until connect" mode, and post-connect sync delay for slow networks.
 
 ### Bug fixes
 
 - **Progress pull safety:** Remote KOReader progress entries at `0%` are ignored during pull, so they are not offered as a sync target and do not overwrite local state.
 - **Progress prompt precision:** Progress conflict prompts now show percentage values with one decimal place.
 - **Stored Data session counts:** The **Show Stored Data** view now reports reading session totals correctly for synced/pending entries.
+- **Network wait compatibility:** Added fallback sleep handling for KOReader builds where `ffi/util.sleep` is unavailable during WiFi connect wait.
 
 ---
 

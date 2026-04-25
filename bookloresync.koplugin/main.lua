@@ -7307,7 +7307,27 @@ function BookloreSync:connectNetwork()
     end
 
     local ok_ffi, ffiutil = pcall(require, "ffi/util")
-    local sleep_available = ok_ffi and ffiutil and type(ffiutil.sleep) == "function"
+    local sleep_fn = nil
+    if ok_ffi and ffiutil and type(ffiutil.sleep) == "function" then
+        sleep_fn = ffiutil.sleep
+    else
+        -- Fallback for KOReader builds where ffi/util.sleep is unavailable.
+        local ok_ffi_core, ffi = pcall(require, "ffi")
+        if ok_ffi_core and ffi then
+            pcall(function()
+                ffi.cdef([[ unsigned int usleep(unsigned int usec); ]])
+            end)
+            if ffi.C and ffi.C.usleep then
+                sleep_fn = function(seconds)
+                    local usec = math.floor((tonumber(seconds) or 0) * 1000000)
+                    if usec < 0 then usec = 0 end
+                    ffi.C.usleep(usec)
+                end
+                self:logInfo("BookloreSync: Using ffi.usleep fallback for network wait")
+            end
+        end
+    end
+    local sleep_available = type(sleep_fn) == "function"
 
     local timeout = tonumber(self.network_connect_timeout_seconds) or DEFAULT_NETWORK_CONNECT_TIMEOUT_SECONDS
     if timeout < 1 then
@@ -7324,7 +7344,7 @@ function BookloreSync:connectNetwork()
         end
 
         if sleep_available then
-            local ok_sleep, sleep_err = pcall(ffiutil.sleep, check_interval)
+            local ok_sleep, sleep_err = pcall(sleep_fn, check_interval)
             if not ok_sleep then
                 self:logWarn("BookloreSync: Sleep call failed while waiting for network:", tostring(sleep_err))
                 break

@@ -10,7 +10,7 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 ---
 
-## Unreleased
+## 4.0.1 - 4.2.0
 
 ### Features
 
@@ -21,12 +21,22 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 - **Shelf sync naming:** Updated menu labels from "Shelf Downloads" to **Shelf Sync** for clearer navigation.
 - **Sync/runtime performance:** Reduced overhead in sync paths (including periodic progress updates and exit handling).
+- **Connection diagnostics:** The **Test Connection** result now includes the active connection type (**Local**, **Remote**, or fallback).
+
+### Documentation
+
+- Updated **Connection Setup** and **Settings Reference** for local/remote URL configuration, automatic network switching keys, and test-connection output details.
+
+### Testing
+
+- Added helper-level unit coverage for URL resolution and effective URL refresh behavior in network auto-switch scenarios.
 
 ### Bug fixes
 
 - **Progress pull safety:** Remote KOReader progress entries at `0%` are ignored during pull, so they are not offered as a sync target and do not overwrite local state.
 - **Progress prompt precision:** Progress conflict prompts now show percentage values with one decimal place.
 - **Stored Data session counts:** The **Show Stored Data** view now reports reading session totals correctly for synced/pending entries.
+- **Network wait compatibility:** Added fallback sleep handling for KOReader builds where `ffi/util.sleep` is unavailable during WiFi connect wait.
 
 ---
 

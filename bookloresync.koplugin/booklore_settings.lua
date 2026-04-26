@@ -119,13 +119,33 @@ function Settings:configureDisplayName(parent)
     input_dialog:onShowKeyboard()
 end
 
----Settings:configureServerUrl.
-function Settings:configureServerUrl(parent)
+---Settings:_applyEffectiveServerUrl.
+-- Recomputes the runtime effective URL on `parent` after any of the URL /
+-- SSID / toggle settings change, and reinitialises the API client.
+local function _applyEffectiveServerUrl(parent)
+    if type(parent.resolveServerUrl) == "function" then
+        parent.server_url = parent:resolveServerUrl()
+    end
+    if parent.api and parent.server_url and parent.server_url ~= "" then
+        parent.api:init(parent.server_url, parent.username, parent.password, parent.db)
+    end
+end
+
+-- Local helpers for the chained Server URL flow.
+-- The flow is a single multi-step wizard:
+--   step 1: Local URL          (always)
+--   step 2: Home Network SSID  (only when auto-switch is enabled)
+--   step 3: Remote URL         (always)
+-- Each step has Back / Cancel / Next (or Save on the final step). Values
+-- are committed at the very end so cancelling at any step is non-destructive.
+
+local function _showRemoteUrlStep(self, parent, draft)
     local input_dialog
     input_dialog = InputDialog:new{
-        title = _("Booklore Server URL"),
-        input = parent.server_url,
-        input_hint = "http://192.168.1.100:6060",
+        title = _("Booklore Remote URL"),
+        input = draft.remote_url,
+        input_hint = "https://booklore.example.com",
+        description = _("Address used when not on the home network. Leave empty if you don't need remote access."),
         buttons = {
             {
                 {
@@ -135,21 +155,45 @@ function Settings:configureServerUrl(parent)
                     end,
                 },
                 {
+                    text = _("Back"),
+                    callback = function()
+                        draft.remote_url = input_dialog:getInputText() or ""
+                        UIManager:close(input_dialog)
+                        if parent.auto_network_switch_enabled then
+                            self:_showHomeSsidStep(parent, draft)
+                        else
+                            self:_showLocalUrlStep(parent, draft)
+                        end
+                    end,
+                },
+                {
                     text = _("Save"),
                     is_enter_default = true,
                     callback = function()
-                        parent.server_url = input_dialog:getInputText():gsub("/$", "")
-                        parent.settings:saveSetting("server_url", parent.server_url)
+                        local local_url  = (draft.local_url or ""):gsub("/$", "")
+                        local remote_url = (input_dialog:getInputText() or ""):gsub("/$", "")
+                        local ssid       = draft.home_ssid or ""
+                        ssid = ssid:gsub("^%s+", ""):gsub("%s+$", "")
+
+                        parent.local_server_url  = local_url
+                        parent.remote_server_url = remote_url
+                        parent.home_network_ssid = ssid
+
+                        parent.settings:saveSetting("local_server_url",  local_url)
+                        parent.settings:saveSetting("remote_server_url", remote_url)
+                        parent.settings:saveSetting("home_network_ssid", ssid)
+                        -- Keep the legacy single-URL key in sync with the
+                        -- local URL so older readers of `server_url` still
+                        -- get a sane value.
+                        parent.settings:saveSetting("server_url", local_url)
                         parent.settings:flush()
 
-                        if parent.api then
-                            parent.api:init(parent.server_url, parent.username, parent.password, parent.db)
-                        end
+                        _applyEffectiveServerUrl(parent)
 
                         UIManager:close(input_dialog)
                         UIManager:show(InfoMessage:new{
-                            text = _("Server URL saved"),
-                            timeout = 1,
+                            text = _("Server URLs saved"),
+                            timeout = 2,
                         })
                     end,
                 },
@@ -158,6 +202,112 @@ function Settings:configureServerUrl(parent)
     }
     UIManager:show(input_dialog)
     input_dialog:onShowKeyboard()
+end
+
+function Settings:_showHomeSsidStep(parent, draft)
+    local self_ref = self
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title = _("Home Network Name (SSID)"),
+        input = draft.home_ssid,
+        input_hint = _("e.g. MyHomeWiFi"),
+        description = _("WiFi name where the local URL is reachable. Tap 'Use current network' to auto-fill from the currently connected WiFi."),
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    callback = function()
+                        UIManager:close(input_dialog)
+                    end,
+                },
+                {
+                    text = _("Use current network"),
+                    callback = function()
+                        local ssid
+                        if parent and type(parent.getCurrentNetworkSSID) == "function" then
+                            ssid = parent:getCurrentNetworkSSID()
+                        end
+                        if not ssid or ssid == "" then
+                            UIManager:show(InfoMessage:new{
+                                text = _("Could not detect current network. Make sure WiFi is connected."),
+                                timeout = 3,
+                            })
+                            return
+                        end
+                        input_dialog:setInputText(ssid)
+                    end,
+                },
+                {
+                    text = _("Back"),
+                    callback = function()
+                        draft.home_ssid = input_dialog:getInputText() or ""
+                        UIManager:close(input_dialog)
+                        self_ref:_showLocalUrlStep(parent, draft)
+                    end,
+                },
+                {
+                    text = _("Next"),
+                    is_enter_default = true,
+                    callback = function()
+                        draft.home_ssid = input_dialog:getInputText() or ""
+                        UIManager:close(input_dialog)
+                        _showRemoteUrlStep(self_ref, parent, draft)
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
+end
+
+function Settings:_showLocalUrlStep(parent, draft)
+    local self_ref = self
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title = _("Booklore Local URL"),
+        input = draft.local_url,
+        input_hint = "http://192.168.1.100:6060",
+        description = _("Address used when on the home network."),
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    callback = function()
+                        UIManager:close(input_dialog)
+                    end,
+                },
+                {
+                    text = _("Next"),
+                    is_enter_default = true,
+                    callback = function()
+                        draft.local_url = input_dialog:getInputText() or ""
+                        UIManager:close(input_dialog)
+                        if parent.auto_network_switch_enabled then
+                            self_ref:_showHomeSsidStep(parent, draft)
+                        else
+                            _showRemoteUrlStep(self_ref, parent, draft)
+                        end
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
+end
+
+---Settings:configureServerUrl.
+-- Single chained wizard for both Server URLs (and the home WiFi SSID when
+-- automatic network switching is enabled). Drafted values are only
+-- persisted on the final Save, so cancelling at any step is safe.
+function Settings:configureServerUrl(parent)
+    local draft = {
+        local_url  = parent.local_server_url  or parent.server_url or "",
+        remote_url = parent.remote_server_url or "",
+        home_ssid  = parent.home_network_ssid or "",
+    }
+    self:_showLocalUrlStep(parent, draft)
 end
 
 -- Chained dialog: Username → Next → Password → Save
@@ -473,6 +623,76 @@ function Settings:configureProgressDecimalPlaces(parent)
     input_dialog:onShowKeyboard()
 end
 
+---Settings:configureNetworkConnectTimeout.
+function Settings:configureNetworkConnectTimeout(parent)
+    local SpinWidget = require("ui/widget/spinwidget")
+    local widget = SpinWidget:new{
+        text = _("Wait this many seconds for WiFi connection after enabling network."),
+        value = parent.network_connect_timeout_seconds or 15,
+        value_min = 1,
+        value_max = 120,
+        value_step = 1,
+        value_hold_step = 5,
+        ok_text = _("Set"),
+        title_text = _("WiFi connect timeout (seconds)"),
+        default_value = 15,
+        callback = function(spin)
+            local n = math.floor(tonumber(spin.value) or 15)
+            if n < 1 then n = 1 end
+            local success = parent.settings:saveSetting("network_connect_timeout_seconds", n)
+            if success ~= false then
+                parent.network_connect_timeout_seconds = n
+                parent.settings:flush()
+                UIManager:show(InfoMessage:new{
+                    text = T(_("WiFi connect timeout set to %1s"), tostring(n)),
+                    timeout = 2,
+                })
+            else
+                UIManager:show(InfoMessage:new{
+                    text = _("Failed to save setting. Check logs for details."),
+                    timeout = 3,
+                })
+            end
+        end,
+    }
+    UIManager:show(widget)
+end
+
+---Settings:configureSyncDelayAfterConnect.
+function Settings:configureSyncDelayAfterConnect(parent)
+    local SpinWidget = require("ui/widget/spinwidget")
+    local widget = SpinWidget:new{
+        text = _("Wait this many seconds after WiFi is connected before running sync."),
+        value = parent.sync_delay_after_connect_seconds or 0,
+        value_min = 0,
+        value_max = 300,
+        value_step = 1,
+        value_hold_step = 5,
+        ok_text = _("Set"),
+        title_text = _("Sync delay after connect (seconds)"),
+        default_value = 0,
+        callback = function(spin)
+            local n = math.floor(tonumber(spin.value) or 0)
+            if n < 0 then n = 0 end
+            local success = parent.settings:saveSetting("sync_delay_after_connect_seconds", n)
+            if success ~= false then
+                parent.sync_delay_after_connect_seconds = n
+                parent.settings:flush()
+                UIManager:show(InfoMessage:new{
+                    text = T(_("Sync delay after connect set to %1s"), tostring(n)),
+                    timeout = 2,
+                })
+            else
+                UIManager:show(InfoMessage:new{
+                    text = _("Failed to save setting. Check logs for details."),
+                    timeout = 3,
+                })
+            end
+        end,
+    }
+    UIManager:show(widget)
+end
+
 ---Settings:showVersion.
 function Settings:showVersion(parent)
     local version_info = require("plugin_version")
@@ -540,8 +760,8 @@ function Settings:buildAuthMenu(parent)
         text = _("Connection Setup"),
         sub_item_table = {
             {
-                text = _("Server URL"),
-                help_text = _("The URL of your Booklore server (e.g., http://192.168.1.100:6060). This is where reading sessions will be synced."),
+                text = _("Server URLs"),
+                help_text = _("Set the Local URL (e.g., http://192.168.1.100:6060) and the Remote URL of your Booklore server. When automatic network switching is enabled the home WiFi name is captured here too."),
                 keep_menu_open = true,
                 callback = function()
                     self:configureServerUrl(parent)
@@ -572,6 +792,26 @@ function Settings:buildAuthMenu(parent)
                 callback = function()
                     parent:testConnection()
                 end,
+            },
+            {
+                text = _("Automatic network switching"),
+                help_text = _("When enabled the plugin uses the Local URL while connected to the configured home WiFi and the Remote URL otherwise. When disabled the Local URL is preferred (Remote is used as a fallback if Local is empty)."),
+                checked_func = function()
+                    return parent.auto_network_switch_enabled
+                end,
+                callback = function()
+                    parent.auto_network_switch_enabled = not parent.auto_network_switch_enabled
+                    parent.settings:saveSetting("auto_network_switch_enabled", parent.auto_network_switch_enabled)
+                    parent.settings:flush()
+                    _applyEffectiveServerUrl(parent)
+                    UIManager:show(InfoMessage:new{
+                        text = parent.auto_network_switch_enabled
+                            and _("Automatic network switching enabled")
+                            or  _("Automatic network switching disabled"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
             },
         },
     }
@@ -837,8 +1077,14 @@ function Settings:exportSettings(parent)
         min_pages                     = parent.min_pages,
         session_detection_mode        = parent.session_detection_mode,
         progress_decimal_places       = parent.progress_decimal_places,
+        network_connect_timeout_seconds = parent.network_connect_timeout_seconds,
+        network_connect_run_until_connect = parent.network_connect_run_until_connect,
+        sync_delay_after_connect_seconds = parent.sync_delay_after_connect_seconds,
         force_push_session_on_suspend = parent.force_push_session_on_suspend,
         connect_network_on_suspend    = parent.connect_network_on_suspend,
+        auto_network_switch_enabled   = parent.auto_network_switch_enabled,
+        -- home_network_ssid and remote_server_url intentionally excluded
+        -- (treated as user-environment / sensitive deployment data).
         sync_mode                     = parent.sync_mode,
         manual_sync_only              = parent.manual_sync_only,
         rating_sync_enabled           = parent.rating_sync_enabled,

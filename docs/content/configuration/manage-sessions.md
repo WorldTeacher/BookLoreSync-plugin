@@ -17,6 +17,8 @@ This menu contains five primary actions: Sync Pending Now, View Pending Sessions
 ![Sync menu with pending entries](../sync_menu.png)
 Immediately uploads all pending sessions, ratings, annotations, bookmarks, and progress updates to the server.
 
+If WiFi is not already connected, this action can enable/connect WiFi first, run sync, then hand control back to KOReader's native post-WiFi action flow.
+
 The label shows the current queue sizes when items are waiting - for example **Sync Pending Now (3S, 1A, 2R, 1B, 4P)** means 3 sessions, 1 annotation, 2 ratings, 1 bookmark, and 4 progress updates are queued. Only non-zero counts are shown. The entry is greyed out when all queues are empty.
 
 Uploads proceed in order: book IDs are resolved first, then ratings, then annotations, then bookmarks, then progress updates, then sessions. Sessions are sent in a batch of up to 100 at a time. Any session whose BookLore book ID is not yet known is resolved against the server first; if resolution fails, that session is skipped and retried next time.
@@ -52,7 +54,9 @@ Followed by
 
 Attempts to resolve books in the local cache that do not yet have a BookLore ID. The label shows the unmatched count when it is greater than zero - for example **Match Unmatched Books (4)**. The entry is greyed out when all books are already matched or the cache is empty.
 
-A network connection is required. If the device is offline, a brief error toast is shown and nothing further happens.
+A network connection is required. If the device is offline, the plugin first attempts to enable/connect WiFi automatically, then proceeds.
+
+If WiFi cannot be enabled (or AirPlane Mode is active), matching is skipped and a brief toast is shown.
 
 **Automatic resolution**
 
@@ -102,6 +106,7 @@ Additional reset and rematch tools are available in:
 **Tools → BookLore Sync → Sync & Cache → Advanced**
 
 - **Re-match All Books in Cache** resets all stored book IDs and re-resolves them from the server. Use this when the server library was rebuilt and IDs changed.
+- **Re-sync Stored Metadata** re-fetches server metadata for matched cached books (for example server pagecount) without resetting matches.
 - **Clear...** opens a selective clear dialog for synced-history tables:
   - Historical sessions
   - Synced annotations
@@ -115,10 +120,24 @@ This advanced clear dialog removes **synced history records** only. Pending queu
 
 ## Clear Cache
 
-Removes all entries from the `book_cache` table. The entry is greyed out when the cache is already empty.
+Removes entries from the `book_cache` table along with all tables that reference it via foreign keys. The entry is greyed out when the cache is already empty.
 
-The cache stores the mapping between each local file and its BookLore book ID, along with the file fingerprint and metadata such as title, author, and ISBN. Clearing it does not affect pending sessions, ratings, annotations, or bookmarks.
+The following tables are cleared together (they would otherwise leave dangling foreign-key references):
 
-The cache rebuilds automatically: the next time you open a book, the plugin recalculates its fingerprint, queries the server, and repopulates the cache entry.
+- `book_cache` (rows not still referenced by pending queues)
+- `synced_annotations`
+- `synced_bookmarks`
+- `rating_sync_history`
+- `book_metadata`
+
+> **Important:** This is a broad clear. Synced annotation/bookmark history, rating sync history, and stored book metadata are all removed.
+
+What is **not** affected:
+
+- Pending queues: `pending_sessions`, `pending_annotations`, `pending_ratings`, `pending_bookmarks`, `pending_koreader_progress`
+- `book_cache` rows still referenced by any pending queue (these are kept to preserve queued sync data)
+- `historical_sessions`
+
+The cache rebuilds automatically: the next time you open a book, the plugin recalculates its fingerprint, queries the server, and repopulates the cache entry. Synced history tables repopulate as future sync activity occurs.
 
 > Use this after reorganising your library (for example, after moving many files to different folders) to force the plugin to rebuild all file-path-to-book mappings cleanly. No confirmation dialog is shown - the cache is cleared immediately.

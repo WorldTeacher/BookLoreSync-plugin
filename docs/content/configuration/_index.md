@@ -27,6 +27,14 @@ hide_page_list = true
     </div>
   </a>
 
+  <a class="section-card" href="sync-behavior/">
+    <div class="section-card__icon">📡</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Sync Behavior</div>
+      <div class="section-card__desc">Choose automatic or manual mode and tune WiFi/network timing for sync actions.</div>
+    </div>
+  </a>
+
   <a class="section-card" href="manage-sessions/">
     <div class="section-card__icon">🗂️</div>
     <div class="section-card__body">

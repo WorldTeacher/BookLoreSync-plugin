@@ -107,7 +107,7 @@ To avoid flooding the server when a device suspends and resumes rapidly (e.g., r
 
 When the device wakes, the plugin schedules a sync to run **15 seconds after resume**. This gives the network time to reconnect before the upload is attempted. If the network is not yet available after 15 seconds, the session stays queued and will be picked up when connectivity is detected.
 
-This wake path is a fallback/background path. With **Auto-sync on suspend** enabled, the plugin already attempts to upload session and progress during suspend.
+This wake path is a fallback/background path. In **Automatic** sync mode, the plugin already attempts to upload session and progress during suspend.
 
 ### Network-connected sync
 

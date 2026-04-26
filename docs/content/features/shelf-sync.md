@@ -148,6 +148,8 @@ Shelf sync can be started in three ways:
 | **Auto on wake** | Fires 15 seconds after device wake, once Wi-Fi is connected. Enable via **Tools → BookLore Sync → Shelf Sync → Auto-sync shelf on wake**. |
 | **Dispatcher action** | Assign `booklore_sync_shelf` to a gesture or hardware button in **Settings → Gestures**. |
 
+If WiFi is disconnected when manual or dispatcher-triggered shelf sync starts, the plugin attempts to enable/connect WiFi automatically first.
+
 When shelf sync starts, a status dialog is shown with a **Cancel** button. The dialog title updates as each book is processed. The device UI is not usable during the sync - tapping outside the dialog does nothing.
 
 ### Full vs delta sync
@@ -211,4 +213,4 @@ When **Delete removed shelf books** is enabled and a book is deleted during sync
 
 ## Credits
 
-Shelf sync was originally contributed by [cporcellijr/BookLoreSync-plugin](https://github.com/cporcellijr/BookLoreSync-plugin) and has since been significantly reworked with a three-phase subprocess architecture, ID-tagged filenames with original-filename and title-derived modes, improved SDR sidecar detection and cleanup, a two-way deletion flow, and a cancellable progress dialog.
+Shelf sync was originally created in a fork made by [cporcellijr](https://github.com/cporcellijr) and has since been significantly reworked with a three-phase subprocess architecture, ID-tagged filenames with original-filename and title-derived modes, improved SDR sidecar detection and cleanup, a two-way deletion flow, and a cancellable progress dialog.

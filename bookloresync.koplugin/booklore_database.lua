@@ -1668,8 +1668,64 @@ end
 
 ---Database:clearBookCache.
 function Database:clearBookCache()
-    self.conn:exec("DELETE FROM book_cache")
-    self.plugin:logInfo("BookloreSync Database: Book cache cleared")
+    local sql_steps = {
+        -- Clear synced/history tables that depend on book_cache_id and can be
+        -- safely rebuilt on next sync.
+        "DELETE FROM synced_annotations",
+        "DELETE FROM synced_bookmarks",
+        "DELETE FROM rating_sync_history",
+        "DELETE FROM book_metadata",
+
+        -- Keep cache rows that are still referenced by pending queues so we do
+        -- not break foreign-key constraints and do not lose pending work.
+        [[
+            DELETE FROM book_cache
+            WHERE id NOT IN (
+                SELECT book_cache_id FROM pending_annotations
+                UNION
+                SELECT book_cache_id FROM pending_ratings
+                UNION
+                SELECT book_cache_id FROM pending_bookmarks
+            )
+        ]],
+    }
+
+    local before = self:getBookCacheStats().total
+
+    local ok_begin, begin_res = pcall(self.conn.exec, self.conn, "BEGIN")
+    if not ok_begin or begin_res ~= SQ3.OK then
+        self.plugin:logErr("BookloreSync Database: clearBookCache BEGIN failed:", self.conn:errmsg())
+        return false
+    end
+
+    for _, sql in ipairs(sql_steps) do
+        local ok_exec, exec_res = pcall(self.conn.exec, self.conn, sql)
+        if not ok_exec or exec_res ~= SQ3.OK then
+            pcall(self.conn.exec, self.conn, "ROLLBACK")
+            self.plugin:logErr("BookloreSync Database: clearBookCache failed:", self.conn:errmsg(), "SQL:", sql)
+            return false
+        end
+    end
+
+    local ok_commit, commit_res = pcall(self.conn.exec, self.conn, "COMMIT")
+    if not ok_commit or commit_res ~= SQ3.OK then
+        pcall(self.conn.exec, self.conn, "ROLLBACK")
+        self.plugin:logErr("BookloreSync Database: clearBookCache COMMIT failed:", self.conn:errmsg())
+        return false
+    end
+
+    local after = self:getBookCacheStats().total
+    local cleared = math.max(0, before - after)
+    if after > 0 then
+        self.plugin:logInfo(
+            "BookloreSync Database: Book cache cleared partially; retained",
+            tostring(after),
+            "rows referenced by pending queues"
+        )
+    else
+        self.plugin:logInfo("BookloreSync Database: Book cache cleared")
+    end
+    self.plugin:logDbg("BookloreSync Database: clearBookCache stats", "before=", tostring(before), "after=", tostring(after), "cleared=", tostring(cleared))
     return true
 end
 
@@ -4181,6 +4237,38 @@ function Database:savePluginSetting(key, value)
     local ok, err = pcall(function() stmt:bind(key, value_str) end)
     if not ok then
         self.plugin:logErr("BookloreSync Database: Bind failed in savePluginSetting:", err)
+        stmt:close()
+        return false
+    end
+
+    local result = stmt:step()
+    stmt:close()
+    return result == SQ3.DONE or result == SQ3.OK
+end
+
+--[[--
+Delete a single plugin setting from the plugin_settings table.
+
+@param key string Setting key
+@return boolean success
+--]]
+---Database:deletePluginSetting.
+function Database:deletePluginSetting(key)
+    if not key then
+        self.plugin:logErr("BookloreSync Database: deletePluginSetting called without key")
+        return false
+    end
+    key = tostring(key)
+
+    local stmt = self.conn:prepare("DELETE FROM plugin_settings WHERE key = ?")
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: Failed to prepare deletePluginSetting:", self.conn:errmsg())
+        return false
+    end
+
+    local ok, err = pcall(function() stmt:bind(key) end)
+    if not ok then
+        self.plugin:logErr("BookloreSync Database: Bind failed in deletePluginSetting:", err)
         stmt:close()
         return false
     end

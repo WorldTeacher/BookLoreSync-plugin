@@ -43,6 +43,8 @@ The process runs in two phases:
 
 Requires BookLore credentials and server URL to be configured. See [Connection Setup](@/configuration/authentication.md).
 
+If WiFi is currently disconnected, the action attempts to enable/connect WiFi automatically before matching starts.
+
 ---
 
 ## View Match Statistics
@@ -68,6 +70,8 @@ Use this if you reset your BookLore library or need to rebuild server-side readi
 
 Requires BookLore credentials and server URL to be configured.
 
+If WiFi is disconnected, the plugin attempts to enable/connect WiFi first. After upload completes, KOReader's native **Action when done with Wi-Fi** policy is applied.
+
 ---
 
 ## Sync Re-matched Sessions
@@ -77,6 +81,8 @@ Uploads sessions that were previously marked for re-matching (due to 404 errors)
 Run this after completing a re-match pass to push the newly matched sessions to the server.
 
 Requires BookLore credentials and server URL to be configured.
+
+If WiFi is disconnected, the plugin attempts to enable/connect WiFi first. After upload completes, KOReader's native **Action when done with Wi-Fi** policy is applied.
 
 ---
 
@@ -94,3 +100,5 @@ For each unmatched book an input dialog is shown, pre-filled with the book's cac
 After a match is confirmed the book's `book_id` is written to the local cache and any pending sessions for that book are synced automatically.
 
 Requires BookLore credentials and server URL to be configured. See [Connection Setup](@/configuration/authentication.md).
+
+If WiFi is disconnected, the action attempts to enable/connect WiFi automatically before the matching flow opens.

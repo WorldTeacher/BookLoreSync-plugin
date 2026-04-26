@@ -20,7 +20,11 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `server_url` | string | `""` | Base URL of the BookLore server (e.g., `http://192.168.1.100:6060`) |
+| `local_server_url` | string | `""` | BookLore URL preferred on home network (for example `http://192.168.1.100:6060`) |
+| `remote_server_url` | string | `""` | BookLore URL preferred away from home network (for example `https://domain.example.com`) |
+| `auto_network_switch_enabled` | boolean | `false` | Enable SSID-aware URL switching (home network → local URL, otherwise remote URL) |
+| `home_network_ssid` | string | `""` | WiFi SSID considered “home” when automatic network switching is enabled |
+| `server_url` | string | `""` | Legacy compatibility key. Runtime URL is derived from local/remote settings and network state. |
 | `username` | string | `""` | KOReader account username (used for MD5-authenticated endpoints) |
 | `password` | string | `""` | KOReader account password (stored in plain text; hashed to MD5 on the fly when sent in requests) |
 | `booklore_username` | string | `""` | BookLore account username (used for Bearer token authentication) |
@@ -61,11 +65,14 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `sync_mode` | string | *(derived)* | High-level sync mode: `"automatic"` (sync on suspend + WiFi connect enabled), `"manual"` (queue only; sync via **Sync & Cache → Sync Pending Now**), or `"custom"` (manual configuration of the two flags below). Derived from `manual_sync_only` and `force_push_session_on_suspend`/`connect_network_on_suspend` on first run; saved explicitly after that. |
+| `sync_mode` | string | *(derived)* | High-level sync mode: `"automatic"` (queue/sync on suspend and resume when connected; manual actions can auto-enable WiFi) or `"manual"` (queue only; sync via **Sync & Cache → Sync Pending Now**). Legacy/custom values are migrated to one of these modes. |
+| `network_connect_timeout_seconds` | integer | `15` | Maximum time (seconds) to wait for WiFi to become connected after enabling it. Increase this on slower devices or networks. |
+| `sync_delay_after_connect_seconds` | integer | `0` | Extra wait time (seconds) after WiFi reports connected, before sync requests are sent. Useful when DNS/routing is not immediately ready after connect. |
+| `network_connect_run_until_connect` | boolean | `false` | When `true`, disables the plugin-side connect timeout and keeps waiting for connection until the underlying network stack resolves or times out itself. |
 | `manual_sync_only` | boolean | `false` | When `true`, sessions are queued but not auto-uploaded; requires manual **Sync & Cache → Sync Pending Now**. Set automatically when `sync_mode` is `"manual"`. |
-| `force_push_session_on_suspend` | boolean | `false` | When `true`, suspend queues the current session/progress and immediately attempts upload via `syncPendingSessions`. Set automatically when `sync_mode` is `"automatic"`; also available as a custom toggle when `sync_mode` is `"custom"`. |
-| `connect_network_on_suspend` | boolean | `false` | When `true`, suspend sync actively tries to bring WiFi up before uploading (works with `force_push_session_on_suspend`). Set automatically when `sync_mode` is `"automatic"`; also available as a custom toggle when `sync_mode` is `"custom"`. |
-| `ask_wifi_enable` | boolean | `false` | When `true`, shows a confirmation dialog before enabling WiFi for a sync (including suspend auto-sync). In the UI this toggle is disabled while `sync_mode` is `"manual"`. |
+| `force_push_session_on_suspend` | boolean | `false` | Internal flag derived from `sync_mode`. In automatic mode, suspend queues current session/progress and attempts immediate upload via `syncPendingSessions` **if network is already connected**. |
+| `connect_network_on_suspend` | boolean | `false` | Legacy compatibility flag derived from `sync_mode`. Current suspend/resume background flow does not actively connect WiFi; automatic WiFi connect is used by explicit sync actions instead. |
+| `airplanemode_sync_mode_enabled` | boolean | `false` | Enables Airplanemode integration. When enabled and plugin is installed, Sync Mode is automatically overridden by airplane status (ON → `manual`, OFF → `automatic`). |
 
 ---
 
@@ -121,7 +128,7 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `auto_update_check` | boolean | `true` | Check for updates once per day at startup |
-| `use_dev_builds` | boolean | `false` | Use the dev-build update channel defined by `dev-build.location` instead of stable GitHub releases |
+| `use_dev_builds` | boolean | `false` | Use the dev-build update channel defined by `dev-build.location` instead of stable GitHub releases. If `dev-build.location` is missing at startup, this setting is reset to `false`. |
 | `last_update_check` | integer | `0` | Unix timestamp of the last update check (set automatically) |
 
 ---

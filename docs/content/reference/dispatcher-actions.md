@@ -16,7 +16,7 @@ The plugin registers seven actions with KOReader's dispatcher system. These can 
 |-------------|---------------|-------------|
 | Toggle BookLore Sync | `ToggleBookloreSync` | Enables or disables the plugin. When disabled, no sessions are tracked. Toggle again to re-enable. |
 | Sync Pending Sessions | `SyncBooklorePending` | Triggers an immediate upload of all pending sessions, ratings, annotations, bookmarks, and progress updates in the local queue. |
-| Toggle Manual Sync Only | `ToggleBookloreManualSyncOnly` | Switches between automatic sync (upload after each session) and manual sync (upload only when you trigger it). |
+| Toggle Manual Sync Only | `ToggleBookloreManualSyncOnly` | Switches between **Automatic** mode (background sync enabled) and **Manual only (cache everything)** mode (queue only until manual sync). |
 | Test Connection | `TestBookloreConnection` | Runs a connection test and shows the result as a notification. Equivalent to tapping **Test Connection** in the Settings menu. |
 | Sync Shelf | `booklore_sync_shelf` | Triggers an immediate shelf sync - downloads new books from the configured BookLore shelf and optionally removes books no longer on the shelf. |
 | Pull Current Book Progress | `PullBookloreCurrentBookProgress` | Pulls remote progress for the currently open book and applies it using the configured forward/backward conflict strategies. |
@@ -44,4 +44,4 @@ The exact navigation path varies by device and KOReader version. Consult the KOR
 
 **Toggle BookLore Sync** (`ToggleBookloreSync`) is useful if you read some books that are not in your BookLore library (e.g., work documents, temporary files) and you want to quickly disable tracking without going into the Settings menu.
 
-**Toggle Manual Sync Only** (`ToggleBookloreManualSyncOnly`) is useful on metered or unreliable connections - you can switch to manual mode when on mobile data and back to auto mode when on Wi-Fi.
+**Toggle Manual Sync Only** (`ToggleBookloreManualSyncOnly`) is useful on metered or unreliable connections - you can switch to manual mode when on mobile data and back to automatic mode when on Wi-Fi.

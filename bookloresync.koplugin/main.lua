@@ -361,6 +361,91 @@ function BookloreSync:isAirplaneModePluginInstalled()
     return false
 end
 
+---BookloreSync:getCurrentNetworkSSID.
+-- Best-effort detection of the currently connected WiFi network name.
+-- Returns the SSID string when available, or nil when unknown
+-- (e.g. running on the emulator/desktop, no WiFi backend, etc.).
+function BookloreSync:getCurrentNetworkSSID()
+    if not NetworkMgr or type(NetworkMgr.getCurrentNetwork) ~= "function" then
+        return nil
+    end
+    local ok, info = pcall(NetworkMgr.getCurrentNetwork, NetworkMgr)
+    if not ok or type(info) ~= "table" then
+        return nil
+    end
+    local ssid = info.ssid
+    if type(ssid) ~= "string" or ssid == "" then
+        return nil
+    end
+    return ssid
+end
+
+---BookloreSync:isOnConfiguredHomeNetwork.
+-- True when automatic network switching is disabled (feature off → always allow),
+-- or when enabled and the current SSID matches the configured one.
+function BookloreSync:isOnConfiguredHomeNetwork()
+    if not self.auto_network_switch_enabled then
+        return true
+    end
+    local target = self.home_network_ssid
+    if type(target) ~= "string" or target == "" then
+        -- Feature enabled but unconfigured: do not gate sync, behave as before.
+        return true
+    end
+    local current = self:getCurrentNetworkSSID()
+    if not current then
+        return false
+    end
+    return current == target
+end
+
+---BookloreSync:resolveServerUrl.
+-- Returns the URL the plugin should currently use to reach Booklore.
+-- The "preferred" URL is whichever fits the current state; if it isn't
+-- configured, the other one is used as a fallback so a user with only a
+-- single URL still gets a working setup regardless of the toggle.
+--
+-- State / preference matrix:
+--   auto-switch off        → prefer local, fall back to remote
+--   auto-switch on, home   → prefer local, fall back to remote
+--   auto-switch on, away   → prefer remote, fall back to local
+function BookloreSync:resolveServerUrl()
+    local local_url  = self.local_server_url  or ""
+    local remote_url = self.remote_server_url or ""
+
+    local prefer_remote = false
+    if self.auto_network_switch_enabled and not self:isOnConfiguredHomeNetwork() then
+        prefer_remote = true
+    end
+
+    local preferred = prefer_remote and remote_url or local_url
+    local fallback  = prefer_remote and local_url  or remote_url
+    if preferred ~= "" then
+        return preferred
+    end
+    return fallback
+end
+
+---BookloreSync:refreshEffectiveServerUrl.
+-- Recomputes the effective URL and, if it changed, updates `self.server_url`
+-- and reinitialises the API client so subsequent calls hit the right host.
+-- Returns the effective URL.
+function BookloreSync:refreshEffectiveServerUrl()
+    local effective = self:resolveServerUrl() or ""
+    if effective ~= (self.server_url or "") then
+        self.server_url = effective
+        if self.api and effective ~= "" then
+            local ok = pcall(function()
+                self.api:init(self.server_url, self.username, self.password, self.db)
+            end)
+            if not ok then
+                -- Best effort; the next explicit api:init call will succeed.
+            end
+        end
+    end
+    return effective
+end
+
 ---BookloreSync:isNetworkConnected.
 function BookloreSync:isNetworkConnected()
     if not NetworkMgr then
@@ -379,6 +464,9 @@ function BookloreSync:isNetworkConnected()
                 ok, connected = pcall(NetworkMgr[method])
             end
             if ok and connected then
+                -- Opportunistically point the API client at the right host
+                -- based on the current SSID before any sync call runs.
+                pcall(function() self:refreshEffectiveServerUrl() end)
                 return true
             end
         end
@@ -511,9 +599,32 @@ function BookloreSync:init()
         end
     end
 
-    self.server_url = self.settings:readSetting("server_url") or ""
-    self.username   = self.settings:readSetting("username")   or ""
-    self.password   = self.settings:readSetting("password")   or ""
+    -- Backwards-compat: `server_url` was historically the single configured
+    -- URL. With automatic network switching it splits into a local and a
+    -- remote URL. The legacy key is treated as the local URL when the new
+    -- `local_server_url` key is absent.
+    local legacy_server_url = self.settings:readSetting("server_url") or ""
+    self.local_server_url   = self.settings:readSetting("local_server_url")
+    if self.local_server_url == nil or self.local_server_url == "" then
+        self.local_server_url = legacy_server_url
+    end
+    self.remote_server_url = self.settings:readSetting("remote_server_url") or ""
+    self.username = self.settings:readSetting("username") or ""
+    self.password = self.settings:readSetting("password") or ""
+
+    -- Automatic network switching: when enabled, the plugin uses the
+    -- local URL while connected to the configured home WiFi and falls back
+    -- to the remote URL otherwise.
+    self.auto_network_switch_enabled = self.settings:readSetting("auto_network_switch_enabled")
+    if self.auto_network_switch_enabled == nil then
+        self.auto_network_switch_enabled = false
+    end
+    self.home_network_ssid = self.settings:readSetting("home_network_ssid") or ""
+
+    -- Compute the runtime effective URL. `self.server_url` remains the
+    -- field every existing call site reads, but its value now depends on
+    -- the current network when auto-switch is on.
+    self.server_url = self:resolveServerUrl()
 
     local local_brand_display = self.settings:readSetting("booklore_brand_display_name")
     self.brand_display_name, self.brand_shortcut_name = Branding.getNames(local_brand_display)
@@ -3269,6 +3380,7 @@ function BookloreSync:fileDialogSyncAnnotations(file_path)
         return
     end
 
+    self:refreshEffectiveServerUrl()
     self.api:init(self.server_url, self.username, self.password, self.db)
 
     UIManager:show(InfoMessage:new{
@@ -3339,6 +3451,7 @@ Internal: run the interactive match dialog for a single book_cache row.
 --]]
 ---BookloreSync:_matchSingleBook.
 function BookloreSync:_matchSingleBook(book)
+    self:refreshEffectiveServerUrl()
     self.api:init(self.server_url, self.username, self.password, self.db)
 
     local search_term = book.title and book.title ~= "" and book.title
@@ -3562,6 +3675,7 @@ function BookloreSync:fileDialogSyncRating(file_path)
         return
     end
 
+    self:refreshEffectiveServerUrl()
     self.api:init(self.server_url, self.username, self.password, self.db)
 
     local mode = self.rating_sync_mode or "koreader_scaled"
@@ -3668,6 +3782,7 @@ function BookloreSync:_fileDialogSyncBoth(file_path)
         return
     end
 
+    self:refreshEffectiveServerUrl()
     self.api:init(self.server_url, self.username, self.password, self.db)
 
     local book_cache_id = book.id
@@ -4104,8 +4219,8 @@ function BookloreSync:addToMainMenu(menu_items)
                 },
             },
             {
-                text = _("Automatic (sync on suspend + WiFi)"),
-                help_text = _("Automatically sync sessions when device suspends. Enables WiFi and attempts connection before syncing."),
+                text = _("Automatic (sync on suspend when connected)"),
+                help_text = _("Automatically sync sessions on suspend and resume only when WiFi is already connected. The plugin does not enable WiFi on suspend; if disconnected, data stays queued until the next sync trigger."),
                 checked_func = function()
                     self:applyAirplaneModeSyncModeIntegration()
                     return self.sync_mode == "automatic"
@@ -4816,7 +4931,7 @@ function BookloreSync:addToMainMenu(menu_items)
             },
             {
                 text = _("Clear Cache"),
-                help_text = _("Delete cached book hashes and file path mappings. Entries still referenced by pending annotations/ratings/bookmarks are retained to preserve queued sync data."),
+                help_text = _("Delete cached book mappings AND related synced history (synced annotations, synced bookmarks, rating sync history, and stored metadata). This broad clear is required because those tables reference book_cache via foreign keys. Cache rows still referenced by pending queues (annotations/ratings/bookmarks) are retained to preserve queued sync data. Pending queues are not affected."),
                 enabled_func = function()
                     if not self.db then
                         return false
@@ -5222,6 +5337,10 @@ function BookloreSync:testConnection()
         text = _("Testing connection..."),
         timeout = 1,
     })
+
+    -- Keep runtime URL selection in sync with current network state
+    -- before running auth checks and showing test details.
+    self:refreshEffectiveServerUrl()
     
     if not self.server_url or self.server_url == "" then
         UIManager:show(InfoMessage:new{
@@ -5276,7 +5395,27 @@ function BookloreSync:testConnection()
     end
 
     -- Build result message
+    local connection_type = _("Not configured")
+    local local_url = self.local_server_url or ""
+    local remote_url = self.remote_server_url or ""
+    local prefer_remote = self.auto_network_switch_enabled and not self:isOnConfiguredHomeNetwork()
+
+    if prefer_remote then
+        if remote_url ~= "" then
+            connection_type = _("Remote")
+        elseif local_url ~= "" then
+            connection_type = _("Local (fallback)")
+        end
+    else
+        if local_url ~= "" then
+            connection_type = _("Local")
+        elseif remote_url ~= "" then
+            connection_type = _("Remote (fallback)")
+        end
+    end
+
     local result_parts = {}
+    table.insert(result_parts, T(_("Connection type: %1"), connection_type))
     
     if koreader_success then
         table.insert(result_parts, T(_("✓ KOReader: %1"), _("Success")))
@@ -5648,7 +5787,7 @@ function BookloreSync:pushCurrentKoreaderProgressDirect(payload)
     if not self.api then
         return false, "API client not initialized"
     end
-    if not NetworkMgr:isConnected() then
+    if not self:isNetworkConnected() then
         return false, "WiFi is not connected"
     end
 
@@ -5725,7 +5864,7 @@ function BookloreSync:runBackgroundProgressFlush(reason)
     if not self.progress_sync_enabled or self.manual_sync_only then
         return false
     end
-    if not NetworkMgr:isConnected() then
+    if not self:isNetworkConnected() then
         self:logDbg("BookloreSync: Background progress flush skipped - offline")
         return false
     end
@@ -6168,7 +6307,7 @@ function BookloreSync:pullKoreaderProgress(interactive)
         return false
     end
 
-    if not NetworkMgr:isConnected() then
+    if not self:isNetworkConnected() then
         self:logInfo("BookloreSync: pullKoreaderProgress skipped - WiFi not connected")
         return false
     end
@@ -6500,7 +6639,7 @@ function BookloreSync:startSession()
 
         -- First open can have hash cached locally but no server-resolved ID yet.
         -- If network is available, resolve now so we do not need a second open.
-        if file_hash and file_hash ~= "" and not book_id and NetworkMgr:isConnected() then
+        if file_hash and file_hash ~= "" and not book_id and self:isNetworkConnected() then
             self:logInfo("BookloreSync: Cache entry has no book_id, resolving from server now")
             local resolved_book_id, isbn10, isbn13, server_pagecount = self:getBookIdByHash(file_hash)
             if resolved_book_id then
@@ -6524,7 +6663,7 @@ function BookloreSync:startSession()
             self:logInfo("BookloreSync: Hash calculated:", file_hash)
             
             local isbn10, isbn13, server_pagecount
-            if NetworkMgr:isConnected() then
+            if self:isNetworkConnected() then
                 self:logInfo("BookloreSync: Network connected, looking up book on server")
                 book_id, isbn10, isbn13, server_pagecount = self:getBookIdByHash(file_hash)
                 
@@ -6638,6 +6777,7 @@ function BookloreSync:startSession()
     -- Re-initialize API client at session start so periodic progress pushes do
     -- not pay init cost on every page-based sync trigger.
     if self.api then
+        self:refreshEffectiveServerUrl()
         self.api:init(self.server_url, self.username, self.password, self.db)
     end
 end
@@ -6773,7 +6913,7 @@ function BookloreSync:onReaderReady()
     self.progress_sync_last_page_turn_timestamp = os.time()
 
     -- Pull-only on open: allow remote catch-up without recording local state.
-    if self.progress_sync_enabled and self.progress_pull_on_open and NetworkMgr:isConnected() then
+    if self.progress_sync_enabled and self.progress_pull_on_open and self:isNetworkConnected() then
         self:pullKoreaderProgress(false)
     end
 
@@ -6920,7 +7060,7 @@ function BookloreSync:onCloseDocument()
     -- the DB cache so subsequent steps see it as known.
     if not pre_book_id and pre_file_hash and pre_file_hash ~= "" then
         self:logInfo("BookloreSync: book_id unknown at close - attempting final resolution (hash:", pre_file_hash, ")")
-        if NetworkMgr:isConnected() then
+        if self:isNetworkConnected() then
             -- Check cache first (may have been populated by a background sync)
             local cached = self.db:getBookByHash(pre_file_hash)
             if cached and cached.book_id then
@@ -7947,6 +8087,10 @@ resume time, kick it off now that we're connected.
 ---BookloreSync:onNetworkConnected.
 function BookloreSync:onNetworkConnected()
     if not self.is_enabled then return false end
+
+    -- A network just came up: pick the right host (local vs remote) for
+    -- the SSID we landed on before any deferred sync runs.
+    pcall(function() self:refreshEffectiveServerUrl() end)
 
     if self.deferred_close_flush_requested then
         self:logInfo("BookloreSync: Network connected with deferred close flush pending - scheduling")
@@ -9305,7 +9449,7 @@ function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_
     if self.booklore_username == "" or self.booklore_password == "" then return end
 
     -- If offline, queue immediately rather than attempting the async call
-    if not from_queue and not NetworkMgr:isConnected() then
+    if not from_queue and not self:isNetworkConnected() then
         self:logWarn("BookloreSync: notifyBookloreOnDeletion - offline, queuing deletion")
         if self.db then self.db:savePendingDeletion(hash, stem, cached_book_id) end
         return
@@ -9562,6 +9706,7 @@ function BookloreSync:syncPendingRatings(silent)
 
     self:logInfo("BookloreSync: Retrying", #pending, "pending rating(s)")
 
+    self:refreshEffectiveServerUrl()
     self.api:init(self.server_url, self.username, self.password, self.db)
 
     local synced_count = 0
@@ -9680,6 +9825,7 @@ function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
 
     self:logInfo("BookloreSync: Retrying", #pending, "pending annotation(s)")
 
+    self:refreshEffectiveServerUrl()
     self.api:init(self.server_url, self.username, self.password, self.db)
 
     local synced_count = 0
@@ -9916,6 +10062,7 @@ function BookloreSync:_runStoredMetadataResync()
         return
     end
 
+    self:refreshEffectiveServerUrl()
     self.api:init(self.server_url, self.username, self.password, self.db)
 
     local books = self.db:getAllCachedBooks() or {}
@@ -10341,6 +10488,8 @@ function BookloreSync:syncPendingSessions(silent)
         return
     end
 
+    local network_ok = self:isNetworkConnected()
+    self:refreshEffectiveServerUrl()
     self.api:init(self.server_url, self.username, self.password, self.db)
 
     -- ── Phase 0: Resolve all book_ids ─────────────────────────────────────
@@ -10359,8 +10508,6 @@ function BookloreSync:syncPendingSessions(silent)
     -- getBookCacheById lookup and bail when book_id is still nil).
     local sessions = self.db:getPendingSessions(100)
     local resolved_count = 0
-
-    local network_ok = self:isNetworkConnected()
 
     for _, session in ipairs(sessions) do
         if session.bookHash and not session.bookId then
@@ -13046,6 +13193,9 @@ function BookloreSync:fetchAndStoreHardcoverIds()
         })
         return
     end
+
+    self:refreshEffectiveServerUrl()
+    self.api:init(self.server_url, self.username, self.password, self.db)
 
     local booklore_msg = InfoMessage:new{
         text = _("Fetching book metadata from Booklore…"),

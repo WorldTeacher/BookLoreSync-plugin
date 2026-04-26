@@ -20,7 +20,11 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `server_url` | string | `""` | Base URL of the BookLore server (e.g., `http://192.168.1.100:6060`) |
+| `local_server_url` | string | `""` | BookLore URL preferred on home network (for example `http://192.168.1.100:6060`) |
+| `remote_server_url` | string | `""` | BookLore URL preferred away from home network (for example `https://domain.example.com`) |
+| `auto_network_switch_enabled` | boolean | `false` | Enable SSID-aware URL switching (home network → local URL, otherwise remote URL) |
+| `home_network_ssid` | string | `""` | WiFi SSID considered “home” when automatic network switching is enabled |
+| `server_url` | string | `""` | Legacy compatibility key. Runtime URL is derived from local/remote settings and network state. |
 | `username` | string | `""` | KOReader account username (used for MD5-authenticated endpoints) |
 | `password` | string | `""` | KOReader account password (stored in plain text; hashed to MD5 on the fly when sent in requests) |
 | `booklore_username` | string | `""` | BookLore account username (used for Bearer token authentication) |

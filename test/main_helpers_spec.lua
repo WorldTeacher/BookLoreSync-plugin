@@ -57,4 +57,90 @@ describe("BookloreSync helper methods", function()
     assert.are.equal("My Book_9.epub", plugin:_generateFilename({ id = 9, title = "My: Book?", extension = "epub" }))
   end)
 
+  it("resolves server URL with auto-switch disabled", function()
+    plugin.auto_network_switch_enabled = false
+    plugin.local_server_url = "http://local"
+    plugin.remote_server_url = "https://remote"
+
+    assert.are.equal("http://local", plugin:resolveServerUrl())
+
+    plugin.local_server_url = ""
+    assert.are.equal("https://remote", plugin:resolveServerUrl())
+  end)
+
+  it("resolves server URL with auto-switch enabled on home network", function()
+    plugin.auto_network_switch_enabled = true
+    plugin.home_network_ssid = "HomeWiFi"
+    plugin.local_server_url = "http://local"
+    plugin.remote_server_url = "https://remote"
+    plugin.getCurrentNetworkSSID = function()
+      return "HomeWiFi"
+    end
+
+    assert.are.equal("http://local", plugin:resolveServerUrl())
+
+    plugin.local_server_url = ""
+    assert.are.equal("https://remote", plugin:resolveServerUrl())
+  end)
+
+  it("resolves server URL with auto-switch enabled away from home network", function()
+    plugin.auto_network_switch_enabled = true
+    plugin.home_network_ssid = "HomeWiFi"
+    plugin.local_server_url = "http://local"
+    plugin.remote_server_url = "https://remote"
+    plugin.getCurrentNetworkSSID = function()
+      return "CoffeeShop"
+    end
+
+    assert.are.equal("https://remote", plugin:resolveServerUrl())
+
+    plugin.remote_server_url = ""
+    assert.are.equal("http://local", plugin:resolveServerUrl())
+  end)
+
+  it("falls back to local preference when auto-switch enabled without configured SSID", function()
+    plugin.auto_network_switch_enabled = true
+    plugin.home_network_ssid = ""
+    plugin.local_server_url = "http://local"
+    plugin.remote_server_url = "https://remote"
+    plugin.getCurrentNetworkSSID = function()
+      return "SomeNetwork"
+    end
+
+    assert.is_true(plugin:isOnConfiguredHomeNetwork())
+    assert.are.equal("http://local", plugin:resolveServerUrl())
+  end)
+
+  it("refreshes effective server URL and reinitializes API when URL changes", function()
+    local init_calls = {}
+
+    plugin.api = {
+      init = function(_, url, username, password, db)
+        table.insert(init_calls, {
+          url = url,
+          username = username,
+          password = password,
+          db = db,
+        })
+      end,
+    }
+
+    plugin.username = "reader"
+    plugin.password = "secret"
+    plugin.db = { name = "db" }
+    plugin.server_url = "http://old"
+    plugin.local_server_url = "http://local"
+    plugin.remote_server_url = "https://remote"
+    plugin.auto_network_switch_enabled = false
+
+    assert.are.equal("http://local", plugin:refreshEffectiveServerUrl())
+    assert.are.equal("http://local", plugin.server_url)
+    assert.are.equal(1, #init_calls)
+    assert.are.equal("http://local", init_calls[1].url)
+
+    -- No URL change -> no additional init call
+    assert.are.equal("http://local", plugin:refreshEffectiveServerUrl())
+    assert.are.equal(1, #init_calls)
+  end)
+
 end)

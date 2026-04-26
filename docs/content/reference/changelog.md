@@ -21,8 +21,15 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 - **Shelf sync naming:** Updated menu labels from "Shelf Downloads" to **Shelf Sync** for clearer navigation.
 - **Sync/runtime performance:** Reduced overhead in sync paths (including periodic progress updates and exit handling).
-- **Sync Behavior menu:** Grouped WiFi connection options under **Sync Behavior → Networking** for clearer configuration flow.
-- **Network tuning controls:** Added configurable WiFi connect timeout, optional "run until connect" mode, and post-connect sync delay for slow networks.
+- **Connection diagnostics:** The **Test Connection** result now includes the active connection type (**Local**, **Remote**, or fallback).
+
+### Documentation
+
+- Updated **Connection Setup** and **Settings Reference** for local/remote URL configuration, automatic network switching keys, and test-connection output details.
+
+### Testing
+
+- Added helper-level unit coverage for URL resolution and effective URL refresh behavior in network auto-switch scenarios.
 
 ### Bug fixes
 

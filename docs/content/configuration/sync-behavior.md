@@ -35,10 +35,10 @@ This guide helps you:
 
 Open **Tools → BookLore Sync → Sync Behavior** and choose one mode:
 
-- **Automatic (sync on suspend + WiFi)**
-  - Queues session/progress on suspend and attempts sync on suspend/resume.
-  - Suspend/resume background sync runs only when network is already connected.
-  - Manual actions (for example **Sync Pending Now**) can auto-enable/connect WiFi when needed.
+- **Automatic (sync on suspend when connected)**
+  - Queues session/progress on suspend and attempts sync on suspend/resume **only when WiFi is already connected**.
+  - Suspend/resume background sync does **not** enable WiFi; if disconnected, data stays queued for the next trigger.
+  - Manual actions (for example **Sync Pending Now**) can still auto-enable/connect WiFi when invoked explicitly.
 
 - **Manual only (cache everything)**
   - Always queues data locally.
@@ -53,7 +53,7 @@ Open **Tools → BookLore Sync → Sync Behavior → Networking**.
   - Increase on slower devices/networks.
 
 - **Run until connect**
-  - Disables plugin-side timeout and waits until WiFi connects (or network stack times out).
+  - Disables plugin-side timeout and waits until WiFi connects (or KOReader/network stack times out).
   - Useful when fixed timeout is too short.
 
 - **Sync delay after connect**

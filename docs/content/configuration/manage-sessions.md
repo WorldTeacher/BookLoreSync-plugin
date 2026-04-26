@@ -120,10 +120,24 @@ This advanced clear dialog removes **synced history records** only. Pending queu
 
 ## Clear Cache
 
-Removes all entries from the `book_cache` table. The entry is greyed out when the cache is already empty.
+Removes entries from the `book_cache` table along with all tables that reference it via foreign keys. The entry is greyed out when the cache is already empty.
 
-The cache stores the mapping between each local file and its BookLore book ID, along with the file fingerprint and metadata such as title, author, and ISBN. Clearing it does not affect pending sessions, ratings, annotations, or bookmarks.
+The following tables are cleared together (they would otherwise leave dangling foreign-key references):
 
-The cache rebuilds automatically: the next time you open a book, the plugin recalculates its fingerprint, queries the server, and repopulates the cache entry.
+- `book_cache` (rows not still referenced by pending queues)
+- `synced_annotations`
+- `synced_bookmarks`
+- `rating_sync_history`
+- `book_metadata`
+
+> **Important:** This is a broad clear. Synced annotation/bookmark history, rating sync history, and stored book metadata are all removed.
+
+What is **not** affected:
+
+- Pending queues: `pending_sessions`, `pending_annotations`, `pending_ratings`, `pending_bookmarks`, `pending_koreader_progress`
+- `book_cache` rows still referenced by any pending queue (these are kept to preserve queued sync data)
+- `historical_sessions`
+
+The cache rebuilds automatically: the next time you open a book, the plugin recalculates its fingerprint, queries the server, and repopulates the cache entry. Synced history tables repopulate as future sync activity occurs.
 
 > Use this after reorganising your library (for example, after moving many files to different folders) to force the plugin to rebuild all file-path-to-book mappings cleanly. No confirmation dialog is shown - the cache is cleared immediately.

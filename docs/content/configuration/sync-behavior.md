@@ -39,6 +39,7 @@ Open **Tools → BookLore Sync → Sync Behavior** and choose one mode:
   - Queues session/progress on suspend and attempts sync on suspend/resume **only when WiFi is already connected**.
   - Suspend/resume background sync does **not** enable WiFi; if disconnected, data stays queued for the next trigger.
   - Manual actions (for example **Sync Pending Now**) can still auto-enable/connect WiFi when invoked explicitly.
+  - Close-time uploads are flushed shortly after close (deferred close flush). If **Silent mode** is enabled, no progress popup is shown during this flush and the UI may appear briefly unresponsive while pending items upload.
 
 - **Manual only (cache everything)**
   - Always queues data locally.

@@ -1,3 +1,21 @@
+# [4.2.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.1.1...4.2.0) (2026-04-26)
+
+
+### Bug Fixes
+
+* **database:** enhance clearBookCache to safely manage dependencies and improve logging ([3a1439f](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/3a1439f26385952e8b8629cf047af2dfa0ba533f))
+* **menu:** reorganize networking options for WiFi connection behavior ([b6c8d20](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/b6c8d209403dfd0b2d7cd4ac8d0d5d0ec05f96ab))
+* **network:** add 'run until connect' option for network connection handling ([e98c6d3](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/e98c6d3f03d9ab5587001a0e6a46cd6fee5168ca))
+* **network:** implement fallback for sleep function in network connection handling ([1733754](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/17337542850d2da55e00da61c7f7806fcad6b40c))
+* **sync:** implement WiFi request handling for various sync operations and... ([d4d2b47](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d4d2b479b1d77ab395f1a44999461b776986ee68))
+
+
+### Features
+
+* **networking:** connection switch ([4074ed8](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/4074ed8dec02a6130c46c30511ec451e2ceeeaed))
+* **settings:** add deletePluginSetting method and integrate into DbSettings... ([2376e19](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/2376e19a0a121dacdb006737a4a768a3d63046aa))
+* **settings:** add network connect timeout configuration and integrate into sync process ([5fc4d87](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/5fc4d87fb2dd04a714663cdb356c83d65426a6f3))
+
 ## [4.1.1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.1.0...4.1.1) (2026-04-19)
 
 

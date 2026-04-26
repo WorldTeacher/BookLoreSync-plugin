@@ -1,6 +1,6 @@
 +++
 title = "Connection Setup"
-description = "Configure your BookLore server URL and login credentials."
+description = "Configure local/remote server URLs and login credentials."
 weight = 1
 +++
 
@@ -14,9 +14,13 @@ Connection settings are found at:
 
 ---
 
-## Server URL
+## Server URLs
 
-Tap **Server URL** to enter the address of your BookLore server.
+Tap **Server URLs** to configure:
+
+- **Local URL**: used on your home network.
+- **Remote URL**: used away from home when automatic network switching is enabled.
+- **Home SSID**: the WiFi name treated as your home network.
 
 **Format:** `http://<host>:<port>` or `https://<host>`
 
@@ -24,11 +28,11 @@ Tap **Server URL** to enter the address of your BookLore server.
 
 ```
 http://192.168.1.100:6060
-http://booklore.local:6060
-https://booklore.example.com
+http://your-url.local:6060
+https://domain.example.com
 ```
 
-Trailing slashes are not required. The plugin will strip them automatically.
+Trailing slashes are not required. The plugin strips them automatically.
 
 > Enter only the base URL - do not append `/api` or any path. The plugin handles all API routing internally.
 
@@ -71,14 +75,16 @@ In most setups, the KOReader account and BookLore account are the same user. You
 ## Test Connection
 
 Tap **Test Connection** to verify that:
-1. The server is reachable at the configured URL.
-2. The KOReader credentials are accepted.
+1. The selected connection target is correct (**Local**, **Remote**, or fallback).
+2. The server is reachable at the effective URL.
+3. The KOReader credentials are accepted.
 
-The button is only enabled once a server URL and username have been entered.
+The button is enabled once a server URL is configured.
 
 A successful test shows:
 
 ```
+Connection type: Local
 KOReader: Success
 BookLore: Success
 by-hash endpoint: ok

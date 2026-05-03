@@ -1053,6 +1053,91 @@ function APIClient:submitRating(book_id, rating, username, password)
 end
 
 --[[--
+Update reading status for one or more books.
+
+Endpoint: POST /api/v1/books/status
+Body: { "bookIds": [book_id, ...], "status": "UNREAD" }
+
+@param book_ids table|number  One book ID or an array of book IDs
+@param status string          Status value (must be uppercase)
+@param username string        Booklore username for Bearer token
+@param password string        Booklore password for Bearer token
+@return boolean success
+@return string|nil error message on failure
+--]]
+---APIClient:updateBookStatus.
+function APIClient:updateBookStatus(book_ids, status, username, password)
+    if type(book_ids) ~= "table" then
+        book_ids = { book_ids }
+    end
+
+    local normalized_ids = {}
+    for _, book_id in ipairs(book_ids) do
+        local id = tonumber(book_id)
+        if id then
+            table.insert(normalized_ids, id)
+        end
+    end
+
+    if #normalized_ids == 0 then
+        return false, "At least one valid book ID is required"
+    end
+
+    status = tostring(status or ""):upper()
+    if status == "" then
+        return false, "Status is required"
+    end
+
+    if not username or username == "" then
+        return false, "Booklore username required for status update"
+    end
+    if not password or password == "" then
+        return false, "Booklore password required for status update"
+    end
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password, false)
+    if not token_ok then
+        return false, token or "Failed to obtain auth token"
+    end
+
+    local body_ids = normalized_ids
+    if json.util and json.util.InitArray then
+        body_ids = json.util.InitArray(normalized_ids)
+    end
+
+    local body = {
+        bookIds = body_ids,
+        status = status,
+    }
+    local headers = {
+        ["Authorization"] = "Bearer " .. token,
+        ["Content-Type"] = "application/json",
+    }
+
+    local success, code, response = self:request("POST", "/api/v1/books/status", body, headers)
+
+    if not success and (code == 401 or code == 403) then
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("POST", "/api/v1/books/status", body, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+
+    if success then
+        self:logInfo("BookloreSync API: Updated book status to", status, "for", #normalized_ids, "book(s)")
+        return true, nil
+    end
+
+    local err_msg = (type(response) == "string" and response ~= "") and response or ("HTTP " .. tostring(code))
+    self:logWarn("BookloreSync API: Failed to update book status:", err_msg)
+    return false, err_msg
+end
+
+--[[--
 
 Endpoint: POST /api/v1/annotations
 Required body fields: bookId, cfi, text

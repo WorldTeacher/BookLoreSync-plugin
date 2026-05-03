@@ -141,4 +141,61 @@ describe("APIClient helper methods", function()
     assert.are.equal("222", normalized.isbn13)
     assert.are.equal("pdf", normalized.extension)
   end)
+
+  it("updates reading status for a book", function()
+    local captured = {}
+
+    client.getOrRefreshBearerToken = function(_, username, password)
+      assert.are.equal("user", username)
+      assert.are.equal("pass", password)
+      return true, "token-1"
+    end
+
+    client.request = function(_, method, path, body, headers)
+      captured.method = method
+      captured.path = path
+      captured.body = body
+      captured.headers = headers
+      return true, 200, {}
+    end
+
+    local ok, err = client:updateBookStatus({ 42 }, "partially_read", "user", "pass")
+    assert.is_true(ok)
+    assert.is_nil(err)
+    assert.are.equal("POST", captured.method)
+    assert.are.equal("/api/v1/books/status", captured.path)
+    assert.are.equal("PARTIALLY_READ", captured.body.status)
+    assert.are.equal(42, captured.body.bookIds[1])
+    assert.are.equal("Bearer token-1", captured.headers["Authorization"])
+  end)
+
+  it("retries reading-status update after token refresh", function()
+    local auth_calls = 0
+    local request_calls = 0
+
+    client.db = { deleteBearerToken = function() end }
+
+    client.getOrRefreshBearerToken = function(_, _, _, force_refresh)
+      auth_calls = auth_calls + 1
+      if force_refresh then
+        return true, "token-2"
+      end
+      return true, "token-1"
+    end
+
+    client.request = function(_, _, _, _, headers)
+      request_calls = request_calls + 1
+      if request_calls == 1 then
+        return false, 401, "Unauthorized"
+      end
+      assert.are.equal("Bearer token-2", headers["Authorization"])
+      return true, 200, {}
+    end
+
+    local ok, err = client:updateBookStatus(7, "UNREAD", "user", "pass")
+    assert.is_true(ok)
+    assert.is_nil(err)
+    assert.are.equal(2, request_calls)
+    assert.are.equal(2, auth_calls)
+  end)
 end)

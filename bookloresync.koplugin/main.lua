@@ -1010,6 +1010,20 @@ function BookloreSync:init()
             },
         }
     end)
+    -- Row 4: reading status (full width)
+    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row4", function(file, is_file, _book_props)
+        if not is_file then return nil end
+        return {
+            {
+                text = _("Set Reading Status"),
+                callback = function()
+                    local fc = FileManager.instance and FileManager.instance.file_chooser
+                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
+                    self:fileDialogSetReadingStatus(file)
+                end,
+            },
+        }
+    end)
 
     self:registerDispatcherActions()
 
@@ -1068,6 +1082,7 @@ function BookloreSync:onExit()
     FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row1")
     FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row2")
     FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row3")
+    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row4")
 
     if self.db then
         self.db:close()
@@ -3902,6 +3917,115 @@ function BookloreSync:_fileDialogSyncBoth(file_path)
     UIManager:show(InfoMessage:new{
         text    = table.concat(ann_parts, "\n"),
         timeout = 4,
+    })
+end
+
+--[[--
+File manager long-press: set Booklore reading status for a single matched book.
+
+@param file_path string  Absolute path to the book file
+--]]
+---BookloreSync:fileDialogSetReadingStatus.
+function BookloreSync:fileDialogSetReadingStatus(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
+        return
+    end
+
+    local username, password = self:_refreshCredentials()
+    if username == "" or password == "" then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
+        return
+    end
+
+    local book = self.db:getBookByFilePath(file_path)
+    if not book then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book not found in local database.\nOpen the book first to register it."),
+        })
+        return
+    end
+    if not book.book_id then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book is not yet matched to Booklore.\nUse \"Match Book\" first."),
+        })
+        return
+    end
+
+    local status_dialog
+    local status_options = {
+        { label = _("Unread"), value = "UNREAD" },
+        { label = _("Paused"), value = "PAUSED" },
+        { label = _("Partially read"), value = "PARTIALLY_READ" },
+        { label = _("Abandoned"), value = "ABANDONED" },
+        { label = _("Won't read"), value = "WONT_READ" },
+    }
+    local buttons = {}
+
+    for _, option in ipairs(status_options) do
+        local selected_option = option
+        table.insert(buttons, {{
+            text = selected_option.label,
+            callback = function()
+                UIManager:close(status_dialog)
+                self:_fileDialogApplyReadingStatus(file_path, selected_option.value, selected_option.label)
+            end,
+        }})
+    end
+
+    table.insert(buttons, {{
+        text = _("Cancel"),
+        callback = function()
+            UIManager:close(status_dialog)
+        end,
+    }})
+
+    status_dialog = ButtonDialog:new{
+        title = _("Set Reading Status"),
+        buttons = buttons,
+    }
+    UIManager:show(status_dialog)
+end
+
+--[[--
+Apply selected Booklore reading status for a single matched book.
+
+@param file_path string  Absolute path to the book file
+@param status string     Uppercase Booklore status value
+@param label string      Human-readable status label for UI
+--]]
+---BookloreSync:_fileDialogApplyReadingStatus.
+function BookloreSync:_fileDialogApplyReadingStatus(file_path, status, label)
+    local username, password = self:_refreshCredentials()
+    if username == "" or password == "" then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
+        return
+    end
+
+    local book = self.db and self.db:getBookByFilePath(file_path)
+    local book_id = book and tonumber(book.book_id)
+    if not book_id then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book is not yet matched to Booklore.\nUse \"Match Book\" first."),
+        })
+        return
+    end
+
+    self:refreshEffectiveServerUrl()
+    self.api:init(self.server_url, self.username, self.password, self.db)
+
+    local ok, err = self.api:updateBookStatus({ book_id }, status, username, password)
+    if ok then
+        UIManager:show(InfoMessage:new{
+            text = T(_("Booklore: reading status set to %1"), label),
+            timeout = 3,
+        })
+        return
+    end
+
+    UIManager:show(InfoMessage:new{
+        text = T(_("Booklore: failed to update reading status (%1)"), tostring(err or _("Unknown error"))),
+        timeout = 3,
     })
 end
 

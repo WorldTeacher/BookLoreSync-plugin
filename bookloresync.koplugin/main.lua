@@ -991,7 +991,7 @@ function BookloreSync:init()
             },
         }
     end)
-    -- Row 3: tracking toggle (full width)
+    -- Row 3: tracking + status actions
     FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row3", function(file, is_file, _book_props)
         if not is_file then return nil end
         return {
@@ -1006,6 +1006,14 @@ function BookloreSync:init()
                     local fc = FileManager.instance and FileManager.instance.file_chooser
                     if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
                     self:fileDialogToggleTracking(file)
+                end,
+            },
+            {
+                text = _("Set Reading Status"),
+                callback = function()
+                    local fc = FileManager.instance and FileManager.instance.file_chooser
+                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
+                    self:fileDialogSetReadingStatus(file)
                 end,
             },
         }

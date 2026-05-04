@@ -546,7 +546,7 @@ function M.new(deps)
 
             -- ── Check disk space before downloading ─────────────────────────────
             if not already_exists then
-                local file_size, size_err = self.api:getBookFileSize(book_id, self.username, self.password)
+                local file_size, size_err = self.api:getBookFileSize(book_id, self.booklore_username, self.booklore_password)
                 if not file_size then
                     self:logWarn("BookloreSync: could not get file size for book", book_id, ":", size_err or "unknown error")
                 else

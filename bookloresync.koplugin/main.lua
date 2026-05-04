@@ -35,6 +35,7 @@ local UpdatesModuleFactory = require("booklore_updates_module")
 local PendingSyncModuleFactory = require("booklore_pending_sync")
 local MatchingModuleFactory = require("booklore_matching_module")
 local DeletionModuleFactory = require("booklore_deletion_module")
+local MenuActionsModuleFactory = require("booklore_menu_actions")
 local ok_branding, Branding = pcall(require, "booklore_branding")
 if not ok_branding or type(Branding) ~= "table" then
     Branding = {
@@ -214,6 +215,12 @@ local MatchingModule = MatchingModuleFactory.new({
 
 local DeletionModule = DeletionModuleFactory.new({
     json = json,
+    UIManager = UIManager,
+})
+
+local MenuActionsModule = MenuActionsModuleFactory.new({
+    _ = _,
+    FileManager = FileManager,
     UIManager = UIManager,
 })
 
@@ -939,85 +946,7 @@ function BookloreSync:init()
     end
     
     self.ui.menu:registerToMainMenu(self)
-
-    -- Register file manager long-press (hold) dialog buttons.
-    -- Register on the FileManager CLASS table (not a live instance), matching the
-    -- coverbrowser pattern: FileManager.addFileDialogButtons(FileManager, id, func).
-    -- showFileDialog reads file_manager.file_dialog_added_buttons where file_manager is
-    -- the live instance; Lua's __index chain finds the entry on the class table.
-    -- Registration must be unconditional - init() is always called from the reader
-    -- context where self.ui.file_chooser is nil.
-    -- Row 1: primary actions
-    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row1", function(file, is_file, _book_props)
-        if not is_file then return nil end
-        return {
-            {
-                text = _("Booklore Sync"),
-                callback = function()
-                    local fc = FileManager.instance and FileManager.instance.file_chooser
-                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
-                    self:_fileDialogBookloreSync(file)
-                end,
-            },
-            {
-                text = _("Match Book"),
-                callback = function()
-                    local fc = FileManager.instance and FileManager.instance.file_chooser
-                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
-                    self:fileDialogMatchBook(file)
-                end,
-            },
-        }
-    end)
-    -- Row 2: data actions
-    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row2", function(file, is_file, _book_props)
-        if not is_file then return nil end
-        return {
-            {
-                text = _("Show Stored Data"),
-                callback = function()
-                    local fc = FileManager.instance and FileManager.instance.file_chooser
-                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
-                    self:fileDialogShowStoredData(file)
-                end,
-            },
-            {
-                text = _("Extract from Sidecar"),
-                callback = function()
-                    local fc = FileManager.instance and FileManager.instance.file_chooser
-                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
-                    self:fileDialogExtractFromSidecar(file)
-                end,
-            },
-        }
-    end)
-    -- Row 3: tracking + status actions
-    FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row3", function(file, is_file, _book_props)
-        if not is_file then return nil end
-        return {
-            {
-                text_func = function()
-                    if self.db and not self.db:isBookTrackingEnabled(file) then
-                        return _("Enable tracking")
-                    end
-                    return _("Disable tracking")
-                end,
-                callback = function()
-                    local fc = FileManager.instance and FileManager.instance.file_chooser
-                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
-                    self:fileDialogToggleTracking(file)
-                end,
-            },
-            {
-                text = _("Set Reading Status"),
-                callback = function()
-                    local fc = FileManager.instance and FileManager.instance.file_chooser
-                    if fc and fc.file_dialog then UIManager:close(fc.file_dialog) end
-                    self:fileDialogSetReadingStatus(file)
-                end,
-            },
-        }
-    end)
+    MenuActionsModule.register(self)
 
     self:registerDispatcherActions()
 
@@ -1073,9 +1002,7 @@ end
 
 ---BookloreSync:onExit.
 function BookloreSync:onExit()
-    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row1")
-    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row2")
-    FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row3")
+    MenuActionsModule.unregister()
 
     if self.db then
         self.db:close()
@@ -3414,6 +3341,74 @@ function BookloreSync:_refreshCredentials()
     return username, password
 end
 
+--[[--
+Ensure a file has a local book_cache row without requiring open/close first.
+
+Populates the core fields normally created at open time:
+- file hash (for matching and later server lookup)
+- title/author (best-effort from sidecar stats)
+- sdr_path metadata (for sidecar-based features)
+
+@param file_path string
+@return table|nil book_cache row
+@return string|nil error message on failure
+--]]
+---BookloreSync:_ensureBookCachedForFile.
+function BookloreSync:_ensureBookCachedForFile(file_path)
+    if not self.db or not file_path or file_path == "" then
+        return nil, "invalid_arguments"
+    end
+
+    local book = self.db:getBookByFilePath(file_path)
+    local existing_book_id = book and book.book_id or nil
+    local file_hash = book and book.file_hash or nil
+    local title = book and book.title or nil
+    local author = book and book.author or nil
+
+    if not file_hash or file_hash == "" then
+        file_hash = self:calculateBookHash(file_path) or ""
+    end
+
+    if (not title or title == "") or (not author or author == "") then
+        local stats = self.metadata_extractor and self.metadata_extractor:getStats(file_path) or nil
+        if type(stats) == "table" then
+            if (not title or title == "") and stats.title and stats.title ~= "" then
+                title = stats.title
+            end
+            if (not author or author == "") and stats.authors then
+                if type(stats.authors) == "table" then
+                    author = table.concat(stats.authors, ", ")
+                elseif type(stats.authors) == "string" then
+                    author = stats.authors
+                end
+            end
+        end
+    end
+
+    local ok = self.db:saveBookCache(file_path, file_hash, existing_book_id, title, author, nil, nil)
+    if not ok then
+        return nil, "save_failed"
+    end
+
+    local hydrated = self.db:getBookByFilePath(file_path)
+    if not hydrated then
+        return nil, "hydrate_failed"
+    end
+
+    local book_cache_id = hydrated.id or self.db:getBookCacheIdByFilePath(file_path)
+    if book_cache_id and self.db.upsertBookMetadata then
+        local ok_ds, DocSettings = pcall(require, "docsettings")
+        if ok_ds and DocSettings and DocSettings.getSidecarDir then
+            local ok_sdr, sdr_path = pcall(DocSettings.getSidecarDir, DocSettings, file_path)
+            if ok_sdr and sdr_path and sdr_path ~= "" then
+                self.db:upsertBookMetadata(book_cache_id, { sdr_path = sdr_path })
+            end
+        end
+    end
+
+    return hydrated, nil
+end
+
 ---BookloreSync:fileDialogSyncAnnotations.
 function BookloreSync:fileDialogSyncAnnotations(file_path)
     if not self.db then
@@ -3489,10 +3484,10 @@ function BookloreSync:fileDialogMatchBook(file_path)
         return
     end
 
-    local book = self.db:getBookByFilePath(file_path)
+    local book, cache_err = self:_ensureBookCachedForFile(file_path)
     if not book then
         UIManager:show(InfoMessage:new{
-            text = _("Booklore: book not found in local database.\nOpen the book first to register it."),
+            text = T(_("Booklore: failed to prepare local data for matching (%1)."), tostring(cache_err or _("Unknown error"))),
         })
         return
     end

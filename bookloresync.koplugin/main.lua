@@ -621,43 +621,52 @@ function BookloreSync:init()
         -- saveSetting / flush calls go through SQLite without any call-site changes.
         self.settings = DbSettings:new(self.db)
 
-        -- Check if we need to migrate from old LuaSettings format
-        local old_db_path = DataStorage:getSettingsDir() .. "/booklore_db.lua"
-        local old_db_file = io.open(old_db_path, "r")
+        local migration_check_flag = "old_lua_db_migration_checked"
+        local migration_checked = self.settings:readSetting(migration_check_flag)
+        if not migration_checked then
+            local migration_check_completed = true
+            local old_db_path = DataStorage:getSettingsDir() .. "/booklore_db.lua"
+            local old_db_file = io.open(old_db_path, "r")
 
-        if old_db_file then
-            old_db_file:close()
-            logger.info("BookloreSync: Found old database, checking if migration needed")
+            if old_db_file then
+                old_db_file:close()
+                logger.info("BookloreSync: Found old database, checking if migration needed")
 
-            -- Check if database is empty (needs migration)
-            local stats = self.db:getBookCacheStats()
-            if stats.total == 0 then
-                logger.info("BookloreSync: Database is empty, migrating from LuaSettings")
+                -- Check if database is empty (needs migration)
+                local stats = self.db:getBookCacheStats()
+                if stats.total == 0 then
+                    logger.info("BookloreSync: Database is empty, migrating from LuaSettings")
 
-                local ok, err = pcall(function()
-                    local local_db = LuaSettings:open(old_db_path)
-                    local success = self.db:migrateFromLuaSettings(local_db)
+                    local migration_success = false
+                    local ok, err = pcall(function()
+                        local local_db = LuaSettings:open(old_db_path)
+                        migration_success = self.db:migrateFromLuaSettings(local_db)
+                    end)
 
-                    if success then
+                    if not ok then
+                        migration_check_completed = false
+                        logger.err("BookloreSync: Migration failed:", err)
+                        UIManager:show(InfoMessage:new{
+                            text = _("Failed to migrate old data. Check logs."),
+                            timeout = 3,
+                        })
+                    elseif migration_success then
                         UIManager:show(InfoMessage:new{
                             text = _("Migrated data to new database format"),
                             timeout = 2,
                         })
                     else
+                        migration_check_completed = false
                         UIManager:show(InfoMessage:new{
                             text = _("Migration completed with some errors. Check logs."),
                             timeout = 3,
                         })
                     end
-                end)
-
-                if not ok then
-                    logger.err("BookloreSync: Migration failed:", err)
-                    UIManager:show(InfoMessage:new{
-                        text = _("Failed to migrate old data. Check logs."),
-                        timeout = 3,
-                    })
                 end
+            end
+
+            if migration_check_completed then
+                self.settings:saveSetting(migration_check_flag, true)
             end
         end
     end

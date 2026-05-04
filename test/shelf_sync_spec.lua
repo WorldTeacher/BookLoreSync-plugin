@@ -1077,4 +1077,86 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     assert.is_false(p.sync_in_progress)
   end)
 
+  it("uses Booklore credentials for file-size preflight", function()
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({ files = {} })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({
+        books = {
+          { id = 21, title = "CredCheck", extension = "epub" },
+        },
+        download_ok = true,
+      })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub({ shelf_state = nil })
+    end
+
+    local p = make_plugin({
+      username = "koreader-user",
+      password = "koreader-pass",
+      booklore_username = "booklore-user",
+      booklore_password = "booklore-pass",
+      min_free_space_mb = 500,
+    })
+
+    local got_username, got_password
+    p.api.getBookFileSize = function(_, _, username, password)
+      got_username = username
+      got_password = password
+      return 1024, nil
+    end
+    p.getAvailableSpace = function()
+      return 1024 * 1024 * 1024, nil
+    end
+
+    p:syncFromBookloreShelf(true)
+
+    assert.are.equal("booklore-user", got_username)
+    assert.are.equal("booklore-pass", got_password)
+    assert.is_false(p.sync_in_progress)
+  end)
+
+  it("does not save shelf state when sync stops for insufficient disk space", function()
+    package.preload["libs/libkoreader-lfs"] = function()
+      return make_lfs_stub({ files = {} })
+    end
+    package.preload["booklore_api_client"] = function()
+      return make_api_stub({
+        books = {
+          { id = 31, title = "BigBook", extension = "epub" },
+        },
+        download_ok = true,
+      })
+    end
+    package.preload["booklore_database"] = function()
+      return make_db_stub({ shelf_state = nil })
+    end
+
+    local p = make_plugin({ min_free_space_mb = 500 })
+    p.api.getBookFileSize = function()
+      return 100 * 1024 * 1024, nil
+    end
+    p.getAvailableSpace = function()
+      return 50 * 1024 * 1024, nil
+    end
+
+    local shelf_state_saved = false
+    p.db.saveShelfState = function()
+      shelf_state_saved = true
+    end
+
+    local callback_ok, callback_msg
+    p:syncFromBookloreShelf(true, function(ok, msg)
+      callback_ok = ok
+      callback_msg = msg
+    end)
+
+    assert.is_false(shelf_state_saved)
+    assert.is_false(callback_ok)
+    assert.is_truthy(callback_msg)
+    assert.is_false(p.sync_in_progress)
+  end)
+
 end)

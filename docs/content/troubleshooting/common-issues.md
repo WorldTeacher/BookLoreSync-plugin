@@ -156,6 +156,20 @@ If you see *"No match found based on hash"* (without "or ISBN"), no ISBN was fou
 
 ---
 
+## UI appears unresponsive after closing a book (Silent mode)
+
+**Symptom:** After closing a book, KOReader appears to hang for a short time, especially when there are many queued items.
+
+**Cause:** In automatic sync mode, the plugin performs a deferred close flush shortly after close. When **Silent mode** is enabled, progress popups are suppressed, so this upload work can look like an unresponsive UI.
+
+**What to do:**
+
+- Wait for the flush to complete (usually brief unless many items are queued).
+- Disable **Silent mode** if you want visible progress/status messages during sync.
+- Reduce queue size by running **Sync Pending Now** earlier (before large backlog accumulates).
+
+---
+
 ## Annotations not appearing in BookLore
 
 **Symptom:** Highlights or notes are not showing up in BookLore after a sync.

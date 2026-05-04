@@ -117,7 +117,7 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `silent_messages` | boolean | `false` | Suppress session-related popup notifications |
+| `silent_messages` | boolean | `false` | Suppress session-related popup notifications. Note: during deferred close-flush sync in automatic mode, no in-progress popup is shown, so the UI may appear temporarily unresponsive while queued items are uploaded. |
 | `log_to_file` | boolean | `false` | Enable file-based debug logging with daily rotation |
 | `booklore_brand_display_name` | string | `"Booklore"` | Custom plugin display name used for UI branding; trailing `Sync` is normalized away and shortcut naming is derived automatically |
 

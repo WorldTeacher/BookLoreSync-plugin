@@ -33,6 +33,33 @@ describe("BookloreSync helper methods", function()
     assert.are.equal("1h 1m 1s", plugin:formatDuration(3661))
   end)
 
+  it("recovers progress sync enabled state from persisted settings", function()
+    plugin.progress_sync_enabled = false
+    plugin.settings = {
+      readSetting = function(_, key)
+        if key == "progress_sync_enabled" then
+          return true
+        end
+        return nil
+      end,
+    }
+    plugin.logWarn = function() end
+
+    assert.is_true(plugin:isProgressSyncEnabled())
+    assert.is_true(plugin.progress_sync_enabled)
+  end)
+
+  it("keeps progress sync disabled when persisted setting is not true", function()
+    plugin.progress_sync_enabled = false
+    plugin.settings = {
+      readSetting = function()
+        return nil
+      end,
+    }
+
+    assert.is_false(plugin:isProgressSyncEnabled())
+  end)
+
   it("treats stale remote progress that is behind local as equal", function()
     local direction = plugin:evaluateKoreaderProgressDirection(
       { percentage = 0.04, progress = "40", timestamp = 1715004000 },

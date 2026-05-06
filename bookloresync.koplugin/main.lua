@@ -1147,6 +1147,26 @@ function BookloreSync:hasOpenDocumentForProgressSync()
     return self.ui and self.ui.document and self.ui.document.file and self.ui.document.file ~= ""
 end
 
+---BookloreSync:isProgressSyncEnabled.
+function BookloreSync:isProgressSyncEnabled()
+    if self.progress_sync_enabled == true then
+        return true
+    end
+
+    if not self.settings or type(self.settings.readSetting) ~= "function" then
+        return false
+    end
+
+    local persisted = self.settings:readSetting("progress_sync_enabled")
+    if persisted == true then
+        self.progress_sync_enabled = true
+        self:logWarn("BookloreSync: progress_sync_enabled recovered from persisted settings")
+        return true
+    end
+
+    return false
+end
+
 ---BookloreSync:onPullBookloreCurrentBookProgress.
 function BookloreSync:onPullBookloreCurrentBookProgress()
     if not self:hasOpenDocumentForProgressSync() then
@@ -1156,7 +1176,7 @@ function BookloreSync:onPullBookloreCurrentBookProgress()
         })
         return true
     end
-    if not self.progress_sync_enabled then
+    if not self:isProgressSyncEnabled() then
         UIManager:show(InfoMessage:new{
             text = _("Progress sync is disabled"),
             timeout = 2,
@@ -1186,7 +1206,7 @@ function BookloreSync:onPushBookloreCurrentBookProgress()
         })
         return true
     end
-    if not self.progress_sync_enabled then
+    if not self:isProgressSyncEnabled() then
         UIManager:show(InfoMessage:new{
             text = _("Progress sync is disabled"),
             timeout = 2,
@@ -5956,7 +5976,7 @@ function BookloreSync:runBackgroundProgressFlush(reason)
         self:logDbg("BookloreSync: Background progress flush skipped - already running")
         return false
     end
-    if not self.progress_sync_enabled or self.manual_sync_only then
+    if not self:isProgressSyncEnabled() or self.manual_sync_only then
         return false
     end
     if not self:isNetworkConnected() then
@@ -6041,7 +6061,7 @@ turns, which can lag on some devices and only update after turning stops.
 --]]
 ---BookloreSync:buildKoreaderProgressPayloadForPage.
 function BookloreSync:buildKoreaderProgressPayloadForPage(page, timestamp)
-    if not self.progress_sync_enabled then
+    if not self:isProgressSyncEnabled() then
         return nil, "Progress sync disabled"
     end
 
@@ -6096,7 +6116,7 @@ Queue local KOReader progress into pending_koreader_progress.
 --]]
 ---BookloreSync:queueCurrentKoreaderProgress.
 function BookloreSync:queueCurrentKoreaderProgress()
-    if not self.progress_sync_enabled then
+    if not self:isProgressSyncEnabled() then
         return false
     end
     if not self.db then
@@ -6142,7 +6162,7 @@ end
 
 ---BookloreSync:queueKoreaderProgressPayload.
 function BookloreSync:queueKoreaderProgressPayload(payload)
-    if not self.progress_sync_enabled then
+    if not self:isProgressSyncEnabled() then
         return false
     end
     if not self.db or type(payload) ~= "table" then
@@ -6177,7 +6197,7 @@ Used by rating workflows when "set book to read on rating" is enabled.
 --]]
 ---BookloreSync:queueReadProgressOnRating.
 function BookloreSync:queueReadProgressOnRating(file_path, book_hash)
-    if not self.progress_sync_enabled or not self.progress_sync_set_read_on_rating then
+    if not self:isProgressSyncEnabled() or not self.progress_sync_set_read_on_rating then
         return false
     end
     if not self.db then
@@ -6401,7 +6421,7 @@ Pull remote KOReader progress and optionally apply if newer.
 function BookloreSync:pullKoreaderProgress(interactive)
     interactive = interactive or false
 
-    if not self.progress_sync_enabled then
+    if not self:isProgressSyncEnabled() then
         return false
     end
     if not self.username or self.username == "" or not self.password or self.password == "" then
@@ -7019,7 +7039,7 @@ function BookloreSync:onReaderReady()
     self.progress_sync_last_page_turn_timestamp = os.time()
 
     -- Pull-only on open: allow remote catch-up without recording local state.
-    if self.progress_sync_enabled and self.progress_pull_on_open and self:isNetworkConnected() then
+    if self:isProgressSyncEnabled() and self.progress_pull_on_open and self:isNetworkConnected() then
         self:pullKoreaderProgress(false)
     end
 
@@ -7033,7 +7053,7 @@ Track page turns for KOReader progress sync when trigger is set to every N pages
 --]]
 ---BookloreSync:onPageUpdate.
 function BookloreSync:onPageUpdate(page)
-    if not self.is_enabled or not self.progress_sync_enabled then
+    if not self.is_enabled or not self:isProgressSyncEnabled() then
         return false
     end
     if page == nil then
@@ -7374,7 +7394,7 @@ function BookloreSync:onCloseDocument()
     -- network flush slightly, so close returns quickly on large books.
     -- Existing pending queues and syncPendingSessions pipeline are reused.
     local progress_queued_now = false
-    if self.progress_sync_enabled then
+    if self:isProgressSyncEnabled() then
         progress_queued_now = self:queueCurrentKoreaderProgress()
     end
 
@@ -8043,7 +8063,7 @@ function BookloreSync:onSuspend()
         -- In automatic suspend-sync mode, queue current progress right now and
         -- flush immediately so session/progress are uploaded on suspend instead
         -- of waiting for deferred wake/close pipelines.
-        if self.progress_sync_enabled then
+        if self:isProgressSyncEnabled() then
             local queued_progress = self:queueCurrentKoreaderProgress()
             self:logInfo("BookloreSync: Suspend progress queue result:", tostring(queued_progress))
         end
@@ -8109,7 +8129,7 @@ function BookloreSync:onResume()
             local function runResumeSyncNow()
                 -- Safer ordering on resume: pull first, then push pending.
                 -- Avoids uploading stale local progress before reading remote.
-                if self.progress_sync_enabled and self.progress_pull_on_resume and self:isNetworkConnected() then
+                if self:isProgressSyncEnabled() and self.progress_pull_on_resume and self:isNetworkConnected() then
                     self:pullKoreaderProgress(false)
                 end
 

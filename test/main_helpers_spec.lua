@@ -33,6 +33,24 @@ describe("BookloreSync helper methods", function()
     assert.are.equal("1h 1m 1s", plugin:formatDuration(3661))
   end)
 
+  it("treats stale remote progress that is behind local as equal", function()
+    local direction = plugin:evaluateKoreaderProgressDirection(
+      { percentage = 0.04, progress = "40", timestamp = 1715004000 },
+      { percentage = 0.045, progress = "45", timestamp = 1715007600 }
+    )
+
+    assert.are.equal("equal", direction)
+  end)
+
+  it("keeps backward direction when remote progress is behind but newer", function()
+    local direction = plugin:evaluateKoreaderProgressDirection(
+      { percentage = 0.04, progress = "40", timestamp = 1715007600 },
+      { percentage = 0.045, progress = "45", timestamp = 1715004000 }
+    )
+
+    assert.are.equal("backward", direction)
+  end)
+
   it("rounds progress using configured decimal places", function()
     plugin.progress_decimal_places = 2
     assert.are.equal(33.33, plugin:roundProgress(33.333))

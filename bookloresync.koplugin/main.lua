@@ -6264,10 +6264,9 @@ function BookloreSync:evaluateKoreaderProgressDirection(remote, local_state)
 
     if remote_pct < local_pct then
         if remote_ts > 0 and local_ts > 0 then
-            if remote_ts < local_ts then
-                return "backward"
+            if remote_ts <= local_ts then
+                return "equal"
             end
-            return "forward"
         end
         return "backward"
     end

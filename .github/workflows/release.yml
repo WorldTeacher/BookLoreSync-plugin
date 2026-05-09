@@ -21,8 +21,8 @@ jobs:
 
       - name: Generate version information
         run: |
-          chmod +x generate-version.sh
-          ./generate-version.sh
+          chmod +x scripts/generate-version.sh
+          ./scripts/generate-version.sh
 
       - name: Compile gettext translations
         run: |

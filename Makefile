@@ -10,11 +10,12 @@ help:
 		| sort -k1,1 \
 		| awk -F '\t' '{printf "  %-14s %s\n", $$1, $$2}'
 test: ## Run test suite
-	./run_tests.sh
+	bash ./scripts/run_tests.sh
 
 documentation: ## Serve docs site locally
 	cd docs && zola serve
-
+docs: documentation ## Alias for documentation
+	
 version: ## Compute next version
 	uv run ~/.scripts/next_version.py
 

@@ -111,6 +111,11 @@ function M.new(deps)
     local username        = self.booklore_username
     local password        = self.booklore_password
     local shelf_name      = self.booklore_shelf_name
+    local source_type = (self.booklore_sync_source_type == "magic") and "magic" or "static"
+    local source_shelf_id = tonumber(self.booklore_source_shelf_id)
+    local source_shelf_name = self.booklore_source_shelf_name or shelf_name
+    local magic_shelf_id = tonumber(self.booklore_magic_shelf_id)
+    local magic_shelf_name = self.booklore_magic_shelf_name
     -- Database:init(db_name) always prepends DataStorage:getSettingsDir() + "/",
     -- so pass the bare filename rather than the already-absolute db_path.
     local db_name         = self.db.db_path:match("([^/]+)$") or "booklore-sync.sqlite"
@@ -314,23 +319,64 @@ function M.new(deps)
             local child_api = ChildAPI:new(child_plugin)
             child_api:init(server_url, username, password, child_db)
 
-            local shelf_ok, shelf_id = child_api:getOrCreateShelf(shelf_name, username, password)
-            if not shelf_ok then
-                child_db:close()
-                return { success = false, error = tostring(shelf_id or "Failed to get/create shelf") }
+            local shelf_id
+            local resolved_shelf_name = nil
+            local books_ok
+            local books
+
+            if source_type == "magic" then
+                local magic_ok, magic_source = child_api:resolveMagicShelfSource(magic_shelf_id, magic_shelf_name, username, password)
+                if not magic_ok then
+                    child_db:close()
+                    local err_code = type(magic_source) == "table" and magic_source.code or nil
+                    local err_msg = type(magic_source) == "table" and magic_source.message or tostring(magic_source)
+                    return { success = false, error = err_msg or "Failed to resolve magic shelf source", error_code = err_code }
+                end
+
+                shelf_id = tonumber(magic_source.id)
+                if not shelf_id then
+                    child_db:close()
+                    return { success = false, error = "Resolved magic shelf source missing shelf id" }
+                end
+
+                resolved_shelf_name = magic_source.name
+                books_ok, books = child_api:getBooksInMagicShelf(shelf_id, username, password)
+            else
+                local source_ok, source = child_api:resolveShelfSource(source_shelf_id, source_shelf_name, username, password)
+                if not source_ok then
+                    child_db:close()
+                    local err_code = type(source) == "table" and source.code or nil
+                    local err_msg = type(source) == "table" and source.message or tostring(source)
+                    return { success = false, error = err_msg or "Failed to resolve shelf source", error_code = err_code }
+                end
+
+                shelf_id = tonumber(source.id)
+                if not shelf_id then
+                    child_db:close()
+                    return { success = false, error = "Resolved shelf source missing shelf id" }
+                end
+                resolved_shelf_name = source.name
+                books_ok, books = child_api:getBooksInShelf(shelf_id, username, password)
             end
 
-            local books_ok, books = child_api:getBooksInShelf(shelf_id, username, password)
             if not books_ok then
                 child_db:close()
-                return { success = false, error = tostring(books or "Failed to retrieve books from shelf") }
+                local err_code = type(books) == "table" and books.code or nil
+                local err_msg = type(books) == "table" and books.message or tostring(books)
+                return { success = false, error = err_msg or "Failed to retrieve books from shelf", error_code = err_code }
             end
 
             -- Read the cached shelf state so the parent can compute the delta.
             local cached_state = child_db:getShelfState(shelf_id)
             child_db:close()
 
-            return { success = true, shelf_id = shelf_id, books = books or {}, cached_state = cached_state }
+            return {
+                success = true,
+                shelf_id = shelf_id,
+                resolved_shelf_name = resolved_shelf_name,
+                books = books or {},
+                cached_state = cached_state,
+            }
         end)
 
         -- completed=false means subprocess fork failed
@@ -360,7 +406,18 @@ function M.new(deps)
         if not fetch_result.success then
             UIManager:close(status_dialog)
             self.sync_in_progress = false
-            local msg = T(_("Sync failed: %1"), fetch_result.error or "unknown error")
+            local err_code = tonumber(fetch_result.error_code)
+            local err_text = tostring(fetch_result.error or "unknown error")
+            local mapped
+            if err_code == 401 then
+                mapped = _("Authentication failed while accessing shelf. Please re-check your BookLore credentials.")
+            elseif err_code == 403 then
+                mapped = _("Shelf access denied. The selected shelf may be private or not shared with this account.")
+            elseif err_code == 404 then
+                mapped = _("Configured shelf is not accessible. Verify the shelf ID/name in Shelf Sync settings.")
+            end
+            local msg = mapped and T(_("Sync failed: %1"), mapped)
+                or T(_("Sync failed: %1"), err_text)
             self:logErr("BookloreSync: syncFromBookloreShelf - phase 1 error:", fetch_result.error)
             if not silent and not self.silent_messages then
                 UIManager:show(InfoMessage:new{ text = msg, timeout = 4 })
@@ -377,18 +434,29 @@ function M.new(deps)
             self.settings:flush()
         end
 
+        if fetch_result.resolved_shelf_name and fetch_result.resolved_shelf_name ~= "" then
+            if source_type == "magic" then
+                self.booklore_shelf_name = fetch_result.resolved_shelf_name
+                self.booklore_magic_shelf_name = fetch_result.resolved_shelf_name
+                self.settings:saveSetting("booklore_shelf_name", self.booklore_shelf_name)
+                self.settings:saveSetting("booklore_magic_shelf_name", self.booklore_magic_shelf_name)
+            else
+                self.booklore_source_shelf_name = fetch_result.resolved_shelf_name
+                self.settings:saveSetting("booklore_source_shelf_name", self.booklore_source_shelf_name)
+            end
+            self.settings:flush()
+        end
+
         local books = fetch_result.books
-        if type(books) ~= "table" or #books == 0 then
+        if type(books) ~= "table" then
             UIManager:close(status_dialog)
             self.sync_in_progress = false
-            local msg = _("Shelf is empty - no books to sync")
-            -- Shelf is now confirmed empty - save that state so the next sync
-            -- also exits fast (no books to add; everything already removed).
-            self.db:saveShelfState(new_shelf_id, "[]")
+            local msg = _("Sync failed: invalid shelf payload")
+            self:logErr("BookloreSync: syncFromBookloreShelf - books payload is not a table")
             if not silent and not self.silent_messages then
-                UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
+                UIManager:show(InfoMessage:new{ text = msg, timeout = 4 })
             end
-            if on_complete then on_complete(true, msg) end
+            if on_complete then on_complete(false, msg) end
             return
         end
 

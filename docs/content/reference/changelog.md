@@ -10,6 +10,25 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 ---
 
+## 4.3.0
+
+### Features
+
+- **Shelf source selector:** Added unified **Select Shelf** flow that lists accessible standard and Magic shelves together, with source-type-aware selection.
+- **Magic Shelf sync source:** Added Magic Shelf source support (name/ID resolution plus paged Magic Shelf book loading).
+- **Private standard shelf support:** Added explicit standard shelf source ID support so private shelves can be synced reliably.
+
+### Improvements
+
+- **Shelf access diagnostics:** Shelf sync now maps common access failures (`401`, `403`, `404`) to clearer user-facing error messages.
+- **Shelf settings labels:** Renamed the shelf source menu label from **Source settings** to **Select Shelf** for clearer navigation.
+
+### Documentation
+
+- Updated Shelf Sync, Settings Reference, and API Endpoints docs for source-type selection (standard vs Magic), explicit source IDs, and new shelf endpoint usage.
+
+---
+
 ## 4.0.1 - 4.2.0
 
 ### Features

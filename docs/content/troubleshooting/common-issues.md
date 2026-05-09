@@ -128,6 +128,32 @@ You can disable that integration toggle if you want to control Sync Mode manuall
 
 ---
 
+## Shelf sync fails with access/configuration errors
+
+**Symptom:** Shelf sync fails early with errors like:
+
+- *Authentication failed while accessing shelf*
+- *Shelf access denied*
+- *Configured shelf is not accessible*
+
+**Cause:** The configured shelf source (type, ID, or name) does not match what the current BookLore account can access.
+
+**Resolution:**
+
+1. Verify **BookLore Account** credentials in **Settings → Connection Setup → Configure BookLore Account**.
+2. Re-select the source from **Tools → BookLore Sync → Shelf Sync → Select Shelf → Select shelf (Standard + Magic)**.
+3. If you manually edited source names, confirm you edited the field matching the active source type:
+   - **Shelf source name** for standard shelves
+   - **Magic Shelf name** for Magic Shelves
+4. For private standard shelves, prefer selecting from the shelf picker so the explicit source ID is saved.
+
+**Verification:**
+
+- Run **Sync from BookLore Shelf**.
+- If resolution succeeds, sync moves past metadata loading and begins per-book processing.
+
+---
+
 ## Book not found on server
 
 **Symptom:** Sessions are saved locally (pending count goes up) but fail to upload with a "book not found" error.

@@ -89,10 +89,22 @@ function M.new(deps)
     return synced_count, failed_count
     end
 
-    function module.syncPendingDeletions(self, silent)
+function module.syncPendingDeletions(self, silent)
     silent = silent or false
 
     if not self.db then return 0, 0 end
+
+    if self.booklore_sync_source_type == "magic" then
+        local deletions = self.db:getPendingDeletions()
+        if deletions and #deletions > 0 then
+            self:logInfo("BookloreSync: syncPendingDeletions - clearing", #deletions, "queued deletion(s) for magic shelf source")
+            for _, deletion in ipairs(deletions) do
+                self.db:removePendingDeletion(deletion.id)
+            end
+            return #deletions, 0
+        end
+        return 0, 0
+    end
 
     local deletions = self.db:getPendingDeletions()
     if not deletions or #deletions == 0 then return 0, 0 end
@@ -136,7 +148,7 @@ function M.new(deps)
             goto del_continue
         end
 
-        local shelf_id = self.shelf_id
+        local shelf_id = tonumber(self.booklore_source_shelf_id) or self.shelf_id
         if not shelf_id then
             self:logWarn("BookloreSync: syncPendingDeletions - no shelf_id configured, cannot unassign book, skipping")
             self.db:incrementDeletionRetry(deletion.id)

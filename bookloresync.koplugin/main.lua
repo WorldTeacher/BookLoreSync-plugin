@@ -806,6 +806,14 @@ function BookloreSync:init()
 
     -- Shelf sync settings
     self.booklore_shelf_name         = self.settings:readSetting("booklore_shelf_name")  or "KOReader"
+    self.booklore_sync_source_type   = self.settings:readSetting("booklore_sync_source_type") or "static"
+    if self.booklore_sync_source_type ~= "magic" then
+        self.booklore_sync_source_type = "static"
+    end
+    self.booklore_source_shelf_name  = self.settings:readSetting("booklore_source_shelf_name") or self.booklore_shelf_name
+    self.booklore_source_shelf_id    = tonumber(self.settings:readSetting("booklore_source_shelf_id"))
+    self.booklore_magic_shelf_name   = self.settings:readSetting("booklore_magic_shelf_name") or self.booklore_shelf_name
+    self.booklore_magic_shelf_id     = tonumber(self.settings:readSetting("booklore_magic_shelf_id"))
     self.shelf_id                    = self.settings:readSetting("shelf_id")
     self.download_dir                = self.settings:readSetting("download_dir")
                                        or self:_detectDefaultDownloadDir()
@@ -1055,7 +1063,7 @@ function BookloreSync:registerDispatcherActions()
     Dispatcher:registerAction("booklore_sync_shelf", {
         category = "none",
         event = "SyncBookloreShelf",
-        title = _("BookLoreSync: Sync from Booklore Shelf"),
+        title = _("BookLoreSync: Sync Booklore Shelf"),
         general = true,
     })
     Dispatcher:registerAction("booklore_pull_current_book_progress", {
@@ -4265,6 +4273,195 @@ function BookloreSync:addToMainMenu(menu_items)
         })
     end
 
+    local source_selector
+
+    local function boolLabel(value)
+        if value == true then return _("yes") end
+        if value == false then return _("no") end
+        if value == 1 or value == "1" or value == "true" then return _("yes") end
+        if value == 0 or value == "0" or value == "false" then return _("no") end
+        return "-"
+    end
+
+    local function pickTitleCount(shelf)
+        return tonumber(shelf.num_titles)
+            or tonumber(shelf.numTitles)
+            or tonumber(shelf.num_books)
+            or tonumber(shelf.numBooks)
+            or tonumber(shelf.book_count)
+            or tonumber(shelf.bookCount)
+            or tonumber(shelf.booksCount)
+            or tonumber(shelf.totalElements)
+            or tonumber(shelf.itemCount)
+            or tonumber(shelf.count)
+            or nil
+    end
+
+    local function openShelfSelector()
+        if self.booklore_username == "" or self.booklore_password == "" then
+            UIManager:show(InfoMessage:new{ text = _("Booklore credentials not configured"), timeout = 2 })
+            return
+        end
+
+        self:refreshEffectiveServerUrl()
+        self.api:init(self.server_url, self.username, self.password, self.db)
+
+        local loading = InfoMessage:new{ text = _("Loading shelves...") }
+        UIManager:show(loading)
+
+        UIManager:scheduleIn(0, function()
+            local standard_ok, standard_or_err = self.api:getAccessibleShelves(self.booklore_username, self.booklore_password)
+            local magic_ok, magic_or_err = self.api:getMagicShelves(self.booklore_username, self.booklore_password)
+
+            UIManager:close(loading)
+
+            local item_table = {}
+
+            if standard_ok then
+                for i, shelf in ipairs(standard_or_err or {}) do
+                    local id = tonumber(shelf.id)
+                    if id then
+                        local name = shelf.name or _("Shelf")
+                        local title_count = pickTitleCount(shelf)
+                        local is_public = shelf.publicShelf
+                        if is_public == nil then is_public = shelf.isPublic end
+                        if is_public == nil then is_public = shelf.is_public end
+                        local shelf_type = shelf.type or "standard"
+                        local text = string.format(
+                            "%s\n%s: %s | %s: %s | %s: %s",
+                            name,
+                            _("Type"), tostring(shelf_type),
+                            _("Public"), boolLabel(is_public),
+                            _("# Titles"), tostring(title_count or "?")
+                        )
+                        table.insert(item_table, {
+                            text = text,
+                            shelf_id = id,
+                            shelf_name = name,
+                            source_kind = "static",
+                        })
+                    end
+                end
+            end
+
+            if magic_ok then
+                for i, shelf in ipairs(magic_or_err or {}) do
+                    local id = tonumber(shelf.id)
+                    if id then
+                        local name = shelf.name or _("Magic Shelf")
+                        local title_count = pickTitleCount(shelf)
+                        if title_count == nil then
+                            local count_ok, count_or_err = self.api:getMagicShelfBookCount(
+                                id,
+                                self.booklore_username,
+                                self.booklore_password
+                            )
+                            if count_ok then
+                                title_count = tonumber(count_or_err)
+                            else
+                                self:logWarn(
+                                    "BookloreSync: openShelfSelector - failed to fetch Magic Shelf title count for id",
+                                    id,
+                                    count_or_err and count_or_err.message or count_or_err
+                                )
+                            end
+                        end
+                        local is_public = shelf.publicShelf
+                        if is_public == nil then is_public = shelf.isPublic end
+                        if is_public == nil then is_public = shelf.is_public end
+                        local shelf_type = shelf.type or "magic"
+                        local text = string.format(
+                            "%s\n%s: %s | %s: %s | %s: %s",
+                            name,
+                            _("Type"), tostring(shelf_type),
+                            _("Public"), boolLabel(is_public),
+                            _("# Titles"), tostring(title_count or "?")
+                        )
+                        table.insert(item_table, {
+                            text = text,
+                            shelf_id = id,
+                            shelf_name = name,
+                            source_kind = "magic",
+                        })
+                    end
+                end
+            end
+
+            table.sort(item_table, function(a, b)
+                local a_name = tostring(a.shelf_name or ""):lower()
+                local b_name = tostring(b.shelf_name or ""):lower()
+                if a_name ~= b_name then
+                    return a_name < b_name
+                end
+                return tostring(a.source_kind or "") < tostring(b.source_kind or "")
+            end)
+
+            if #item_table == 0 then
+                local err_parts = {}
+                if not standard_ok then
+                    local err_msg = type(standard_or_err) == "table" and standard_or_err.message or tostring(standard_or_err)
+                    table.insert(err_parts, T(_("Standard: %1"), err_msg))
+                end
+                if not magic_ok then
+                    local err_msg = type(magic_or_err) == "table" and magic_or_err.message or tostring(magic_or_err)
+                    table.insert(err_parts, T(_("Magic: %1"), err_msg))
+                end
+                if #err_parts > 0 then
+                    UIManager:show(InfoMessage:new{ text = T(_("Failed to load shelves:\n%1"), table.concat(err_parts, "\n")), timeout = 4 })
+                else
+                    UIManager:show(InfoMessage:new{ text = _("No selectable shelves found"), timeout = 2 })
+                end
+                return
+            end
+
+            source_selector = Menu:new{
+                title = _("Select Shelf"),
+                item_table = item_table,
+                single_line = false,
+                multilines_show_more_text = true,
+                fullscreen = true,
+                onMenuSelect = function(menu_widget, item)
+                    UIManager:close(source_selector)
+                    self.shelf_id = nil
+                    self.settings:saveSetting("shelf_id", nil)
+                    if item.source_kind == "magic" then
+                        self.booklore_sync_source_type = "magic"
+                        self.booklore_shelf_name = item.shelf_name
+                        self.booklore_magic_shelf_name = item.shelf_name
+                        self.booklore_magic_shelf_id = item.shelf_id
+                        self.booklore_source_shelf_id = nil
+                        self.settings:saveSetting("booklore_sync_source_type", "magic")
+                        self.settings:saveSetting("booklore_shelf_name", item.shelf_name)
+                        self.settings:saveSetting("booklore_magic_shelf_name", item.shelf_name)
+                        self.settings:saveSetting("booklore_magic_shelf_id", item.shelf_id)
+                        self.settings:saveSetting("booklore_source_shelf_id", nil)
+                    else
+                        self.booklore_sync_source_type = "static"
+                        self.booklore_shelf_name = item.shelf_name
+                        self.booklore_source_shelf_name = item.shelf_name
+                        self.booklore_source_shelf_id = item.shelf_id
+                        self.booklore_magic_shelf_id = nil
+                        self.settings:saveSetting("booklore_sync_source_type", "static")
+                        self.settings:saveSetting("booklore_shelf_name", item.shelf_name)
+                        self.settings:saveSetting("booklore_source_shelf_name", item.shelf_name)
+                        self.settings:saveSetting("booklore_source_shelf_id", item.shelf_id)
+                        self.settings:saveSetting("booklore_magic_shelf_id", nil)
+                    end
+                    self.settings:flush()
+                    UIManager:show(ConfirmBox:new{
+                        text = T(_("Selected shelf: %1\n\nSync now?"), item.shelf_name),
+                        ok_text = _("Yes"),
+                        cancel_text = _("No"),
+                        ok_callback = function()
+                            self:onSyncBookloreShelf()
+                        end,
+                    })
+                end,
+            }
+            UIManager:show(source_selector)
+        end)
+    end
+
     local base_menu = {}
     
     local enable_sync_menu = {
@@ -4770,8 +4967,8 @@ function BookloreSync:addToMainMenu(menu_items)
         text = _("Shelf Sync"),
         sub_item_table = {
             {
-                text = _("Sync from Booklore Shelf"),
-                help_text = _("Download books from your Booklore shelf into the local download directory. Books already present are skipped."),
+                text = _("Sync Booklore Shelf"),
+                help_text = _("Syncronizes the selected shelf with KOReader. Downloads books on the shelf to the device and optionally deletes local files for removed shelf books. Syncs metadata like title/author and can optionally use original server filenames. Requires a shelf to be selected and WiFi connection. Shelf removal for static shelves only"),
                 callback = function()
                     self:onSyncBookloreShelf()
                 end,
@@ -4862,42 +5059,111 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
-                text_func = function()
-                    return T(_("Shelf name: %1"), self.booklore_shelf_name)
-                end,
-                help_text = _("Name of the Booklore shelf to sync. The shelf is created automatically if it does not exist."),
-                keep_menu_open = true,
-                callback = function()
-                    local dialog
-                    dialog = InputDialog:new{
-                        title   = _("Booklore shelf name"),
-                        input   = self.booklore_shelf_name,
-                        buttons = {{
-                            {
-                                text     = _("Cancel"),
-                                callback = function() UIManager:close(dialog) end,
-                            },
-                            {
-                                text     = _("Save"),
-                                is_enter_default = true,
-                                callback = function()
-                                    local val = dialog:getInputText()
-                                    if val and val ~= "" then
-                                        self.booklore_shelf_name = val
-                                        self.settings:saveSetting("booklore_shelf_name", val)
-                                        -- Invalidate cached shelf_id so it is re-resolved
-                                        self.shelf_id = nil
-                                        self.settings:saveSetting("shelf_id", nil)
-                                        self.settings:flush()
-                                    end
-                                    UIManager:close(dialog)
-                                end,
-                            },
-                        }},
-                    }
-                    UIManager:show(dialog)
-                    dialog:onShowKeyboard()
-                end,
+                text = _("Select Shelf"),
+                help_text = _("Select a standard or Magic shelf source and configure the matching source name."),
+                sub_item_table = {
+                    {
+                        text_func = function()
+                            local source_type = (self.booklore_sync_source_type == "magic") and _("Magic") or _("Standard")
+                            local source_name = self.booklore_shelf_name or ""
+                            if source_name == "" then
+                                source_name = _("(not set)")
+                            end
+                            return T(_("Current source: %1 | %2"), source_type, source_name)
+                        end,
+                        enabled = false,
+                    },
+                    {
+                        text = _("Select shelf (Standard + Magic)"),
+                        help_text = _("Load all accessible standard and Magic shelves from Booklore and pick one as sync source."),
+                        keep_menu_open = true,
+                        callback = function()
+                            openShelfSelector()
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Shelf source name: %1"), self.booklore_source_shelf_name)
+                        end,
+                        help_text = _("Name of the standard shelf source to sync."),
+                        enabled_func = function()
+                            return self.booklore_sync_source_type ~= "magic"
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            local dialog
+                            dialog = InputDialog:new{
+                                title   = _("Booklore shelf source name"),
+                                input   = self.booklore_source_shelf_name,
+                                buttons = {{
+                                    { text = _("Cancel"), callback = function() UIManager:close(dialog) end },
+                                    {
+                                        text = _("Save"),
+                                        is_enter_default = true,
+                                        callback = function()
+                                            local val = dialog:getInputText()
+                                            if val and val ~= "" then
+                                                self.booklore_shelf_name = val
+                                                self.booklore_source_shelf_name = val
+                                                self.booklore_source_shelf_id = nil
+                                                self.settings:saveSetting("booklore_shelf_name", val)
+                                                self.settings:saveSetting("booklore_source_shelf_name", val)
+                                                self.settings:saveSetting("booklore_source_shelf_id", nil)
+                                                self.shelf_id = nil
+                                                self.settings:saveSetting("shelf_id", nil)
+                                                self.settings:flush()
+                                            end
+                                            UIManager:close(dialog)
+                                        end,
+                                    },
+                                }},
+                            }
+                            UIManager:show(dialog)
+                            dialog:onShowKeyboard()
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Magic Shelf name: %1"), self.booklore_magic_shelf_name)
+                        end,
+                        help_text = _("Name of the Magic Shelf source to sync."),
+                        enabled_func = function()
+                            return self.booklore_sync_source_type == "magic"
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            local dialog
+                            dialog = InputDialog:new{
+                                title   = _("Booklore Magic Shelf name"),
+                                input   = self.booklore_magic_shelf_name,
+                                buttons = {{
+                                    { text = _("Cancel"), callback = function() UIManager:close(dialog) end },
+                                    {
+                                        text = _("Save"),
+                                        is_enter_default = true,
+                                        callback = function()
+                                            local val = dialog:getInputText()
+                                            if val and val ~= "" then
+                                                self.booklore_shelf_name = val
+                                                self.booklore_magic_shelf_name = val
+                                                self.booklore_magic_shelf_id = nil
+                                                self.settings:saveSetting("booklore_shelf_name", val)
+                                                self.settings:saveSetting("booklore_magic_shelf_name", val)
+                                                self.settings:saveSetting("booklore_magic_shelf_id", nil)
+                                                self.shelf_id = nil
+                                                self.settings:saveSetting("shelf_id", nil)
+                                                self.settings:flush()
+                                            end
+                                            UIManager:close(dialog)
+                                        end,
+                                    },
+                                }},
+                            }
+                            UIManager:show(dialog)
+                            dialog:onShowKeyboard()
+                        end,
+                    },
+                },
             },
             {
                 text_func = function()
@@ -8099,6 +8365,20 @@ function BookloreSync:onResume()
 
     self:logInfo("BookloreSync: Device resuming")
 
+    -- Shelf wake sync is independent from session/progress resume sync and
+    -- should arm on every wake when enabled.
+    if self.auto_sync_shelf_on_resume then
+        self.needs_wake_sync = true
+        if self:isNetworkConnected() then
+            self:logInfo("BookloreSync: Auto shelf wake sync armed (network connected) - scheduling")
+            self:_scheduleWakeSync()
+        else
+            self:logInfo("BookloreSync: Auto shelf wake sync armed (waiting for network)")
+        end
+    else
+        self.needs_wake_sync = false
+    end
+
     -- Cooldown guard: skip auto-sync if we ran one less than 5 minutes ago.
     -- Exception: if sessions/progress are pending, force a resume sync to avoid
     -- leaving deferred close data queued until a later trigger.
@@ -8134,17 +8414,6 @@ function BookloreSync:onResume()
                 end
 
                 self:syncPendingSessions(true)
-
-                -- Flag a deferred wake-sync so the shelf can be updated once
-                -- the network is fully up. If WiFi is already connected,
-                -- schedule it directly; otherwise onNetworkConnected will pick it up.
-                if self.auto_sync_shelf_on_resume then
-                    self.needs_wake_sync = true
-                    if self:isNetworkConnected() then
-                        self:logInfo("BookloreSync: WiFi already connected on resume, scheduling delayed wake sync")
-                        self:_scheduleWakeSync()
-                    end
-                end
 
                 self:logInfo("BookloreSync: Checking for unmatched books")
                 self:resolveUnmatchedBooks(true)

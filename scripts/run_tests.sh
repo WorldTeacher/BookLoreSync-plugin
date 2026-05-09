@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
 # run_tests.sh - Run framework-based Lua tests with coverage.
-# Exits 0 only if tests pass and coverage artifacts are generated.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
+cd "$REPO_ROOT"
+
+if ! command -v lua &>/dev/null; then
+    echo "ERROR: lua not found in PATH" >&2
+    exit 1
+fi
+
+LUA_VERSION="$(lua -e 'print(_VERSION:match("Lua (%d+%.%d+)"))')"
+LUAROCKS_BIN="$(command -v "luarocks-$LUA_VERSION" || command -v luarocks || true)"
+
+if [ -n "${LUAROCKS_BIN:-}" ]; then
+    eval "$($LUAROCKS_BIN --lua-version="$LUA_VERSION" path)"
+fi
 
 if ! command -v busted &>/dev/null; then
     echo "ERROR: busted not found in PATH (install via luarocks install busted)" >&2
@@ -20,11 +32,6 @@ fi
 if ! command -v luacov-cobertura &>/dev/null; then
     echo "ERROR: luacov-cobertura not found in PATH (install via luarocks install luacov-cobertura)" >&2
     exit 1
-fi
-
-LUAROCKS_BIN="$(command -v luarocks-5.4 || command -v luarocks || true)"
-if [ -n "${LUAROCKS_BIN:-}" ]; then
-    eval "$($LUAROCKS_BIN --lua-version=5.4 path 2>/dev/null || $LUAROCKS_BIN path)"
 fi
 
 rm -f luacov.stats.out luacov.report.out coverage.xml

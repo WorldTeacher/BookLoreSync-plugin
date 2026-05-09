@@ -25,5 +25,5 @@ translate: ## Update translation files
 generate_version: ## Generate version file
 	sh ./scripts/generate-version.sh
 
-changelog-pregen: ## Pre-generate next changelog file
-	bash ./scripts/changelog-pregen.sh
+changelog-pregen: ## Pre-generate changelog (CHG_ARGS=--docs for docs changelog)
+	bash ./scripts/changelog-pregen.sh $(CHG_ARGS)

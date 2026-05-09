@@ -533,7 +533,7 @@ function M.new(deps)
                 local ok_partial = pcall(function()
                     for _, nb in ipairs(new_books) do
                         self.db:saveBookCache(nb.filepath, nb.hash, nb.book_id,
-                            nb.title, nb.author, nb.isbn10, nb.isbn13)
+                            nb.title, nb.author, nb.isbn10, nb.isbn13, nb.server_pagecount)
                     end
                 end)
                 if ok_partial then self.db:commit() else self.db:rollback() end
@@ -659,9 +659,17 @@ function M.new(deps)
             local cap_book_id  = book_id
             local cap_filepath = filepath
             local cap_title    = book.title
-            local cap_author   = book.author
-            local cap_isbn10   = book.isbn10
-            local cap_isbn13   = book.isbn13
+            local cap_author   = book.author or book.authors
+            local cap_isbn10   = book.isbn10 or (type(book.metadata) == "table" and book.metadata.isbn10) or nil
+            local cap_isbn13   = book.isbn13 or (type(book.metadata) == "table" and book.metadata.isbn13) or nil
+            local cap_server_pagecount = tonumber(book.pagecount)
+                or tonumber(book.server_pagecount)
+                or (type(book.metadata) == "table" and (tonumber(book.metadata.pagecount) or tonumber(book.metadata.pageCount)))
+            if cap_server_pagecount and cap_server_pagecount > 0 then
+                cap_server_pagecount = math.floor(cap_server_pagecount + 0.5)
+            else
+                cap_server_pagecount = nil
+            end
 
             local book_completed, book_result = runSubprocess(function()
                 -- Child: check / download / hash one book.
@@ -717,6 +725,7 @@ function M.new(deps)
                             filepath = cap_filepath, hash = book_result.hash,
                             book_id  = cap_book_id,  title = cap_title,
                             author   = cap_author,   isbn10 = cap_isbn10, isbn13 = cap_isbn13,
+                            server_pagecount = cap_server_pagecount,
                         })
                     elseif book_result.status == "skipped_uncached" then
                         skipped = skipped + 1
@@ -724,6 +733,7 @@ function M.new(deps)
                             filepath = cap_filepath, hash = book_result.hash,
                             book_id  = cap_book_id,  title = cap_title,
                             author   = cap_author,   isbn10 = cap_isbn10, isbn13 = cap_isbn13,
+                            server_pagecount = cap_server_pagecount,
                         })
                     elseif book_result.status == "skipped" then
                         skipped = skipped + 1
@@ -746,6 +756,7 @@ function M.new(deps)
                     filepath = cap_filepath, hash = book_result.hash,
                     book_id  = cap_book_id,  title = cap_title,
                     author   = cap_author,   isbn10 = cap_isbn10, isbn13 = cap_isbn13,
+                    server_pagecount = cap_server_pagecount,
                 })
             elseif book_result.status == "skipped_uncached" then
                 skipped = skipped + 1
@@ -753,6 +764,7 @@ function M.new(deps)
                     filepath = cap_filepath, hash = book_result.hash,
                     book_id  = cap_book_id,  title = cap_title,
                     author   = cap_author,   isbn10 = cap_isbn10, isbn13 = cap_isbn13,
+                    server_pagecount = cap_server_pagecount,
                 })
             elseif book_result.status == "skipped" then
                 skipped = skipped + 1
@@ -773,7 +785,7 @@ function M.new(deps)
         local ok_commit, err_commit = pcall(function()
             for _, nb in ipairs(new_books) do
                 self.db:saveBookCache(nb.filepath, nb.hash, nb.book_id,
-                    nb.title, nb.author, nb.isbn10, nb.isbn13)
+                    nb.title, nb.author, nb.isbn10, nb.isbn13, nb.server_pagecount)
             end
 
             if delete_removed then

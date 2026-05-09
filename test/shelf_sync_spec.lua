@@ -745,7 +745,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     assert.is_false(p.sync_in_progress)
   end)
 
-  it("downloads a missing book and queues a DB write", function()
+  it("downloads a missing book and queues a DB write with metadata", function()
     -- File does NOT exist on disk initially
     local filepath = "/tmp/test-dl/NewBook_7.epub"
     package.preload["libs/libkoreader-lfs"] = function()
@@ -754,7 +754,17 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     end
     package.preload["booklore_api_client"] = function()
       return make_api_stub({
-        books       = { { id = 7, title = "NewBook", extension = "epub" } },
+        books       = {
+          {
+            id = 7,
+            title = "NewBook",
+            authors = "Jane Doe",
+            isbn10 = "1234567890",
+            isbn13 = "9781234567897",
+            pagecount = 321,
+            extension = "epub",
+          },
+        },
         download_ok = true,
       })
     end
@@ -764,8 +774,16 @@ describe("BookloreSync:syncFromBookloreShelf", function()
 
     local p = make_plugin()
     local saved = {}
-    p.db.saveBookCache = function(_, fp, hash, bid, title, author, isbn10, isbn13)
-      table.insert(saved, { fp = fp, bid = bid, title = title })
+    p.db.saveBookCache = function(_, fp, hash, bid, title, author, isbn10, isbn13, server_pagecount)
+      table.insert(saved, {
+        fp = fp,
+        bid = bid,
+        title = title,
+        author = author,
+        isbn10 = isbn10,
+        isbn13 = isbn13,
+        server_pagecount = server_pagecount,
+      })
     end
 
     p:syncFromBookloreShelf(true)
@@ -773,6 +791,10 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     assert.are.equal(1, #saved)
     assert.are.equal(7, saved[1].bid)
     assert.are.equal("NewBook", saved[1].title)
+    assert.are.equal("Jane Doe", saved[1].author)
+    assert.are.equal("1234567890", saved[1].isbn10)
+    assert.are.equal("9781234567897", saved[1].isbn13)
+    assert.are.equal(321, saved[1].server_pagecount)
     assert.is_false(p.sync_in_progress)
   end)
 

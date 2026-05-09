@@ -25,6 +25,7 @@ All notable changes to the BookLore Sync plugin are documented here.
 * **menu:** move reading status into row 3
 * **progress:** better timestamp handling for past timestamps
 * **progress:** implement progress sync enabled state recovery from persisted settings
+* **shelf-sync:** store metadata from books in db on sync
 
 ### Maintenance
 
@@ -32,6 +33,7 @@ All notable changes to the BookLore Sync plugin are documented here.
 * **makefile:** update makefile
 * **makefile:** update available commands and improve help output
 * **scripts:** add changelog pregen script
+* **docs:** update docs changelog
 
 ### Other Changes
 

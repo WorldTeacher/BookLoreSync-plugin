@@ -6,7 +6,7 @@ weight = 5
 
 # Shelf Sync
 
-Shelf sync is a two-way sync feature. On the **pull** side, the plugin downloads books from a named BookLore shelf to your e-reader, letting you manage your reading queue from the BookLore web UI. On the **push** side, when you delete a downloaded book from your device, the plugin automatically removes that book from the shelf in BookLore.
+Shelf sync is a two-way sync feature. On the **pull** side, the plugin downloads books from a BookLore shelf source (standard shelf or Magic Shelf) to your e-reader, letting you manage your reading queue from the BookLore web UI. On the **push** side (standard shelves only), when you delete a downloaded book from your device, the plugin removes that book from the configured shelf in BookLore.
 
 ---
 
@@ -43,6 +43,8 @@ flowchart TD
     L -->|No| N
 {% end %}
 
+> **Note:** The diagram shows the standard-shelf fetch path. For Magic Shelves, phase 1 resolves the Magic Shelf source and fetches books through the Magic Shelf endpoints.
+
 ### Three-phase execution
 
 Shelf sync runs in three phases. Each network operation happens in a subprocess so the UI thread is not blocked, but a modal status dialog is shown for the duration and the device is otherwise not usable:
@@ -57,9 +59,9 @@ A persistent **Cancel** button is shown throughout. Pressing it finishes the cur
 
 ---
 
-## Push side: local deletion → shelf removal
+## Push side (standard shelves): local deletion → shelf removal
 
-When you delete a book file from your device (via the KOReader file manager), the plugin unassigns that book from the BookLore shelf automatically:
+When you delete a book file from your device (via the KOReader file manager), the plugin unassigns that book from the configured **standard shelf source** automatically:
 
 ```
 POST /api/v1/books/shelves
@@ -68,6 +70,8 @@ POST /api/v1/books/shelves
 
 If the device is offline at the time of deletion, the removal is queued and retried the next time a sync runs.
 
+> **Note:** Magic Shelves are computed views. They are not directly assign/unassign targets, so this push-side unassign flow applies to standard shelves only.
+
 ---
 
 ## Prerequisites
@@ -75,7 +79,7 @@ If the device is offline at the time of deletion, the removal is queued and retr
 - **BookLore credentials** configured (Bearer token authentication). See [Connection Setup](@/configuration/authentication.md).
 - Sufficient local storage in the download directory.
 
-> **Note:** If no shelf with the configured name exists in BookLore, the plugin creates it automatically on the first sync. By default the shelf is created as **public**.
+> **Note:** For **standard shelf sources**, if no shelf with the configured name exists in BookLore, the plugin creates it automatically on first sync (as **public** by default). Magic Shelf sources are not auto-created.
 
 ---
 
@@ -84,12 +88,27 @@ If the device is offline at the time of deletion, the removal is queued and retr
 ![KOReader Shelf sync settings](../shelf-sync.png)
 
 1. Open **Tools → BookLore Sync → Shelf Sync**.
-2. Review or change the **Shelf name** (default: `KOReader`). The plugin matches shelves case-insensitively.
-3. Optionally change the **Download directory** (see [Download directory](#download-directory) below).
-4. Optionally enable **Auto-sync shelf on wake** to download books automatically 15 seconds after the device wakes from suspend, once Wi-Fi is connected.
-5. Optionally enable **Delete removed shelf books** to remove local files when a book is no longer on the shelf.
-6. Optionally enable **Use original server filename** (default: **on**) to save downloaded books using the server's own filename instead of deriving it from the book title.
-7. Optionally enable **Also delete sidecar (.sdr) on removal** to also remove the KOReader reading-progress folder when a book is deleted. This option is only active when **Delete removed shelf books** is also enabled.
+2. Open **Select Shelf**.
+3. Choose **Select shelf (Standard + Magic)** to load all accessible standard and Magic shelves, then pick one.
+4. Optionally edit the source name manually:
+   - **Shelf source name** when using a standard shelf source.
+   - **Magic Shelf name** when using a Magic shelf source.
+5. Optionally change the **Download directory** (see [Download directory](#download-directory) below).
+6. Optionally enable **Auto-sync shelf on wake** to download books automatically 15 seconds after the device wakes from suspend, once Wi-Fi is connected.
+7. Optionally enable **Delete removed shelf books** to remove local files when a book is no longer on the shelf.
+8. Optionally enable **Use original server filename** (default: **on**) to save downloaded books using the server's own filename instead of deriving it from the book title.
+9. Optionally enable **Also delete sidecar (.sdr) on removal** to also remove the KOReader reading-progress folder when a book is deleted. This option is only active when **Delete removed shelf books** is also enabled.
+
+### Shelf source resolution behavior
+
+Shelf source resolution depends on source type:
+
+| Source type | Resolution order |
+|------------|------------------|
+| **Standard** | 1) Explicit shelf ID (if set), 2) shelf name (case-insensitive), 3) create standard shelf by name if not found |
+| **Magic** | 1) Explicit Magic Shelf ID (if set), 2) Magic Shelf name (case-insensitive) |
+
+The selector stores both source type and source ID. If you manually change a source name, the stored source ID is cleared and resolved again on the next sync.
 
 ---
 
@@ -186,7 +205,7 @@ If this setting is disabled (the default), books already on the device are never
 
 ---
 
-## Shelf creation
+## Standard shelf creation
 
 If no shelf with the configured name exists in BookLore, the plugin creates it automatically on the first sync:
 

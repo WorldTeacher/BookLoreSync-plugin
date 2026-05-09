@@ -10,209 +10,907 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 ---
 
-## 4.3.0
+## 4.3.0 (2026-05-09)
 
 ### Features
 
-- **Shelf source selector:** Added unified **Select Shelf** flow that lists accessible standard and Magic shelves together, with source-type-aware selection.
-- **Magic Shelf sync source:** Added Magic Shelf source support (name/ID resolution plus paged Magic Shelf book loading).
-- **Private standard shelf support:** Added explicit standard shelf source ID support so private shelves can be synced reliably.
+* **reading-status:** add functionality to update reading status for books
+* **menu:** implement file dialog actions for syncing and tracking books
+* **shelf-sync:** implement private shelf sync support with explicit ID...
 
-### Improvements
+### Bug Fixes
 
-- **Shelf access diagnostics:** Shelf sync now maps common access failures (`401`, `403`, `404`) to clearer user-facing error messages.
-- **Shelf settings labels:** Renamed the shelf source menu label from **Source settings** to **Select Shelf** for clearer navigation.
+* **migration:** store migration in database
+* **menu:** remove double reading status entry, update makefile
+* **menu:** move reading status into row 3
+* **progress:** better timestamp handling for past timestamps
+* **progress:** implement progress sync enabled state recovery from persisted settings
 
-### Documentation
+### Maintenance
 
-- Updated Shelf Sync, Settings Reference, and API Endpoints docs for source-type selection (standard vs Magic), explicit source IDs, and new shelf endpoint usage.
+* **docs:** update docs regarding silent mode
+* **makefile:** update makefile
+* **makefile:** update available commands and improve help output
+* **scripts:** add changelog pregen script
 
----
+### Other Changes
 
-## 4.0.1 - 4.2.0
+* Bugfix/refactor main file
+* Feature/set read status
+
+## 4.2.0 (2026-04-26)
 
 ### Features
 
-- **Progress sync actions:** Added dispatcher actions for **Pull Current Book Progress** and **Push Current Book Progress** so progress can be triggered manually from gestures/buttons.
-- **Progress location normalization:** Added optional normalization of session start/end locations to server page-count scale, plus metadata re-sync support for better page alignment.
+* **settings:** add deletePluginSetting method and integrate into DbSettings...
+* **settings:** add network connect timeout configuration and integrate into sync process
+* **networking:** connection switch
 
-### Improvements
+### Bug Fixes
 
-- **Shelf sync naming:** Updated menu labels from "Shelf Downloads" to **Shelf Sync** for clearer navigation.
-- **Sync/runtime performance:** Reduced overhead in sync paths (including periodic progress updates and exit handling).
-- **Connection diagnostics:** The **Test Connection** result now includes the active connection type (**Local**, **Remote**, or fallback).
+* **database:** enhance clearBookCache to safely manage dependencies and improve logging
+* **network:** add 'run until connect' option for network connection handling
+* **sync:** implement WiFi request handling for various sync operations and...
+* **menu:** reorganize networking options for WiFi connection behavior
+* **network:** implement fallback for sleep function in network connection handling
 
-### Documentation
+### Maintenance
 
-- Updated **Connection Setup** and **Settings Reference** for local/remote URL configuration, automatic network switching keys, and test-connection output details.
+* **tests:** remove deprecated URL handling tests and airplane mode checks
+* **docs:** update documentation for changed networking rules
+* **i10n:** update translations
+* **semantic-release:** release 4.2.0 - [skip ci on prod]
 
-### Testing
+## 4.1.1 (2026-04-19)
 
-- Added helper-level unit coverage for URL resolution and effective URL refresh behavior in network auto-switch scenarios.
+### Bug Fixes
 
-### Bug fixes
+* **upload:** upload sessions on resume from sleep
+* **sync:** enhance auto-sync on suspend to queue and upload session/progress immediately
 
-- **Progress pull safety:** Remote KOReader progress entries at `0%` are ignored during pull, so they are not offered as a sync target and do not overwrite local state.
-- **Progress prompt precision:** Progress conflict prompts now show percentage values with one decimal place.
-- **Stored Data session counts:** The **Show Stored Data** view now reports reading session totals correctly for synced/pending entries.
-- **Network wait compatibility:** Added fallback sleep handling for KOReader builds where `ffi/util.sleep` is unavailable during WiFi connect wait.
+### Performance Improvements
 
----
+* **sync:** change upload to be deferred
+
+### Maintenance
+
+* **makefile:** add Makefile for test and documentation commands
+* **semantic-release:** release 4.1.1 - [skip ci on prod]
+
+### Other Changes
+
+* Revert "Merge branch 'upload-on-resume-from-sleep-if-automatic' into 'develop'"
+
+## 4.1.0 (2026-04-12)
+
+### Features
+
+* **sync:** add session location normalization and metadata resync functionality
+* **sync:** add progress sync gestures
+* **ci:** add Lua formatting, translation validation, and test stages to CI pipeline
+* **perf:** improve performance for sync, exit, periodic progress
+
+### Bug Fixes
+
+* **menu:** restructure main menu items for improved organization and clarity
+* **localization:** update translations for shelf sync and related settings
+* **localization:** remove outdated translation for shelf sync
+* **menu:** rename shelf downloads menu to shelf sync for clarity
+* **localization:** update translations for shelf sync settings
+* **ci:** change stages of Lua formatting and validation checks from test to build
+* **ci:** update stages for Lua formatting and validation checks to run in the test stage
+* **ci:** add production stage to CI pipeline
+* **ci:** update workflow rules for CI pipeline to include push events on develop and main branches
+* **ci:** update lua-format-check image to specific version 2.4.1
+* **ci:** update lua-format-check to use alpine image and install Stylua dynamically
+* **ci:** update lua-tests before_script to use quotes for command execution
+* **ci:** update lua-format-check to download Stylua version 2.4.1 directly
+* **ci:** update lua-tests before_script to use a multi-line command for installing dependencies
+* **ci:** update lua-format-check to download Stylua for musl and improve version check
+* **ci:** update lua-format-check to download Stylua for x86_64 musl
+* **ci:** update lua-tests before_script to install additional Lua dependencies and add random UUID generation
+* **progress:** add functions to build and push KOReader progress payload
+* **ci:** add openssl-dev to lua-tests before_script for dependency installation
+* **sync:** no longer stores local state on open
+* **tests:** fix tests
+* **tests:** enhance Lua test coverage reporting and setup
+* **ui:** fix reading sessions in show data, progress decimals
+
+### Maintenance
+
+* **docs:** update progress sync instructions for clarity and add session location normalization option
+* **sync:** streamline annotation processing and remove lua-format-check job
+* **docs:** update file manager actions, gestures, and dispatcher actions documentation; enhance changelog with new features and improvements
+* **semantic-release:** release 4.1.0 - [skip ci on prod]
+
+### Other Changes
+
+* fix(progress sync): update session location normalization help text for clarity and detail
+* Fix progress dialog at 0%
+
+## 4.0.1 (2026-04-05)
+
+### Bug Fixes
+
+* **menu:** restructure main menu items for improved organization and clarity
+
+### Maintenance
+
+* **semantic-release:** release 4.0.1 - [skip ci on prod]
 
 ## 4.0.0 (2026-04-05)
 
 ### Features
 
-- **KOReader progress sync:** Added document-position sync with pull-on-open/resume, push-on-open/close, optional periodic page-turn updates, configurable forward/backward conflict strategies, and progress queue processing in `Sync Pending Now`.
-- **Updater file preservation:** Auto-update now preserves and restores user-specific files across installs (`hardcover.token`, `dev-build.location`).
-- **Shelf sync storage guard:** Added pre-download free-space checks with configurable minimum free space (`min_free_space_mb`, default `500 MB`).
-- **Shelf delta cache management:** Added shelf state caching for delta-based syncs plus **Force full re-sync** to clear cached shelf state and run a full pass.
-- **Advanced data tools:** Added **Re-match All Books in Cache** and selective **Clear Synced History** options (historical sessions, synced annotations, synced bookmarks, rating sync history, synced progress).
-- **Per-book tools expanded:** File manager long-press menu now includes additional diagnostic actions (**Show Stored Data**, **Extract from Sidecar**) alongside sync/match/tracking actions.
-
-### Improvements
-
-- **Settings input handling:** Minimum duration and minimum pages inputs now use streamlined validation/error handling.
-- **Session management UX:** Pending/synced summaries now include progress queue/history counts where relevant.
-- **Plugin naming alignment:** Internal/release naming was aligned to `bookloresync` to match KOReader plugin expectations.
-- **Settings menu organization:** Reordered top-level settings and renamed key sections for task-first navigation (**Enable Sync**, **Connection Setup**, **What to Sync**, **Sync Behavior**, **Sync & Cache**, **Shelf Sync**, **Import & Matching**, **Integrations**, **Appearance & Diagnostics**, **About & Updates**).
-
-### Documentation
-
-- **Required for this PR:** Updated docs and menu-path references to match the reorganized settings structure and labels.
+* **database:** add functions to count pending and synced annotations and bookmarks for a specific book
+* **storage:** implement disk space check and file size retrieval before downloads
+* **database:** add shelf state caching for delta-based sync
+* **advanced:** add data management options for clearing synced history and re-matching books
+* **database:** add function to delete pending ratings by book_cache_id
+* **updater:** add user file preservation and restoration during updates
+* **branding:** implement branding functionality for customizable display names
+* **localization:** update German translations for improved clarity and accuracy
 
 ### Bug Fixes
 
-- **Updater restore reliability:** Improved error handling during restoration of preserved user files after update.
+* **settings:** improve error handling for saving settings
+* **koreader:** update plugin name to 'bookloresync' to allow plugin to be disabled
+* **ci:** update quotes for tag condition in workflow rules
+* **ci:** remove unnecessary release rules from workflow
+* **ci:** update pipeline rules for main branch and document changes
+* **updater:** improve user file restoration error handling
+* **settings:** streamline input handling for minimum duration and pages configuration
+* **api_client:** enhance progress update validation for timestamp and percentage
+* **api_client:** simplify logging methods by removing redundant checks
+* **api_client:** enhance error handling and logging for getBookFileSize method
+* **ci:** update version generation to support override from CI environment
+* **database:** update schema version and modify pending progress handling
+* **branding:** improve branding functionality by handling missing branding module and simplifying function signatures
+* **branding:** handle missing branding module gracefully and provide default implementations
+* **branding:** improve display name handling and use unique placeholders in apply function
+* **settings:** enhance error handling for saving progress decimal places
 
-### Breaking changes
+### Maintenance
 
-- Database schema updated to **v24** (migration runs automatically on first startup after update). Additions include progress-sync tables/history and new management helpers used by advanced clear/rematch flows.
+* **ci:** add build job for generating and compiling koplugin artifacts
+* **ci:** change build stage to test for koplugin artifact generation
+* **ci:** change build stage to build and update rules for merge request targeting main
+* **logs:** rework logging mechanism and remove secure logging option
+* **release:** update plugin name to 'bookloresync' in version generation script
+* **ci:** add package upload as reference
+* **ci:** new upload strategy for dev builds
+* **plugin:** dev build implementation
+* **docs:** update documentation for progress sync feature and related settings
+* **translation:** update thranslations
+* **docs:** update documentation for plugin naming and branding settings
+* **docs:** update changelog in docs
+* **settings:** redesign settings for easier navigation
+* **docs:** refine description for connect_network_on_suspend setting
+* **semantic-release:** release 4.0.0 - [skip ci on prod]
 
----
+### Other Changes
+
+* feat(progress sync): Implement KOReader progress sync functionality
+
+### BREAKING CHANGES
+
+* **settings:** enhance error handling for saving progress decimal places
+
+## 3.8.4 (2026-03-16)
+
+### Bug Fixes
+
+* **release:** simplify plugin archive creation in CI workflows
+
+### Maintenance
+
+* **semantic-release:** release 3.8.4 - [skip ci on prod]
+
+## 3.8.3 (2026-03-16)
+
+### Bug Fixes
+
+* **release:** correct plugin archive creation path in workflow
+
+### Maintenance
+
+* **semantic-release:** release 3.8.3 - [skip ci on prod]
+
+## 3.8.2 (2026-03-16)
+
+### Features
+
+* **settings:** add settiings export for debug
+* probe by-hash endpoint in test connection
+* add Manual Matching placeholder to Import Reading History menu
+* **db:** add hardcover_id column to book_cache (migration 16)
+* **hardcover:** add debug menu with 'Request book metadata from BookLore' action
+* add file manager hold menu items (sync annotations, match book, sync rating)
+* **ui:** register file manager hold menu actions for syncing annotations, matching book, and syncing rating
+* add file manager hold menu items (sync annotations, match book, sync rating)
+* **annotations:** add 'Both' destination and PDF mock CFI support
+* **bookmarks:** sync bookmarks to Booklore via api/v1/bookmarks
+* **sync:** implement hardcover rating sync with token validation and fallback search
+* **settings:** add hardcover token configuration and rating sync options
+* **hardcover:** implement Hardcover API client and integrate with BookloreSync for rating and book search
+* **database:** add hardcover_id column to book_cache for rating sync
+* **sync:** add bookmarks sync functionality and update related methods; add check for existing annotations
+* **deletion:** notify Booklore when books are deleted from file manager
+* **resume:** add 5min cooldown, deferred wake sync, onNetworkConnected
+* **shelf-sync:** pull books from Booklore shelf with bidirectional sync
+* **shelf-sync:** smart download dir detection + shelf name/dir config UI
+* **skip-book:** per-book tracking toggle via file manager long-press
+* **sync:** add bookmarks sync configuration and toggle functionality
+* **metadata:** enhance bookmark extraction from DocSettings and improve filtering logic
+* **bookmarks:** calculate bookmark cfi
+* **wifi:** add user confirmation for enabling WiFi before syncing
+* **sync:** enhance book synchronization with interactive matching and improved UI dialogs
+* **test:** Add unit tests for BookloreSync and Updater helper functions
+* **docs:** add versioned docs with version selector
+* **release:** trigger major version bump [release]
+* **api:** add ISBN lookup functionality to retrieve book ID
+* **isbn:** extract ISBN from KOReader doc settings and use as fallback for book lookup
+* **sync:** enhance shelf synchronization with improved subprocess handling and user feedback
+* **translation:** convert every string to be translateable
+* **translation:** add translation files
+
+### Bug Fixes
+
+* **logging:** enhance logging for batch upload sessions with book ID details
+* **hardcover:** use self.server_url instead of self.booklore_url in fetchAndStoreHardcoverIds
+* **main:** re-remove extended_sync
+* **shelf-sync:** read KOReader home_dir for download dir detection
+* **pop-up:** show synced / skipped for other areas
+* **menu:** add function to integrate items into the main menu
+* **menu:** update menu item text for fetching Hardcover Book IDs
+* **database:** improve error handling in setBookTracking and isBookTrackingEnabled functions
+* **sync:** improve user feedback in sync dialog for missing spine
+* **ci:** streamline commit-analyzer configuration in release setup [release]
+* **match:** show popup when hash lookup finds no match in Booklore [release]
+* **ci:** change pipeline to always run
+* **annotations:** save to both now actually uploads to both locations
+* **isbn:** update ISBN lookup to use searchBooksByIsbn and handle exact match scoring
+* **docs:** standardize punctuation in documentation for clarity
+* **network:** fix bug in ask to enable wifi, fixes crash related to networking by using networkmanager
+* **ci:** update butler rules to ensure proper execution based on GITLAB_TOKEN
+* **ci:** comment out unused butler configuration in CI pipeline
+* **ci:** add lua-tests stage to CI pipeline for improved testing coverage
+* **ci:** add missing stages to CI pipeline configuration
+* **ci:** rename lua-tests to lua-check and update testing commands
+* **ci:** update lua-check to use luajit and adjust script for compatibility
+* **ci:** restore butler configuration and remove unused lua-check stage
+* **ci:** remove unused pipeline stages from configuration
+* **sync:** improve shelf book synchronization and filename generation
+* **gestures:** sync now gesture also asks for wifi to be enabled
+* **menu:** keep menu open when input dialogs are shown
+* **shelf:** add option to use original server filename for downloaded books
+* **shelf-sync:** add sdr deletion and improved sidecar detection
+* **sidecar:** fix and enhance sdr detection
+* **sync:** capture bookmarks and annotations on device suspend
+* **shelf-sync:** enhance filename generation and migration handling for shelf books
+* **sync:** improve pending items count calculation and update sync messages
+* **sync:** enhance language loading and improve pending items handling
+* **.gitignore:** add missing patterns for gettext translations and new file types
+* **pre-commit:** remove MAX_LINE_LENGTH environment variable
+
+### Maintenance
+
+* **ci:** add zola workspace to variables
+* **documentation:** use @ links
+* **tests:** add tests
+* **documentation:** add reference for the custom image
+* **readme:** remove troubleshooting steps for easier maintenance
+* update highlights and notes sync status to 'Currently not working'
+* **auto-match:** streamline hash matching process and enhance logging for auto-acceptance
+* **database:** add methods to save and retrieve hardcover user ID
+* **api:** resolve merge conflict and improve error handling in getBookById and submitBookmark functions
+* **database:** update schema version to 20 and adjust migration index
+* **menu:** streamline sync triggers and reintroduce hardcover integration
+* **formatting:** enforce formatting
+* **readme:** add testing instructions and coverage artifact details
+* **ci:** remove test stage and associated run-tests job from CI pipeline
+* **semantic-release:** release 1.0.0 - [skip ci on prod]
+* **ci:** add stuff [release]
+* **semantic-release:** release 1.0.0 - [skip ci on prod]
+* **changelog:** reset changelog [release]
+* **semantic-release:** release 1.0.0 - [skip ci on prod]
+* **semantic-release:** release 3.5.0 - [skip ci on prod]
+* **semantic-release:** release 3.5.1 - [skip ci on prod]
+* **api:** remove ISBN lookup function from APIClient
+* **docs:** update docs to reference the ISBN lookup and recommended workflow
+* **ci:** butler change
+* **semantic-release:** release 3.6.0 - [skip ci on prod]
+* **semantic-release:** release 3.6.1 - [skip ci on prod]
+* **sync:** replace AsyncTask with Trapper for improved synchronization handling and add comprehensive tests for shelf synchronization
+* **docs:** update docs for sync shelf
+* **semantic-release:** release 3.7.0 - [skip ci on prod]
+* **gitlab:** add templates for issues and MRs
+* **ci:** add translation compiling
+* **i10n:** update translation for  sdr detection and deletion
+* **documentation:** update documentation to explain updated functions
+* **semantic-release:** release 3.8.0 - [skip ci on prod]
+* **semantic-release:** release 1.0.0 - [skip ci on prod]
+* **semantic-release:** release 1.0.0 - [skip ci on prod]
+
+### Other Changes
+
+* update ci
+* Better annotation handling
+* refactor(sync flow): resolve book_id first, then session/rating/annotations
+* Fix shelf sync async tasks
+* Edit README.md
+
+### BREAKING CHANGES
+
+* **release:** trigger major version bump [release]
+
+## 3.8.1 (2026-03-16)
+
+### Bug Fixes
+
+* **.gitignore:** add missing patterns for gettext translations and new file types
+
+### Maintenance
+
+* **semantic-release:** release 3.8.1 - [skip ci on prod]
+
+## 3.8.0 (2026-03-16)
+
+### Features
+
+* **translation:** convert every string to be translateable
+* **translation:** add translation files
+
+### Bug Fixes
+
+* **menu:** keep menu open when input dialogs are shown
+* **shelf:** add option to use original server filename for downloaded books
+* **shelf-sync:** add sdr deletion and improved sidecar detection
+* **sidecar:** fix and enhance sdr detection
+* **sync:** capture bookmarks and annotations on device suspend
+* **shelf-sync:** enhance filename generation and migration handling for shelf books
+* **sync:** improve pending items count calculation and update sync messages
+* **sync:** enhance language loading and improve pending items handling
+
+### Maintenance
+
+* **gitlab:** add templates for issues and MRs
+* **ci:** add translation compiling
+* **i10n:** update translation for  sdr detection and deletion
+* **documentation:** update documentation to explain updated functions
+* **semantic-release:** release 3.8.0 - [skip ci on prod]
+
+## 3.7.0 (2026-03-11)
+
+### Features
+
+* **sync:** enhance shelf synchronization with improved subprocess handling and user feedback
+
+### Bug Fixes
+
+* **sync:** improve shelf book synchronization and filename generation
+
+### Maintenance
+
+* **sync:** replace AsyncTask with Trapper for improved synchronization handling and add comprehensive tests for shelf synchronization
+* **docs:** update docs for sync shelf
+* **semantic-release:** release 3.7.0 - [skip ci on prod]
+
+### Other Changes
+
+* Edit README.md
+
+## 3.6.1 (2026-03-10)
+
+### Bug Fixes
+
+* **gestures:** sync now gesture also asks for wifi to be enabled
+
+### Maintenance
+
+* **semantic-release:** release 3.6.1 - [skip ci on prod]
+
+## 3.6.0 (2026-03-10)
+
+### Features
+
+* **api:** add ISBN lookup functionality to retrieve book ID
+* **isbn:** extract ISBN from KOReader doc settings and use as fallback for book lookup
+
+### Bug Fixes
+
+* **annotations:** save to both now actually uploads to both locations
+* **isbn:** update ISBN lookup to use searchBooksByIsbn and handle exact match scoring
+* **docs:** standardize punctuation in documentation for clarity
+* **network:** fix bug in ask to enable wifi, fixes crash related to networking by using networkmanager
+* **ci:** update butler rules to ensure proper execution based on GITLAB_TOKEN
+* **ci:** comment out unused butler configuration in CI pipeline
+* **ci:** add lua-tests stage to CI pipeline for improved testing coverage
+* **ci:** add missing stages to CI pipeline configuration
+* **ci:** rename lua-tests to lua-check and update testing commands
+* **ci:** update lua-check to use luajit and adjust script for compatibility
+* **ci:** restore butler configuration and remove unused lua-check stage
+* **ci:** remove unused pipeline stages from configuration
+
+### Maintenance
+
+* **api:** remove ISBN lookup function from APIClient
+* **docs:** update docs to reference the ISBN lookup and recommended workflow
+* **ci:** butler change
+* **semantic-release:** release 3.6.0 - [skip ci on prod]
+
+## 3.5.1 (2026-03-09)
+
+### Bug Fixes
+
+* **match:** show popup when hash lookup finds no match in Booklore [release]
+* **ci:** change pipeline to always run
+
+### Maintenance
+
+* **semantic-release:** release 3.5.1 - [skip ci on prod]
+
+## 3.5.0 (2026-03-08)
+
+### Features
+
+* **release:** trigger semrel [release]
+
+### Maintenance
+
+* **semantic-release:** release 3.5.0 - [skip ci on prod]
+
+## 3.4.1 (2026-03-08)
+
+### Features
+
+* log obfuscation
+* add auto-updater system with GitHub integration
+* add auto-updater system with GitHub integration
+* **api:** add batch session upload endpoint with intelligent batching
+* **logging:** implement file-based logging with daily rotation and automatic cleanup
+* **logging:** enhance file logging with initialization and closure handling
+* **sessions:** add support for pdf and archive-type formats
+* **metadata:** add metadata parser
+* **settings:** add new sync menu for ratings and notes
+* **database:** update schema to version 9 and add book metadata sync functionality
+* **api:** add submitRating function for personal book ratings
+* **api:** add annotation support
+* **database:** add annotation sync helpers for KOReader
+* **notes:** add  color mapping, cfi generation, sync  for notes
+* **rating:** enhance rating sync with live in-memory support and retry mechanism
+* **rating:** respect user settings for rating sync and improve handling of deferred ratings
+* **sync:** enhance session details view and improve pending uploads handling
+* **settings:** rework clear cache to select entries to be cleared on category level
+* **docs:** add documentation and zola support
+* **settings:** sanitize server URL input and enhance connection test messages
+* **settings:** add settiings export for debug
+* probe by-hash endpoint in test connection
+* add Manual Matching placeholder to Import Reading History menu
+* **db:** add hardcover_id column to book_cache (migration 16)
+* **hardcover:** add debug menu with 'Request book metadata from BookLore' action
+* add file manager hold menu items (sync annotations, match book, sync rating)
+* **ui:** register file manager hold menu actions for syncing annotations, matching book, and syncing rating
+* add file manager hold menu items (sync annotations, match book, sync rating)
+* **annotations:** add 'Both' destination and PDF mock CFI support
+* **bookmarks:** sync bookmarks to Booklore via api/v1/bookmarks
+* **sync:** implement hardcover rating sync with token validation and fallback search
+* **settings:** add hardcover token configuration and rating sync options
+* **hardcover:** implement Hardcover API client and integrate with BookloreSync for rating and book search
+* **database:** add hardcover_id column to book_cache for rating sync
+* **sync:** add bookmarks sync functionality and update related methods; add check for existing annotations
+* **deletion:** notify Booklore when books are deleted from file manager
+* **resume:** add 5min cooldown, deferred wake sync, onNetworkConnected
+* **shelf-sync:** pull books from Booklore shelf with bidirectional sync
+* **shelf-sync:** smart download dir detection + shelf name/dir config UI
+* **skip-book:** per-book tracking toggle via file manager long-press
+* **sync:** add bookmarks sync configuration and toggle functionality
+* **metadata:** enhance bookmark extraction from DocSettings and improve filtering logic
+* **bookmarks:** calculate bookmark cfi
+* **wifi:** add user confirmation for enabling WiFi before syncing
+* **sync:** enhance book synchronization with interactive matching and improved UI dialogs
+* **test:** Add unit tests for BookloreSync and Updater helper functions
+* **docs:** add versioned docs with version selector
+* **release:** trigger major version bump [release]
+
+### Bug Fixes
+
+* **network:** add missing options
+* ci file
+* ci now allows addition?
+* new ci
+* new ci
+* another ci
+* tag version in github
+* **updater:** handle HTTP redirects manually for KOReader compatibility
+* **updater:** use correct lfs library path for KOReader
+* **updater:** remove duplicate restart confirmation dialog
+* **menu:** use text_func instead of text for dynamic pending count
+* **updater:** handle HTTP redirects manually for KOReader compatibility
+* **updater:** use correct lfs library path for KOReader
+* **updater:** remove duplicate restart confirmation dialog
+* **sync:** handle nil progress values in session processing and batch uploads
+* **sync:** fallback to individual upload on 403 Forbidden
+* **database:** improve journal mode handling for better reliability
+* **reading-session:** correct page retrieval method for EPUB format
+* **settings:** change upload strategy for notes
+* **changelog:** change changelog match
+* **rating:** delay keyboard display in rating dialog to prevent crashes on Linux
+* **database:** update schema version and relax constraints for pending annotations and ratings
+* **ci:** add workspace dir for zola
+* **ci:** add submodul handling
+* **documentation:** add sidebar template with table of contents, remove version picker
+* **sync:** mark annotations as synced when CFI cannot be built
+* **api:** improve error message formatting in extractErrorMessage function [release]
+* **logging:** enhance logging for batch upload sessions with book ID details
+* **hardcover:** use self.server_url instead of self.booklore_url in fetchAndStoreHardcoverIds
+* **main:** re-remove extended_sync
+* **shelf-sync:** read KOReader home_dir for download dir detection
+* **pop-up:** show synced / skipped for other areas
+* **menu:** add function to integrate items into the main menu
+* **menu:** update menu item text for fetching Hardcover Book IDs
+* **database:** improve error handling in setBookTracking and isBookTrackingEnabled functions
+* **sync:** improve user feedback in sync dialog for missing spine
+* **ci:** streamline commit-analyzer configuration in release setup [release]
+
+### Maintenance
+
+* **plugin:** small updates, add versioning
+* **plugin:** rename files to fix crashes
+* **ci:** update releaserc
+* **network:** fix offline behavior
+* **semantic-release:** release 1.0.0 - [skip ci on prod]
+* **semantic-release:** release 1.0.1 - [skip ci on prod]
+* **semantic-release:** release 1.0.2 - [skip ci on prod]
+* **semantic-release:** release 1.0.3 - [skip ci on prod]
+* **semantic-release:** release 1.0.4 - [skip ci on prod]
+* **semantic-release:** release 1.0.5 - [skip ci on prod]
+* **semantic-release:** release 1.1.0 - [skip ci on prod]
+* **semantic-release:** release 1.1.1 - [skip ci on prod]
+* **updater:** remove changelog from update confirmation dialog
+* **ui:** remove duplicate version option
+* **menu:** reorganize menu structure for improved usability
+* **updater:** remove changelog from update confirmation dialog
+* **ui:** remove duplicate version option
+* **semantic-release:** release 2.0.0 - [skip ci on prod]
+* **semantic-release:** release 3.0.0 - [skip ci on prod]
+* add batch upload feature note to README
+* **semantic-release:** release 3.1.0 - [skip ci on prod]
+* **semantic-release:** release 3.2.0 - [skip ci on prod]
+* **ci:** add pre-commit
+* **semantic-release:** release 3.3.0 - [skip ci on prod]
+* **git:** remove linting
+* **semantic-release:** release 3.3.1 - [skip ci on prod]
+* **ci:** remove comment stage
+* **ci:** bump pre-commit version
+* **ci:** limit semrel to only run on set commits / MRs
+* **db:** add migrations
+* **settings:** restructure settings
+* **database:** add pending annotations queue for retrying failed uploads
+* **database:** add function to delete pending ratings
+* **all:** remove and simplify comments
+* **documentation:** remove testing static files
+* **documentation:** remove generated files
+* **ci:** disable lychee
+* **docs:** add index page
+* **semantic-release:** release 3.4.0 - [skip ci on prod]
+* **all:** delete some files
+* **ci:** add zola workspace to variables
+* **documentation:** use @ links
+* **tests:** add tests
+* **documentation:** add reference for the custom image
+* **readme:** remove troubleshooting steps for easier maintenance
+* update highlights and notes sync status to 'Currently not working'
+* **auto-match:** streamline hash matching process and enhance logging for auto-acceptance
+* **database:** add methods to save and retrieve hardcover user ID
+* **api:** resolve merge conflict and improve error handling in getBookById and submitBookmark functions
+* **database:** update schema version to 20 and adjust migration index
+* **menu:** streamline sync triggers and reintroduce hardcover integration
+* **formatting:** enforce formatting
+* **readme:** add testing instructions and coverage artifact details
+* **ci:** remove test stage and associated run-tests job from CI pipeline
+* **ci:** trigger release [release]
+* **semantic-release:** release 1.0.0 - [skip ci on prod]
+* **ci:** add stuff [release]
+* **semantic-release:** release 1.0.0 - [skip ci on prod]
+* **changelog:** reset changelog [release]
+* **semantic-release:** release 1.0.0 - [skip ci on prod]
+
+### Other Changes
+
+* initial rewrite
+* add ci and files
+* add releaserc
+* progress on historical sync, broken
+* first working implementation of historical sync
+* add isbn to db, change reading session json. allow isbn matching
+* add isbn extraction from api
+* current progress
+* fix sync for historical sessions with present books
+* drop unused table
+* record all the decimals
+* fix session copy, add koreader title, id
+* update format
+* remove double version
+* add docs
+* Add small changelog to updater
+* remove linting, add MR comment function
+* fix(update, log): change path handling
+* chore(db, settings): settings into database
+* update ci
+* Better annotation handling
+* refactor(sync flow): resolve book_id first, then session/rating/annotations
+* Fix shelf sync async tasks
+
+### BREAKING CHANGES
+
+* add auto-updater system with GitHub integration
+* add auto-updater system with GitHub integration
+* **release:** trigger major version bump [release]
 
 ## 3.4.0 (2026-02-22)
 
 ### Features
 
-- **Ratings sync:** Ratings can now be synced to BookLore via `POST /api/v1/books/{id}/personal-info`. Enable in **Settings → Sync Settings → Ratings & Notes Sync → Sync ratings**.
-- **Notes and highlights sync:** KOReader highlights and notes are synced to BookLore via `POST /api/v1/books/{id}/notes`. Colour mapping (KOReader → BookLore hex), EPUB CFI generation, and sync are all handled automatically. Enable in **Settings → Sync Settings → Ratings & Notes Sync → Sync notes**.
-- **Ratings & Notes sync menu:** A dedicated **Ratings & Notes Sync** sub-menu groups all annotation-related sync toggles and settings under **Settings → Sync Settings**.
-- **Deferred rating retry:** Ratings that cannot be submitted immediately (e.g. while offline or before the book ID is resolved) are stored in a `pending_ratings` queue and retried automatically.
-- **Live in-memory rating support:** Ratings set during a reading session are kept in memory and submitted at sync time without requiring a database round-trip.
-- **Session details view:** The session details screen now shows pending upload counts and additional sync state information.
-- **Selective cache clear:** The clear-cache action now presents a category-level selection dialog, letting you choose which cache entries (book IDs, sessions, annotations, ratings) to clear rather than wiping everything at once.
-- **Server URL sanitisation:** The server URL entered in settings is automatically trimmed and normalised (trailing slashes removed, scheme enforced) before use.
-- **Connection test feedback:** The connection test dialog now reports specific failure reasons rather than a generic error message.
-- **Metadata parser:** Internal metadata parser added to extract and normalise book metadata fields from KOReader document settings.
+* **metadata:** add metadata parser
+* **settings:** add new sync menu for ratings and notes
+* **database:** update schema to version 9 and add book metadata sync functionality
+* **api:** add submitRating function for personal book ratings
+* **api:** add annotation support
+* **database:** add annotation sync helpers for KOReader
+* **notes:** add  color mapping, cfi generation, sync  for notes
+* **rating:** enhance rating sync with live in-memory support and retry mechanism
+* **rating:** respect user settings for rating sync and improve handling of deferred ratings
+* **sync:** enhance session details view and improve pending uploads handling
+* **settings:** rework clear cache to select entries to be cleared on category level
+* **docs:** add documentation and zola support
+* **settings:** sanitize server URL input and enhance connection test messages
 
 ### Bug Fixes
 
-- **Rating dialog:** Delayed keyboard display in the rating dialog to prevent crashes when running on Linux.
-- **Sync:** Annotations whose CFI cannot be built are now marked as synced to prevent indefinite retry loops.
-- **API:** Error messages from server responses are now extracted and surfaced correctly in all error dialogs.
-- **Database:** Schema version updated and constraints on `pending_annotations` and `pending_ratings` tables relaxed for compatibility.
+* **settings:** change upload strategy for notes
+* **changelog:** change changelog match
+* **rating:** delay keyboard display in rating dialog to prevent crashes on Linux
+* **database:** update schema version and relax constraints for pending annotations and ratings
+* **ci:** add workspace dir for zola
+* **ci:** add submodul handling
+* **documentation:** add sidebar template with table of contents, remove version picker
+* **sync:** mark annotations as synced when CFI cannot be built
+* **api:** improve error message formatting in extractErrorMessage function [release]
 
-### Breaking changes
+### Maintenance
 
-- Database schema updated to version 9. Migration runs automatically on first startup after update. New additions: `pending_annotations` table, `pending_ratings` table, book metadata columns in `book_cache`.
+* **ci:** remove comment stage
+* **ci:** bump pre-commit version
+* **ci:** limit semrel to only run on set commits / MRs
+* **db:** add migrations
+* **settings:** restructure settings
+* **database:** add pending annotations queue for retrying failed uploads
+* **database:** add function to delete pending ratings
+* **all:** remove and simplify comments
+* **documentation:** remove testing static files
+* **documentation:** remove generated files
+* **ci:** disable lychee
+* **docs:** add index page
+* **semantic-release:** release 3.4.0 - [skip ci on prod]
 
----
+### Other Changes
+
+* fix(update, log): change path handling
+* chore(db, settings): settings into database
 
 ## 3.3.1 (2026-02-20)
 
 ### Bug Fixes
 
-- **Reading session:** Corrected page retrieval method for EPUB format to return accurate page numbers.
+* **reading-session:** correct page retrieval method for EPUB format
 
----
+### Maintenance
+
+* **git:** remove linting
+* **semantic-release:** release 3.3.1 - [skip ci on prod]
 
 ## 3.3.0 (2026-02-19)
 
 ### Features
 
-- **Sessions:** Added support for PDF and archive-type formats (CBZ, CBR) in addition to EPUB.
+* **sessions:** add support for pdf and archive-type formats
 
----
+### Maintenance
+
+* **ci:** add pre-commit
+* **semantic-release:** release 3.3.0 - [skip ci on prod]
+
+### Other Changes
+
+* Add small changelog to updater
+* remove linting, add MR comment function
 
 ## 3.2.0 (2026-02-16)
 
 ### Features
 
-- **Logging:** Implemented file-based logging with daily rotation and automatic cleanup of old files (keeps last 3).
-- **Logging:** Enhanced file logger with proper initialisation and graceful closure handling.
+* **logging:** implement file-based logging with daily rotation and automatic cleanup
+* **logging:** enhance file logging with initialization and closure handling
 
 ### Bug Fixes
 
-- **Database:** Improved journal mode handling (`TRUNCATE` instead of `WAL`) for better reliability on e-reader storage.
+* **database:** improve journal mode handling for better reliability
 
----
+### Maintenance
+
+* **semantic-release:** release 3.2.0 - [skip ci on prod]
 
 ## 3.1.0 (2026-02-16)
 
 ### Features
 
-- **API:** Added batch session upload endpoint (`POST /api/v1/reading-sessions/batch`) with intelligent batching of up to 100 sessions per request - 10–20× faster than individual uploads.
+* **api:** add batch session upload endpoint with intelligent batching
 
 ### Bug Fixes
 
-- **Sync:** Fallback to individual upload on `403 Forbidden` response from the batch endpoint (compatibility with older server versions).
-- **Sync:** Fixed handling of `nil` progress values in session processing and batch uploads.
+* **sync:** handle nil progress values in session processing and batch uploads
+* **sync:** fallback to individual upload on 403 Forbidden
 
----
+### Maintenance
+
+* add batch upload feature note to README
+* **semantic-release:** release 3.1.0 - [skip ci on prod]
+
+### Other Changes
+
+* add docs
 
 ## 3.0.0 (2026-02-16)
 
 ### Features
 
-- **Auto-updater:** Full self-update system with GitHub integration, one-tap installation, automatic backup, rollback support, and daily update checks.
+* add auto-updater system with GitHub integration
 
 ### Bug Fixes
 
-- **Menu:** Fixed dynamic pending count display using `text_func` instead of static `text`.
-- **Updater:** Fixed HTTP redirect handling for KOReader compatibility.
-- **Updater:** Removed duplicate restart confirmation dialog.
-- **Updater:** Fixed `lfs` library path resolution for KOReader.
+* **updater:** handle HTTP redirects manually for KOReader compatibility
+* **updater:** use correct lfs library path for KOReader
+* **updater:** remove duplicate restart confirmation dialog
+* **menu:** use text_func instead of text for dynamic pending count
 
-### Breaking changes
+### Maintenance
 
-- Database schema migrated from version 7 to 8. Migration runs automatically on first startup after update.
+* **updater:** remove changelog from update confirmation dialog
+* **ui:** remove duplicate version option
+* **menu:** reorganize menu structure for improved usability
+* **semantic-release:** release 3.0.0 - [skip ci on prod]
 
----
+### Other Changes
+
+* remove double version
+
+### BREAKING CHANGES
+
+* add auto-updater system with GitHub integration
+
+## 2.0.0 (2026-02-16)
+
+### Features
+
+* add auto-updater system with GitHub integration
+
+### Bug Fixes
+
+* **updater:** handle HTTP redirects manually for KOReader compatibility
+* **updater:** use correct lfs library path for KOReader
+* **updater:** remove duplicate restart confirmation dialog
+
+### Maintenance
+
+* **updater:** remove changelog from update confirmation dialog
+* **ui:** remove duplicate version option
+* **semantic-release:** release 2.0.0 - [skip ci on prod]
+
+### BREAKING CHANGES
+
+* add auto-updater system with GitHub integration
 
 ## 1.1.1 (2026-02-15)
 
 ### Bug Fixes
 
-- Fixed version tag in GitHub release pipeline.
+* tag version in github
 
----
+### Maintenance
+
+* **semantic-release:** release 1.1.1 - [skip ci on prod]
 
 ## 1.1.0 (2026-02-15)
 
 ### Features
 
-- **Logging:** Added URL redaction (secure logs) to protect server addresses in shared log output.
+* log obfuscation
 
----
+### Maintenance
 
-## 1.0.0 – 1.0.5 (2026-02-15)
+* **semantic-release:** release 1.1.0 - [skip ci on prod]
 
-Initial public release series. Versions 1.0.1 through 1.0.5 were CI and release pipeline fixes.
+## 1.0.5 (2026-02-15)
 
-### Features in 1.0.0
+### Bug Fixes
 
-- Automatic session tracking on book open/close/suspend/resume
-- Book fingerprinting with sample-based MD5 algorithm
-- Book ID resolution and caching in SQLite
-- Session validation (minimum duration and pages)
-- Offline queue with retry logic and book ID resolution
-- Batch upload support
-- Settings UI (server URL, credentials, session thresholds)
-- Dispatcher integration (toggle, sync, manual mode, test connection)
-- Rating sync (KOReader scaled and select-at-complete modes)
-- Highlights and notes sync with EPUB CFI generation
-- Annotation colour mapping (KOReader → BookLore hex)
-- SQLite database with schema versioning and migrations
-- Progress decimal places configuration
-- Silent mode and debug logging preferences
+* another ci
+
+### Maintenance
+
+* **semantic-release:** release 1.0.5 - [skip ci on prod]
+
+## 1.0.4 (2026-02-15)
+
+### Bug Fixes
+
+* new ci
+
+### Maintenance
+
+* **semantic-release:** release 1.0.4 - [skip ci on prod]
+
+## 1.0.3 (2026-02-15)
+
+### Bug Fixes
+
+* new ci
+
+### Maintenance
+
+* **semantic-release:** release 1.0.3 - [skip ci on prod]
+
+## 1.0.2 (2026-02-15)
+
+### Bug Fixes
+
+* ci now allows addition?
+
+### Maintenance
+
+* **semantic-release:** release 1.0.2 - [skip ci on prod]
+
+## 1.0.1 (2026-02-15)
+
+### Bug Fixes
+
+* ci file
+
+### Maintenance
+
+* **semantic-release:** release 1.0.1 - [skip ci on prod]
+
+### Other Changes
+
+* update format
+
+## 1.0.0 (2026-02-15)
+
+### Bug Fixes
+
+* **network:** add missing options
+
+### Maintenance
+
+* **plugin:** small updates, add versioning
+* **plugin:** rename files to fix crashes
+* **ci:** update releaserc
+* **network:** fix offline behavior
+* **semantic-release:** release 1.0.0 - [skip ci on prod]
+
+### Other Changes
+
+* initial rewrite
+* add ci and files
+* add releaserc
+* progress on historical sync, broken
+* first working implementation of historical sync
+* add isbn to db, change reading session json. allow isbn matching
+* add isbn extraction from api
+* current progress
+* fix sync for historical sessions with present books
+* drop unused table
+* record all the decimals
+* fix session copy, add koreader title, id
+

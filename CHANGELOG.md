@@ -1,3 +1,22 @@
+# [4.3.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.2.0...4.3.0) (2026-05-10)
+
+
+### Bug Fixes
+
+* **menu:** move reading status into row 3 ([d560201](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d560201a7c789dc0b67d246e9ee07fde079ee850))
+* **menu:** remove double reading status entry, update makefile ([5686506](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/5686506331811b2b8932768497dced5f0cfc3bca))
+* **migration:** store migration in database ([84566b9](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/84566b922fda3a57c801a34beb6b51f42ba968af))
+* **progress:** better timestamp handling for past timestamps ([11e6b24](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/11e6b247d85c6ae37d4575d32838b52676f635cc))
+* **progress:** implement progress sync enabled state recovery from persisted settings ([1303228](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/130322893803441d58a264a642466b9eb46d5942))
+* **shelf-sync:** store metadata from books in db on sync ([8a86a50](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/8a86a507392184011ef81ee8d5c01c0377158365))
+
+
+### Features
+
+* **menu:** implement file dialog actions for syncing and tracking books ([d204f5d](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d204f5d9cd4b70bc42422d71cd29184847d91222))
+* **reading-status:** add functionality to update reading status for books ([a2d0926](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a2d092662c0db3790d059f84e57c027966f56eca))
+* **shelf-sync:** implement private shelf sync support with explicit ID... ([099b565](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/099b565bd0ab0ac77b9b64fbdce250af12132744))
+
 # [4.2.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.1.1...4.2.0) (2026-04-26)
 
 

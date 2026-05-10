@@ -10,7 +10,7 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 ---
 
-## 4.3.0 (2026-05-09)
+## 4.3.0 (2026-05-10)
 
 ### Features
 

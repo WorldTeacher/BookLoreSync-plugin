@@ -33,6 +33,51 @@ describe("BookloreSync helper methods", function()
     assert.are.equal("1h 1m 1s", plugin:formatDuration(3661))
   end)
 
+  it("recovers progress sync enabled state from persisted settings", function()
+    plugin.progress_sync_enabled = false
+    plugin.settings = {
+      readSetting = function(_, key)
+        if key == "progress_sync_enabled" then
+          return true
+        end
+        return nil
+      end,
+    }
+    plugin.logWarn = function() end
+
+    assert.is_true(plugin:isProgressSyncEnabled())
+    assert.is_true(plugin.progress_sync_enabled)
+  end)
+
+  it("keeps progress sync disabled when persisted setting is not true", function()
+    plugin.progress_sync_enabled = false
+    plugin.settings = {
+      readSetting = function()
+        return nil
+      end,
+    }
+
+    assert.is_false(plugin:isProgressSyncEnabled())
+  end)
+
+  it("treats stale remote progress that is behind local as equal", function()
+    local direction = plugin:evaluateKoreaderProgressDirection(
+      { percentage = 0.04, progress = "40", timestamp = 1715004000 },
+      { percentage = 0.045, progress = "45", timestamp = 1715007600 }
+    )
+
+    assert.are.equal("equal", direction)
+  end)
+
+  it("keeps backward direction when remote progress is behind but newer", function()
+    local direction = plugin:evaluateKoreaderProgressDirection(
+      { percentage = 0.04, progress = "40", timestamp = 1715007600 },
+      { percentage = 0.045, progress = "45", timestamp = 1715004000 }
+    )
+
+    assert.are.equal("backward", direction)
+  end)
+
   it("rounds progress using configured decimal places", function()
     plugin.progress_decimal_places = 2
     assert.are.equal(33.33, plugin:roundProgress(33.333))
@@ -141,6 +186,98 @@ describe("BookloreSync helper methods", function()
     -- No URL change -> no additional init call
     assert.are.equal("http://local", plugin:refreshEffectiveServerUrl())
     assert.are.equal(1, #init_calls)
+  end)
+
+  it("hydrates local cache for unopened files before matching", function()
+    local saved_args
+    local hydrated_row = {
+      id = 77,
+      file_path = "/books/new.epub",
+      file_hash = "hash-1",
+      book_id = nil,
+      title = "Sidecar Title",
+      author = "A, B",
+    }
+    plugin.db = {
+      getBookByFilePath = function(_, fp)
+        if fp == "/books/new.epub" and saved_args then
+          return hydrated_row
+        end
+        return nil
+      end,
+      saveBookCache = function(_, file_path, file_hash, book_id, title, author)
+        saved_args = {
+          file_path = file_path,
+          file_hash = file_hash,
+          book_id = book_id,
+          title = title,
+          author = author,
+        }
+        return true
+      end,
+      getBookCacheIdByFilePath = function() return 77 end,
+      upsertBookMetadata = function(_, book_cache_id, fields)
+        assert.are.equal(77, book_cache_id)
+        assert.is_truthy(fields.sdr_path)
+      end,
+    }
+    plugin.metadata_extractor = {
+      getStats = function()
+        return { title = "Sidecar Title", authors = { "A", "B" } }
+      end,
+    }
+    plugin.calculateBookHash = function() return "hash-1" end
+
+    package.loaded["docsettings"] = nil
+    package.preload["docsettings"] = function()
+      return {
+        getSidecarDir = function(_, file_path)
+          return file_path .. ".sdr"
+        end,
+      }
+    end
+
+    local row, err = plugin:_ensureBookCachedForFile("/books/new.epub")
+
+    assert.is_nil(err)
+    assert.are.equal(hydrated_row, row)
+    assert.are.equal("/books/new.epub", saved_args.file_path)
+    assert.are.equal("hash-1", saved_args.file_hash)
+    assert.are.equal("Sidecar Title", saved_args.title)
+    assert.are.equal("A, B", saved_args.author)
+  end)
+
+  it("fileDialogMatchBook proceeds without prior open when cache hydrate succeeds", function()
+    local interactive_called = false
+    plugin.db = {
+      getBookByFilePath = function()
+        return { id = 5, file_path = "/books/new.epub", title = "New", book_id = nil }
+      end,
+      saveBookCache = function() return true end,
+      getBookCacheIdByFilePath = function() return 5 end,
+      upsertBookMetadata = function() end,
+    }
+    plugin.settings = {
+      readSetting = function(_, key)
+        if key == "booklore_username" then return "u" end
+        if key == "booklore_password" then return "p" end
+        return ""
+      end,
+    }
+    plugin.calculateBookHash = function() return "h" end
+    plugin.metadata_extractor = { getStats = function() return nil end }
+    plugin._matchSingleBookInteractive = function(_, book)
+      interactive_called = true
+      assert.are.equal("/books/new.epub", book.file_path)
+    end
+
+    package.loaded["docsettings"] = nil
+    package.preload["docsettings"] = function()
+      return { getSidecarDir = function() return "/books/new.epub.sdr" end }
+    end
+
+    plugin:fileDialogMatchBook("/books/new.epub")
+    assert.is_true(interactive_called)
   end)
 
 end)

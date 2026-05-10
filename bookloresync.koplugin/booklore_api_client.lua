@@ -166,7 +166,7 @@ Make HTTP request with improved error handling
 @return table|string|nil Response data or error message
 --]]
 ---APIClient:request.
-function APIClient:request(method, path, body, headers)
+function APIClient:request(method, path, body, headers, options)
     if not self.server_url or self.server_url == "" then
         self:logErr("BookloreSync API: Server URL not configured")
         return false, nil, "Server URL not configured"
@@ -176,9 +176,10 @@ function APIClient:request(method, path, body, headers)
     self:logInfo("BookloreSync API:", method, url)
     
     local req_headers = headers or {}
+    options = options or {}
     
-    -- Add authentication if username/password provided and no custom Authorization header
-    if self.username and self.password and not req_headers["Authorization"] then
+    -- Add default KOReader auth headers unless explicitly disabled.
+    if not options.skip_default_auth and self.username and self.password and not req_headers["Authorization"] then
         local password_hash = md5(self.password)
         req_headers["x-auth-user"] = self.username
         req_headers["x-auth-key"] = password_hash
@@ -625,7 +626,7 @@ function APIClient:loginBooklore(username, password)
     }
     
     -- Make request without auth headers (login doesn't need auth)
-    local success, code, response = self:request("POST", endpoint, body)
+    local success, code, response = self:request("POST", endpoint, body, nil, { skip_default_auth = true })
     
     if success and type(response) == "table" and response.accessToken then
         self:logInfo("BookloreSync API: Successfully obtained Bearer token")
@@ -1053,6 +1054,91 @@ function APIClient:submitRating(book_id, rating, username, password)
 end
 
 --[[--
+Update reading status for one or more books.
+
+Endpoint: POST /api/v1/books/status
+Body: { "bookIds": [book_id, ...], "status": "UNREAD" }
+
+@param book_ids table|number  One book ID or an array of book IDs
+@param status string          Status value (must be uppercase)
+@param username string        Booklore username for Bearer token
+@param password string        Booklore password for Bearer token
+@return boolean success
+@return string|nil error message on failure
+--]]
+---APIClient:updateBookStatus.
+function APIClient:updateBookStatus(book_ids, status, username, password)
+    if type(book_ids) ~= "table" then
+        book_ids = { book_ids }
+    end
+
+    local normalized_ids = {}
+    for _, book_id in ipairs(book_ids) do
+        local id = tonumber(book_id)
+        if id then
+            table.insert(normalized_ids, id)
+        end
+    end
+
+    if #normalized_ids == 0 then
+        return false, "At least one valid book ID is required"
+    end
+
+    status = tostring(status or ""):upper()
+    if status == "" then
+        return false, "Status is required"
+    end
+
+    if not username or username == "" then
+        return false, "Booklore username required for status update"
+    end
+    if not password or password == "" then
+        return false, "Booklore password required for status update"
+    end
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password, false)
+    if not token_ok then
+        return false, token or "Failed to obtain auth token"
+    end
+
+    local body_ids = normalized_ids
+    if json.util and json.util.InitArray then
+        body_ids = json.util.InitArray(normalized_ids)
+    end
+
+    local body = {
+        bookIds = body_ids,
+        status = status,
+    }
+    local headers = {
+        ["Authorization"] = "Bearer " .. token,
+        ["Content-Type"] = "application/json",
+    }
+
+    local success, code, response = self:request("POST", "/api/v1/books/status", body, headers)
+
+    if not success and (code == 401 or code == 403) then
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("POST", "/api/v1/books/status", body, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+
+    if success then
+        self:logInfo("BookloreSync API: Updated book status to", status, "for", #normalized_ids, "book(s)")
+        return true, nil
+    end
+
+    local err_msg = (type(response) == "string" and response ~= "") and response or ("HTTP " .. tostring(code))
+    self:logWarn("BookloreSync API: Failed to update book status:", err_msg)
+    return false, err_msg
+end
+
+--[[--
 
 Endpoint: POST /api/v1/annotations
 Required body fields: bookId, cfi, text
@@ -1470,26 +1556,25 @@ function APIClient:getBooksInShelf(shelf_id, username, password)
 
     local err_msg = (type(response) == "string" and response) or ("HTTP " .. tostring(code))
     self:logWarn("BookloreSync API: getBooksInShelf failed:", err_msg)
-    return false, err_msg
+    return false, { code = code, message = err_msg }
 end
 
 --[[--
-Find an existing shelf by name (case-insensitive), or create it if absent.
+Fetch all shelves visible to the current user.
 
-@param name      string  Shelf name to find or create
 @param username  string
 @param password  string
 @return boolean success
-@return number|string  shelf_id on success, error message on failure
+@return table|table  Shelf array on success, or { code, message } on failure
 --]]
----APIClient:getOrCreateShelf.
-function APIClient:getOrCreateShelf(name, username, password)
-    self:logInfo("BookloreSync API: getOrCreateShelf - name:", name)
+---APIClient:getAccessibleShelves.
+function APIClient:getAccessibleShelves(username, password)
+    self:logInfo("BookloreSync API: getAccessibleShelves")
 
     local token_ok, token = self:getOrRefreshBearerToken(username, password)
     if not token_ok then
-        self:logErr("BookloreSync API: getOrCreateShelf - auth failed:", token)
-        return false, token
+        self:logErr("BookloreSync API: getAccessibleShelves - auth failed:", token)
+        return false, { code = 401, message = tostring(token or "Authentication failed") }
     end
 
     local headers = { ["Authorization"] = "Bearer " .. token }
@@ -1506,9 +1591,418 @@ function APIClient:getOrCreateShelf(name, username, password)
 
     if not ok or type(response) ~= "table" then
         local err_msg = (type(response) == "string" and response) or ("HTTP " .. tostring(code))
-        self:logWarn("BookloreSync API: getOrCreateShelf - could not list shelves:", err_msg)
-        return false, err_msg
+        self:logWarn("BookloreSync API: getAccessibleShelves failed:", err_msg)
+        return false, { code = code, message = err_msg }
     end
+
+    return true, response
+end
+
+--[[--
+List available Magic Shelves.
+
+@param username  string
+@param password  string
+@return boolean success
+@return table|table  Shelf list on success, or { code, message } on failure
+--]]
+---APIClient:getMagicShelves.
+function APIClient:getMagicShelves(username, password)
+    self:logInfo("BookloreSync API: getMagicShelves")
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password)
+    if not token_ok then
+        return false, { code = 401, message = tostring(token or "Authentication failed") }
+    end
+
+    local headers = { ["Authorization"] = "Bearer " .. token }
+    local ok, code, response = self:request("GET", "/api/magic-shelves", nil, headers)
+
+    if not ok and (code == 401 or code == 403) then
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            ok, code, response = self:request("GET", "/api/magic-shelves", nil, headers)
+        end
+    end
+
+    if not ok then
+        if code == 404 then
+            return false, {
+                code = 404,
+                message = "Magic Shelves endpoint unsupported on this BookLore version",
+            }
+        end
+        local err_msg = (type(response) == "string" and response) or ("HTTP " .. tostring(code))
+        return false, { code = code, message = err_msg }
+    end
+
+    if type(response) ~= "table" then
+        return false, { code = code, message = "Invalid Magic Shelves response" }
+    end
+
+    return true, response
+end
+
+--[[--
+Fetch a specific Magic Shelf by ID.
+
+@param magic_shelf_id number|string
+@param username string
+@param password string
+@return boolean success
+@return table|table  Shelf object on success, or { code, message } on failure
+--]]
+---APIClient:getMagicShelfById.
+function APIClient:getMagicShelfById(magic_shelf_id, username, password)
+    local id = tonumber(magic_shelf_id)
+    if not id then
+        return false, { code = 400, message = "Invalid Magic Shelf ID" }
+    end
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password)
+    if not token_ok then
+        return false, { code = 401, message = tostring(token or "Authentication failed") }
+    end
+
+    local headers = { ["Authorization"] = "Bearer " .. token }
+    local ok, code, response = self:request("GET", "/api/magic-shelves/" .. id, nil, headers)
+
+    if not ok and (code == 401 or code == 403) then
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            ok, code, response = self:request("GET", "/api/magic-shelves/" .. id, nil, headers)
+        end
+    end
+
+    if not ok then
+        if code == 404 then
+            return false, {
+                code = 404,
+                message = "Magic Shelf not found or Magic Shelves endpoint unsupported",
+            }
+        end
+        local err_msg = (type(response) == "string" and response) or ("HTTP " .. tostring(code))
+        return false, { code = code, message = err_msg }
+    end
+
+    if type(response) ~= "table" then
+        return false, { code = code, message = "Invalid Magic Shelf response" }
+    end
+
+    return true, response
+end
+
+--[[--
+Fetch and normalize books for a Magic Shelf.
+
+@param magic_shelf_id number|string
+@param username string
+@param password string
+@return boolean success
+@return table|table  Normalized books array on success, or { code, message } on failure
+--]]
+---APIClient:getBooksInMagicShelf.
+function APIClient:getMagicShelfBookCount(magic_shelf_id, username, password)
+    local id = tonumber(magic_shelf_id)
+    if not id then
+        return false, { code = 400, message = "Invalid Magic Shelf ID" }
+    end
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password)
+    if not token_ok then
+        return false, { code = 401, message = tostring(token or "Authentication failed") }
+    end
+
+    local headers = { ["Authorization"] = "Bearer " .. token }
+    local path = string.format("/api/v1/app/shelves/magic/%d/books?page=0&size=1", id)
+    local ok, code, response = self:request("GET", path, nil, headers)
+
+    if not ok and (code == 401 or code == 403) then
+        if self.db then self.db:deleteBearerToken(username) end
+        local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if ref_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            ok, code, response = self:request("GET", path, nil, headers)
+        end
+    end
+
+    if not ok then
+        local err_msg = (type(response) == "string" and response) or ("HTTP " .. tostring(code))
+        return false, { code = code, message = err_msg }
+    end
+
+    if type(response) ~= "table" then
+        return false, { code = code, message = "Invalid Magic Shelf books response" }
+    end
+
+    local total = tonumber(response.totalElements)
+    if total == nil and type(response.content) == "table" then
+        total = #response.content
+    end
+    if total == nil then
+        return false, { code = code, message = "Magic Shelf books response missing totalElements" }
+    end
+
+    return true, total
+end
+
+---APIClient:getBooksInMagicShelf.
+function APIClient:getBooksInMagicShelf(magic_shelf_id, username, password)
+    local id = tonumber(magic_shelf_id)
+    if not id then
+        return false, { code = 400, message = "Invalid Magic Shelf ID" }
+    end
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password)
+    if not token_ok then
+        return false, { code = 401, message = tostring(token or "Authentication failed") }
+    end
+
+    local headers = { ["Authorization"] = "Bearer " .. token }
+    local normalized = {}
+    local page = 0
+    local size = 100
+
+    while true do
+        local path = string.format("/api/v1/app/shelves/magic/%d/books?page=%d&size=%d", id, page, size)
+        local ok, code, response = self:request("GET", path, nil, headers)
+
+        if not ok and (code == 401 or code == 403) then
+            if self.db then self.db:deleteBearerToken(username) end
+            local ref_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+            if ref_ok then
+                headers["Authorization"] = "Bearer " .. new_token
+                ok, code, response = self:request("GET", path, nil, headers)
+            end
+        end
+
+        if not ok then
+            local err_msg = (type(response) == "string" and response) or ("HTTP " .. tostring(code))
+            return false, { code = code, message = err_msg }
+        end
+
+        if type(response) ~= "table" or type(response.content) ~= "table" then
+            return false, { code = code, message = "Invalid Magic Shelf books response" }
+        end
+
+        for _, entry in ipairs(response.content) do
+            if type(entry) == "table" then
+                local mapped = {
+                    id = entry.id,
+                    title = entry.title,
+                    author = (type(entry.authors) == "table" and entry.authors[1]) or entry.author,
+                    metadata = {
+                        authors = (type(entry.authors) == "table") and entry.authors or nil,
+                    },
+                    bookType = entry.primaryFileType or entry.bookType,
+                }
+                table.insert(normalized, self:_normalizeShelfBookObject(mapped))
+            end
+        end
+
+        if response.hasNext ~= true then
+            break
+        end
+        page = page + 1
+    end
+
+    return true, normalized
+end
+
+--[[--
+Resolve a Magic Shelf source for sync.
+
+Resolution order:
+1) If magic_shelf_id is set, ensure that Magic Shelf exists in list response.
+2) Otherwise, resolve by magic_shelf_name (case-insensitive).
+
+@param magic_shelf_id    number|string|nil
+@param magic_shelf_name  string|nil
+@param username          string
+@param password          string
+@return boolean success
+@return table|table  { id, name, source } on success; { code, message } on failure
+--]]
+---APIClient:resolveMagicShelfSource.
+function APIClient:resolveMagicShelfSource(magic_shelf_id, magic_shelf_name, username, password)
+    self:logInfo("BookloreSync API: resolveMagicShelfSource - id:", tostring(magic_shelf_id), "name:", tostring(magic_shelf_name))
+
+    local explicit_id = tonumber(magic_shelf_id)
+    local shelf_name = tostring(magic_shelf_name or "")
+
+    local list_ok, shelves_or_err = self:getMagicShelves(username, password)
+    if not list_ok then
+        return false, shelves_or_err
+    end
+
+    local shelves = shelves_or_err
+
+    if explicit_id then
+        for _, shelf in ipairs(shelves) do
+            local sid = tonumber(shelf.id)
+            if sid and sid == explicit_id then
+                return true, {
+                    id = sid,
+                    name = shelf.name or ("Magic Shelf " .. tostring(sid)),
+                    source = "id",
+                }
+            end
+        end
+        return false, {
+            code = 404,
+            message = "Configured Magic Shelf ID is not accessible for this account",
+        }
+    end
+
+    if shelf_name ~= "" then
+        local name_lower = shelf_name:lower()
+        for _, shelf in ipairs(shelves) do
+            if shelf.name and shelf.name:lower() == name_lower then
+                local sid = tonumber(shelf.id)
+                if sid then
+                    return true, {
+                        id = sid,
+                        name = shelf.name,
+                        source = "name",
+                    }
+                end
+            end
+        end
+        return false, {
+            code = 404,
+            message = "Configured Magic Shelf name is not accessible for this account",
+        }
+    end
+
+    return false, {
+        code = 400,
+        message = "No Magic Shelf source configured",
+    }
+end
+
+--[[--
+Resolve a shelf source for sync.
+
+Resolution order:
+1) If source_shelf_id is set, ensure that shelf exists in accessible shelves.
+2) Otherwise, resolve by source_shelf_name (case-insensitive).
+3) If name is not found, create the shelf by name.
+
+@param source_shelf_id    number|string|nil
+@param source_shelf_name  string|nil
+@param username           string
+@param password           string
+@return boolean success
+@return table|table  { id, name, source, is_private } on success; { code, message } on failure
+--]]
+---APIClient:resolveShelfSource.
+function APIClient:resolveShelfSource(source_shelf_id, source_shelf_name, username, password)
+    self:logInfo("BookloreSync API: resolveShelfSource - id:", tostring(source_shelf_id), "name:", tostring(source_shelf_name))
+
+    local explicit_id = tonumber(source_shelf_id)
+    local shelf_name = tostring(source_shelf_name or "")
+
+    local list_ok, shelves_or_err = self:getAccessibleShelves(username, password)
+    if not list_ok then
+        return false, shelves_or_err
+    end
+
+    local shelves = shelves_or_err
+
+    if explicit_id then
+        for _, shelf in ipairs(shelves) do
+            local sid = tonumber(shelf.id)
+            if sid and sid == explicit_id then
+                return true, {
+                    id = sid,
+                    name = shelf.name or ("Shelf " .. tostring(sid)),
+                    source = "id",
+                    is_private = (shelf.publicShelf == false),
+                }
+            end
+        end
+        return false, {
+            code = 404,
+            message = "Configured shelf ID is not accessible for this account",
+        }
+    end
+
+    if shelf_name ~= "" then
+        local name_lower = shelf_name:lower()
+        for _, shelf in ipairs(shelves) do
+            if shelf.name and shelf.name:lower() == name_lower then
+                local sid = tonumber(shelf.id)
+                if sid then
+                    return true, {
+                        id = sid,
+                        name = shelf.name,
+                        source = "name",
+                        is_private = (shelf.publicShelf == false),
+                    }
+                end
+            end
+        end
+
+        local token_ok, token = self:getOrRefreshBearerToken(username, password)
+        if not token_ok then
+            return false, {
+                code = 401,
+                message = tostring(token or "Authentication failed"),
+            }
+        end
+
+        local body = { name = shelf_name, icon = "pi pi-shield", iconType = "PRIME_NG", publicShelf = true }
+        local create_headers = {
+            ["Authorization"] = "Bearer " .. token,
+            ["Content-Type"]  = "application/json",
+        }
+        local c_ok, c_code, c_resp = self:request("POST", "/api/v1/shelves", body, create_headers)
+        if c_ok and c_code == 201 and type(c_resp) == "table" and c_resp.id then
+            return true, {
+                id = tonumber(c_resp.id),
+                name = c_resp.name or shelf_name,
+                source = "created",
+                is_private = false,
+            }
+        end
+
+        local c_err = (type(c_resp) == "string" and c_resp) or ("HTTP " .. tostring(c_code))
+        return false, {
+            code = c_code,
+            message = c_err,
+        }
+    end
+
+    return false, {
+        code = 400,
+        message = "No shelf source configured",
+    }
+end
+
+--[[--
+Find an existing shelf by name (case-insensitive), or create it if absent.
+
+@param name      string  Shelf name to find or create
+@param username  string
+@param password  string
+@return boolean success
+@return number|string  shelf_id on success, error message on failure
+--]]
+---APIClient:getOrCreateShelf.
+function APIClient:getOrCreateShelf(name, username, password)
+    self:logInfo("BookloreSync API: getOrCreateShelf - name:", name)
+
+    local list_ok, response_or_err = self:getAccessibleShelves(username, password)
+    if not list_ok then
+        self:logWarn("BookloreSync API: getOrCreateShelf - could not list shelves:", response_or_err.message)
+        return false, response_or_err.message
+    end
+
+    local response = response_or_err
 
     -- Search for existing shelf (case-insensitive)
     local name_lower = name:lower()
@@ -1521,7 +2015,12 @@ function APIClient:getOrCreateShelf(name, username, password)
 
     -- Create it
     self:logInfo("BookloreSync API: Shelf not found, creating:", name)
-   local body = json.encode({ name = name, icon = "pi pi-shield", iconType = "PRIME_NG", publicShelf = true })
+    local token_ok, token = self:getOrRefreshBearerToken(username, password)
+    if not token_ok then
+        self:logErr("BookloreSync API: getOrCreateShelf - auth failed before create:", token)
+        return false, tostring(token or "Authentication failed")
+    end
+    local body = { name = name, icon = "pi pi-shield", iconType = "PRIME_NG", publicShelf = true }
     local create_headers = {
         ["Authorization"] = "Bearer " .. token,
         ["Content-Type"]  = "application/json",

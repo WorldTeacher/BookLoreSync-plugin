@@ -80,6 +80,17 @@ This document tracks all features from the old plugin and their implementation s
 | Connect network on suspend | 🚧 | `main.lua:425-438` | Setting exists, behavior deferred |
 | Silent messages mode | ✅ | `booklore_settings.lua:305-320` | |
 
+### Shelf Sync
+| Feature | Status | Location (New) | Notes |
+|---------|--------|---------------|-------|
+| Shelf source name configuration | ✅ | `main.lua` (Shelf Sync menu) | Used as fallback source resolution |
+| Explicit shelf source ID | ✅ | `main.lua` (Shelf Sync menu) | Supports private shelf sync by ID |
+| Shelf source type selector (standard vs magic) | ✅ | `main.lua` (Shelf Sync menu) | Switches shelf sync adapter |
+| Magic Shelf source by name or ID | ✅ | `main.lua`, `booklore_shelf_sync.lua`, `booklore_api_client.lua` | Resolves name via `/api/magic-shelves`, then loads `/api/magic-shelves/<id>` |
+| Private shelf source sync | ✅ | `booklore_shelf_sync.lua`, `booklore_api_client.lua` | Uses Bearer auth and access checks |
+| Actionable shelf-access errors (401/403/404) | ✅ | `booklore_shelf_sync.lua` | User-facing failure guidance |
+| Deletion unassign uses configured source shelf | ✅ | `booklore_deletion_module.lua`, `booklore_pending_sync.lua` | Uses explicit source ID when set (standard source only) |
+
 ### Network Management
 | Feature | Status | Location (New) | Notes |
 |---------|--------|---------------|-------|

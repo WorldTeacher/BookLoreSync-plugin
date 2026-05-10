@@ -362,7 +362,65 @@ Creates a bookmark at a specific EPUB CFI position.
 
 ---
 
-## Shelf endpoint
+## Shelf endpoints
+
+### `GET /api/v1/shelves`
+
+Lists shelves visible to the authenticated user (including private shelves they can access).
+
+**Authentication:** Bearer token
+
+Used during shelf-source resolution before sync. The plugin can resolve by explicit shelf ID first, then by shelf name fallback.
+
+---
+
+### `GET /api/v1/shelves/<shelf_id>/books`
+
+Fetches books in a specific shelf.
+
+**Authentication:** Bearer token
+
+**Path parameter:** `<shelf_id>` - shelf ID resolved from the configured source.
+
+Used by Shelf Sync to download only books currently present in the selected shelf source (public or private).
+
+---
+
+### `GET /api/magic-shelves`
+
+Lists available Magic Shelves for the authenticated user.
+
+**Authentication:** Bearer token
+
+Used by the plugin when validating Magic Shelf support and resolving a configured Magic Shelf by name.
+
+---
+
+### `GET /api/magic-shelves/<magic_shelf_id>`
+
+Fetches a specific Magic Shelf and its computed books.
+
+**Authentication:** Bearer token
+
+**Path parameter:** `<magic_shelf_id>` - numeric Magic Shelf ID (configured directly or resolved from configured Magic Shelf name).
+
+Used when shelf source type is set to Magic Shelf.
+
+---
+
+### `GET /api/v1/app/shelves/magic/<magic_shelf_id>/books`
+
+Fetches paged books for a specific Magic Shelf.
+
+**Authentication:** Bearer token
+
+**Path parameter:** `<magic_shelf_id>` - numeric Magic Shelf ID (configured directly or resolved from configured Magic Shelf name).
+
+**Query parameters:** `page` (int), `size` (int)
+
+Response uses a page envelope with `content` and `hasNext`; the plugin follows pages until `hasNext` is false.
+
+---
 
 ### `POST /api/v1/books/shelves`
 
@@ -379,7 +437,7 @@ Assigns or unassigns one or more books to/from shelves.
 }
 ```
 
-Used when a book file is deleted from the device to unassign it from the KOReader shelf. Also used during shelf sync to assign downloaded books to the configured shelf.
+Used when a book file is deleted from the device to unassign it from the configured standard shelf source. Also used during shelf sync bookkeeping.
 
 ---
 

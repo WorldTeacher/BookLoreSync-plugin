@@ -131,7 +131,7 @@ build-koplugin-artifact:
   script:
     - echo "Generating version information"
     - export PLUGIN_VERSION="dev-build-$(date -u +%Y%m%d%H%M%S)"
-    - VERSION_OVERRIDE="$PLUGIN_VERSION" bash generate-version.sh
+    - VERSION_OVERRIDE="$PLUGIN_VERSION" bash scripts/generate-version.sh
 
     - echo "Compiling gettext translations"
     - |
@@ -184,7 +184,7 @@ zip-koplugin-release:
       --git-protocol https
   script:
     - echo "Generating version information from tag $CI_COMMIT_TAG"
-    - bash generate-version.sh
+    - bash scripts/generate-version.sh
 
     - echo "Compiling gettext translations"
     - |

@@ -1,5 +1,3 @@
-#!/usr/bin/env bash
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
@@ -43,6 +41,7 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
 EXISTING_CHANGELOG="${EXISTING_CHANGELOG_FILE:-CHANGELOG.md}"
 
 if ! command -v git >/dev/null 2>&1; then
@@ -61,6 +60,22 @@ update_docs_changelog() {
     local tag
 
     declare -A seen_versions=()
+
+    append_unique_changelog_line() {
+        local array_name="$1"
+        local seen_name="$2"
+        local line="$3"
+
+        local -n target_array="$array_name"
+        local -n seen_map="$seen_name"
+
+        if [ -n "${seen_map[$line]:-}" ]; then
+            return 0
+        fi
+
+        seen_map[$line]=1
+        target_array+=("$line")
+    }
 
     while IFS=$'\t' read -r tag normalized_version; do
         [ -z "$tag" ] && continue
@@ -108,6 +123,14 @@ update_docs_changelog() {
         local -a up_maintenance=()
         local -a up_others=()
 
+        declare -A up_seen_features=()
+        declare -A up_seen_bug_fixes=()
+        declare -A up_seen_perf_improvements=()
+        declare -A up_seen_reverts=()
+        declare -A up_seen_breaking_changes=()
+        declare -A up_seen_maintenance=()
+        declare -A up_seen_others=()
+
         while IFS= read -r -d $'\x1e' entry; do
             [ -z "$entry" ] && continue
 
@@ -131,43 +154,43 @@ update_docs_changelog() {
 
                 case "$commit_type" in
                     feat)
-                        up_features+=("* ${subject_text}")
+                        append_unique_changelog_line up_features up_seen_features "* ${subject_text}"
                         if [ "$up_bump_level" != "major" ] && [ "$up_bump_level" != "minor" ]; then
                             up_bump_level="minor"
                         fi
                         ;;
                     fix)
-                        up_bug_fixes+=("* ${subject_text}")
+                        append_unique_changelog_line up_bug_fixes up_seen_bug_fixes "* ${subject_text}"
                         if [ "$up_bump_level" = "none" ]; then
                             up_bump_level="patch"
                         fi
                         ;;
                     perf)
-                        up_perf_improvements+=("* ${subject_text}")
+                        append_unique_changelog_line up_perf_improvements up_seen_perf_improvements "* ${subject_text}"
                         if [ "$up_bump_level" = "none" ]; then
                             up_bump_level="patch"
                         fi
                         ;;
                     revert)
-                        up_reverts+=("* ${subject_text}")
+                        append_unique_changelog_line up_reverts up_seen_reverts "* ${subject_text}"
                         if [ "$up_bump_level" = "none" ]; then
                             up_bump_level="patch"
                         fi
                         ;;
                     docs|style|refactor|test|build|ci|chore)
-                        up_maintenance+=("* ${subject_text}")
+                        append_unique_changelog_line up_maintenance up_seen_maintenance "* ${subject_text}"
                         ;;
                     *)
-                        up_others+=("* ${subject_text}")
+                        append_unique_changelog_line up_others up_seen_others "* ${subject_text}"
                         ;;
                 esac
 
                 if [ -n "$is_breaking" ] || [[ "$body" == *"BREAKING CHANGE:"* ]] || [[ "$body" == *"BREAKING-CHANGE:"* ]]; then
-                    up_breaking_changes+=("* ${subject_text}")
+                    append_unique_changelog_line up_breaking_changes up_seen_breaking_changes "* ${subject_text}"
                     up_bump_level="major"
                 fi
             else
-                up_others+=("* ${subject_text}")
+                append_unique_changelog_line up_others up_seen_others "* ${subject_text}"
             fi
         done < <(git log --no-merges --reverse --pretty=tformat:'%s%x1f%b%x1e' "${latest_tag}..HEAD")
 
@@ -282,6 +305,14 @@ update_docs_changelog() {
             local -a maintenance=()
             local -a others=()
 
+            declare -A seen_features=()
+            declare -A seen_bug_fixes=()
+            declare -A seen_perf_improvements=()
+            declare -A seen_reverts=()
+            declare -A seen_breaking_changes=()
+            declare -A seen_maintenance=()
+            declare -A seen_others=()
+
             while IFS= read -r -d $'\x1e' entry; do
                 [ -z "$entry" ] && continue
 
@@ -305,30 +336,30 @@ update_docs_changelog() {
 
                     case "$commit_type" in
                         feat)
-                            features+=("* ${subject_text}")
+                            append_unique_changelog_line features seen_features "* ${subject_text}"
                             ;;
                         fix)
-                            bug_fixes+=("* ${subject_text}")
+                            append_unique_changelog_line bug_fixes seen_bug_fixes "* ${subject_text}"
                             ;;
                         perf)
-                            perf_improvements+=("* ${subject_text}")
+                            append_unique_changelog_line perf_improvements seen_perf_improvements "* ${subject_text}"
                             ;;
                         revert)
-                            reverts+=("* ${subject_text}")
+                            append_unique_changelog_line reverts seen_reverts "* ${subject_text}"
                             ;;
                         docs|style|refactor|test|build|ci|chore)
-                            maintenance+=("* ${subject_text}")
+                            append_unique_changelog_line maintenance seen_maintenance "* ${subject_text}"
                             ;;
                         *)
-                            others+=("* ${subject_text}")
+                            append_unique_changelog_line others seen_others "* ${subject_text}"
                             ;;
                     esac
 
                     if [ -n "$is_breaking" ] || [[ "$body" == *"BREAKING CHANGE:"* ]] || [[ "$body" == *"BREAKING-CHANGE:"* ]]; then
-                        breaking_changes+=("* ${subject_text}")
+                        append_unique_changelog_line breaking_changes seen_breaking_changes "* ${subject_text}"
                     fi
                 else
-                    others+=("* ${subject_text}")
+                    append_unique_changelog_line others seen_others "* ${subject_text}"
                 fi
             done < <(git log --no-merges --reverse --pretty=tformat:'%s%x1f%b%x1e' "$log_range")
 
@@ -398,6 +429,7 @@ fi
 
 latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
 log_range="HEAD"
+
 if [ -n "$latest_tag" ]; then
     log_range="${latest_tag}..HEAD"
 fi
@@ -413,6 +445,7 @@ breaking_changes=()
 
 origin_url="$(git config --get remote.origin.url 2>/dev/null || true)"
 repo_url=""
+
 if [[ "$origin_url" =~ ^git@([^:]+):(.+)\.git$ ]]; then
     repo_url="https://${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
 elif [[ "$origin_url" =~ ^git@([^:]+):(.+)$ ]]; then
@@ -430,6 +463,7 @@ append_line() {
     short_hash="$(git rev-parse --short "$commit_hash")"
 
     local commit_ref="${short_hash}"
+
     if [ -n "$repo_url" ]; then
         commit_ref="[${short_hash}](${repo_url}/commit/${commit_hash})"
     fi
@@ -443,9 +477,11 @@ append_line() {
 
 contains_breaking_change_note() {
     local body="$1"
+
     if [[ "$body" == *"BREAKING CHANGE:"* ]] || [[ "$body" == *"BREAKING-CHANGE:"* ]]; then
         return 0
     fi
+
     return 1
 }
 
@@ -545,6 +581,7 @@ release_date="$(date -u +%Y-%m-%d)"
 
 if [ "$has_release_commit" -eq 0 ]; then
     compare_hint="HEAD"
+
     if [ -n "$latest_tag" ]; then
         compare_hint="$latest_tag"
     fi
@@ -604,9 +641,11 @@ fi
 } > "$OUTPUT_FILE"
 
 echo "Created $OUTPUT_FILE"
+
 if [ -n "$latest_tag" ]; then
     echo "Based on commits in range: $latest_tag..HEAD"
 else
     echo "Based on all commits (no existing tag found)"
 fi
+
 echo "Predicted next version: $next_version"

@@ -229,7 +229,6 @@ All notable changes to the BookLore Sync plugin are documented here.
 * **hardcover:** add debug menu with 'Request book metadata from BookLore' action
 * add file manager hold menu items (sync annotations, match book, sync rating)
 * **ui:** register file manager hold menu actions for syncing annotations, matching book, and syncing rating
-* add file manager hold menu items (sync annotations, match book, sync rating)
 * **annotations:** add 'Both' destination and PDF mock CFI support
 * **bookmarks:** sync bookmarks to Booklore via api/v1/bookmarks
 * **sync:** implement hardcover rating sync with token validation and fallback search
@@ -313,9 +312,7 @@ All notable changes to the BookLore Sync plugin are documented here.
 * **ci:** remove test stage and associated run-tests job from CI pipeline
 * **semantic-release:** release 1.0.0 - [skip ci on prod]
 * **ci:** add stuff [release]
-* **semantic-release:** release 1.0.0 - [skip ci on prod]
 * **changelog:** reset changelog [release]
-* **semantic-release:** release 1.0.0 - [skip ci on prod]
 * **semantic-release:** release 3.5.0 - [skip ci on prod]
 * **semantic-release:** release 3.5.1 - [skip ci on prod]
 * **api:** remove ISBN lookup function from APIClient
@@ -331,8 +328,6 @@ All notable changes to the BookLore Sync plugin are documented here.
 * **i10n:** update translation for  sdr detection and deletion
 * **documentation:** update documentation to explain updated functions
 * **semantic-release:** release 3.8.0 - [skip ci on prod]
-* **semantic-release:** release 1.0.0 - [skip ci on prod]
-* **semantic-release:** release 1.0.0 - [skip ci on prod]
 
 ### Other Changes
 
@@ -468,7 +463,6 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 * log obfuscation
 * add auto-updater system with GitHub integration
-* add auto-updater system with GitHub integration
 * **api:** add batch session upload endpoint with intelligent batching
 * **logging:** implement file-based logging with daily rotation and automatic cleanup
 * **logging:** enhance file logging with initialization and closure handling
@@ -493,7 +487,6 @@ All notable changes to the BookLore Sync plugin are documented here.
 * **hardcover:** add debug menu with 'Request book metadata from BookLore' action
 * add file manager hold menu items (sync annotations, match book, sync rating)
 * **ui:** register file manager hold menu actions for syncing annotations, matching book, and syncing rating
-* add file manager hold menu items (sync annotations, match book, sync rating)
 * **annotations:** add 'Both' destination and PDF mock CFI support
 * **bookmarks:** sync bookmarks to Booklore via api/v1/bookmarks
 * **sync:** implement hardcover rating sync with token validation and fallback search
@@ -521,16 +514,12 @@ All notable changes to the BookLore Sync plugin are documented here.
 * ci file
 * ci now allows addition?
 * new ci
-* new ci
 * another ci
 * tag version in github
 * **updater:** handle HTTP redirects manually for KOReader compatibility
 * **updater:** use correct lfs library path for KOReader
 * **updater:** remove duplicate restart confirmation dialog
 * **menu:** use text_func instead of text for dynamic pending count
-* **updater:** handle HTTP redirects manually for KOReader compatibility
-* **updater:** use correct lfs library path for KOReader
-* **updater:** remove duplicate restart confirmation dialog
 * **sync:** handle nil progress values in session processing and batch uploads
 * **sync:** fallback to individual upload on 403 Forbidden
 * **database:** improve journal mode handling for better reliability
@@ -572,8 +561,6 @@ All notable changes to the BookLore Sync plugin are documented here.
 * **updater:** remove changelog from update confirmation dialog
 * **ui:** remove duplicate version option
 * **menu:** reorganize menu structure for improved usability
-* **updater:** remove changelog from update confirmation dialog
-* **ui:** remove duplicate version option
 * **semantic-release:** release 2.0.0 - [skip ci on prod]
 * **semantic-release:** release 3.0.0 - [skip ci on prod]
 * add batch upload feature note to README
@@ -612,11 +599,8 @@ All notable changes to the BookLore Sync plugin are documented here.
 * **readme:** add testing instructions and coverage artifact details
 * **ci:** remove test stage and associated run-tests job from CI pipeline
 * **ci:** trigger release [release]
-* **semantic-release:** release 1.0.0 - [skip ci on prod]
 * **ci:** add stuff [release]
-* **semantic-release:** release 1.0.0 - [skip ci on prod]
 * **changelog:** reset changelog [release]
-* **semantic-release:** release 1.0.0 - [skip ci on prod]
 
 ### Other Changes
 
@@ -646,7 +630,6 @@ All notable changes to the BookLore Sync plugin are documented here.
 
 ### BREAKING CHANGES
 
-* add auto-updater system with GitHub integration
 * add auto-updater system with GitHub integration
 * **release:** trigger major version bump [release]
 

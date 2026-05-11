@@ -1089,6 +1089,7 @@ function Settings:exportSettings(parent)
         manual_sync_only              = parent.manual_sync_only,
         rating_sync_enabled           = parent.rating_sync_enabled,
         rating_sync_mode              = parent.rating_sync_mode,
+        show_post_rating_recommendations = parent.show_post_rating_recommendations,
         highlights_notes_sync_enabled = parent.highlights_notes_sync_enabled,
         notes_destination             = parent.notes_destination,
         upload_strategy               = parent.upload_strategy,

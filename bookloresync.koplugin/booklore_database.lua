@@ -808,6 +808,7 @@ Database.migration_hooks = {
             "historical_sync_ack",
             "booklore_username", "booklore_password",
             "rating_sync_enabled", "rating_sync_mode",
+            "show_post_rating_recommendations",
             "highlights_notes_sync_enabled", "notes_destination", "upload_strategy",
             "auto_update_check", "last_update_check",
         }
@@ -2078,7 +2079,7 @@ end
 function Database:getHistoricalSessionsForBook(koreader_book_id)
     local stmt = self.conn:prepare([[
         SELECT 
-            id, book_id, book_type, start_time, end_time,
+            id, book_id, book_hash, book_type, start_time, end_time,
             duration_seconds, start_progress, end_progress, progress_delta,
             start_location, end_location, synced
         FROM historical_sessions
@@ -2098,16 +2099,17 @@ function Database:getHistoricalSessionsForBook(koreader_book_id)
         table.insert(sessions, {
             id = tonumber(row[1]),
             book_id = tonumber(row[2]),
-            book_type = tostring(row[3]),
-            start_time = tostring(row[4]),
-            end_time = tostring(row[5]),
-            duration_seconds = tonumber(row[6]),
-            start_progress = tonumber(row[7]),
-            end_progress = tonumber(row[8]),
-            progress_delta = tonumber(row[9]),
-            start_location = tostring(row[10]),
-            end_location = tostring(row[11]),
-            synced = tonumber(row[12]) or 0,
+            book_hash = tostring(row[3] or ""),
+            book_type = tostring(row[4]),
+            start_time = tostring(row[5]),
+            end_time = tostring(row[6]),
+            duration_seconds = tonumber(row[7]),
+            start_progress = tonumber(row[8]),
+            end_progress = tonumber(row[9]),
+            progress_delta = tonumber(row[10]),
+            start_location = tostring(row[11]),
+            end_location = tostring(row[12]),
+            synced = tonumber(row[13]) or 0,
         })
     end
     
@@ -2119,7 +2121,7 @@ end
 function Database:getHistoricalSessionsForBookUnsynced(koreader_book_id)
     local stmt = self.conn:prepare([[
         SELECT 
-            id, book_id, book_type, start_time, end_time,
+            id, book_id, book_hash, book_type, start_time, end_time,
             duration_seconds, start_progress, end_progress, progress_delta,
             start_location, end_location, synced
         FROM historical_sessions
@@ -2139,16 +2141,17 @@ function Database:getHistoricalSessionsForBookUnsynced(koreader_book_id)
         table.insert(sessions, {
             id = tonumber(row[1]),
             book_id = tonumber(row[2]),
-            book_type = tostring(row[3]),
-            start_time = tostring(row[4]),
-            end_time = tostring(row[5]),
-            duration_seconds = tonumber(row[6]),
-            start_progress = tonumber(row[7]),
-            end_progress = tonumber(row[8]),
-            progress_delta = tonumber(row[9]),
-            start_location = tostring(row[10] or ""),
-            end_location = tostring(row[11] or ""),
-            synced = tonumber(row[12]) or 0,
+            book_hash = tostring(row[3] or ""),
+            book_type = tostring(row[4]),
+            start_time = tostring(row[5]),
+            end_time = tostring(row[6]),
+            duration_seconds = tonumber(row[7]),
+            start_progress = tonumber(row[8]),
+            end_progress = tonumber(row[9]),
+            progress_delta = tonumber(row[10]),
+            start_location = tostring(row[11] or ""),
+            end_location = tostring(row[12] or ""),
+            synced = tonumber(row[13]) or 0,
         })
     end
     

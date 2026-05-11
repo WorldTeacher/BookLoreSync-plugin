@@ -57,6 +57,20 @@ function M.new(deps)
             }
         end)
 
+        -- Row 4: recommendations
+        FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row4", function(file, is_file, _book_props)
+            if not is_file then return nil end
+            return {
+                {
+                    text = _("Get recommendations"),
+                    callback = function()
+                        closeFileDialog()
+                        plugin:fileDialogGetRecommendations(file)
+                    end,
+                },
+            }
+        end)
+
         -- Row 3: tracking + status actions
         FileManager.addFileDialogButtons(FileManager, "booklore_sync_actions_row3", function(file, is_file, _book_props)
             if not is_file then return nil end
@@ -88,6 +102,7 @@ function M.new(deps)
         FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row1")
         FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row2")
         FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row3")
+        FileManager.removeFileDialogButtons(FileManager, "booklore_sync_actions_row4")
     end
 
     return module

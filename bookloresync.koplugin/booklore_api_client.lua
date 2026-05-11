@@ -2220,4 +2220,112 @@ function APIClient:getBookFileSize(book_id, username, password)
     return file_size, nil
 end
 
+--[[--
+Fetch recommendations for a given Booklore book.
+
+Endpoint: GET /api/v1/books/{id}/recommendations?limit=N
+
+@param book_id   number  Booklore book ID
+@param username  string  Booklore username
+@param password  string  Booklore password
+@param limit     number|nil  Max recommendations (default 10)
+@return boolean success
+@return table|string recommendations array or error message
+--]]
+---APIClient:getBookRecommendations.
+function APIClient:getBookRecommendations(book_id, username, password, limit)
+    book_id = tonumber(book_id)
+    if not book_id then
+        return false, "Invalid book_id"
+    end
+    limit = tonumber(limit) or 10
+    if limit < 1 then limit = 1 end
+
+    self:logInfo("BookloreSync API: getBookRecommendations - id:", book_id, "limit:", limit)
+
+    local token_ok, token = self:getOrRefreshBearerToken(username, password)
+    if not token_ok then
+        self:logErr("BookloreSync API: getBookRecommendations - auth failed:", token)
+        return false, "Authentication failed: " .. tostring(token)
+    end
+
+    local headers = { ["Authorization"] = "Bearer " .. token }
+    local endpoint = "/api/v1/books/" .. tostring(book_id) .. "/recommendations?limit=" .. tostring(limit)
+
+    local success, code, response = self:request("GET", endpoint, nil, headers)
+
+    if not success and (code == 401 or code == 403) then
+        self:logWarn("BookloreSync API: getBookRecommendations - token rejected, refreshing")
+        if self.db then self.db:deleteBearerToken(username) end
+        local refresh_ok, new_token = self:getOrRefreshBearerToken(username, password, true)
+        if refresh_ok then
+            headers["Authorization"] = "Bearer " .. new_token
+            success, code, response = self:request("GET", endpoint, nil, headers)
+        else
+            return false, new_token or "Authentication failed after refresh"
+        end
+    end
+
+    if not success then
+        local err = (type(response) == "string" and response ~= "") and response
+                    or ("HTTP " .. tostring(code or "?"))
+        self:logWarn("BookloreSync API: getBookRecommendations failed:", err)
+        return false, err
+    end
+
+    -- Server may return either a bare array or an object wrapping the array
+    -- (e.g. { recommendations = [...] } or { content = [...] }). Accept both.
+    local items = nil
+    if type(response) == "table" then
+        if #response > 0 or next(response) == nil then
+            items = response
+        elseif type(response.recommendations) == "table" then
+            items = response.recommendations
+        elseif type(response.content) == "table" then
+            items = response.content
+        elseif type(response.items) == "table" then
+            items = response.items
+        else
+            items = response
+        end
+    end
+
+    if type(items) ~= "table" then
+        return false, "Unexpected recommendations response shape"
+    end
+
+    -- Per OpenAPI: each item is a BookRecommendation { book: Book, similarityScore }.
+    -- Unwrap the inner Book and carry similarityScore onto the normalised object
+    -- as matchScore so the existing UI conventions work unchanged. Tolerate older
+    -- shapes that returned bare Book objects directly.
+    local books = {}
+    for _, item in ipairs(items) do
+        local inner = item
+        local score = nil
+        if type(item) == "table" then
+            if type(item.book) == "table" then
+                inner = item.book
+                score = tonumber(item.similarityScore)
+                    or tonumber(item.matchScore)
+                    or tonumber(item.score)
+            elseif type(item.recommendedBook) == "table" then
+                inner = item.recommendedBook
+                score = tonumber(item.similarityScore)
+                    or tonumber(item.matchScore)
+                    or tonumber(item.score)
+            end
+        end
+        if type(inner) == "table" then
+            inner = self:_normalizeBookObject(inner)
+            if score and not inner.matchScore then
+                inner.matchScore = score
+            end
+            table.insert(books, inner)
+        end
+    end
+
+    self:logInfo("BookloreSync API: getBookRecommendations - got", #books, "items")
+    return true, books
+end
+
 return APIClient

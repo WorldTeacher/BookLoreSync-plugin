@@ -256,6 +256,108 @@ describe("APIClient helper methods", function()
     assert.are.equal(2, auth_calls)
   end)
 
+  it("rejects recommendations request with invalid book id", function()
+    local ok, err = client:getBookRecommendations(nil, "user", "pass")
+    assert.is_false(ok)
+    assert.are.equal("Invalid book_id", err)
+  end)
+
+  it("fetches recommendations with default limit and normalizes wrapped results", function()
+    local captured_path
+    client.getOrRefreshBearerToken = function(_, username, password)
+      assert.are.equal("user", username)
+      assert.are.equal("pass", password)
+      return true, "token-1"
+    end
+
+    client.request = function(_, method, path, body, headers)
+      captured_path = path
+      assert.are.equal("GET", method)
+      assert.is_nil(body)
+      assert.are.equal("Bearer token-1", headers["Authorization"])
+      return true, 200, {
+        recommendations = {
+          {
+            id = 123,
+            title = "Reco Book",
+            metadata = {
+              isbn10 = "111",
+              isbn13 = "222",
+            },
+          },
+        },
+      }
+    end
+
+    local ok, items = client:getBookRecommendations(42, "user", "pass")
+    assert.is_true(ok)
+    assert.are.equal("/api/v1/books/42/recommendations?limit=10", captured_path)
+    assert.are.equal(1, #items)
+    assert.are.equal("111", items[1].isbn10)
+    assert.are.equal("222", items[1].isbn13)
+  end)
+
+  it("clamps recommendations limit to at least one", function()
+    local captured_path
+    client.getOrRefreshBearerToken = function()
+      return true, "token-1"
+    end
+
+    client.request = function(_, _, path)
+      captured_path = path
+      return true, 200, {}
+    end
+
+    local ok, items = client:getBookRecommendations(7, "user", "pass", 0)
+    assert.is_true(ok)
+    assert.are.equal("/api/v1/books/7/recommendations?limit=1", captured_path)
+    assert.is_table(items)
+  end)
+
+  it("retries recommendations request after auth refresh", function()
+    local auth_calls = 0
+    local request_calls = 0
+    client.db = { deleteBearerToken = function() end }
+
+    client.getOrRefreshBearerToken = function(_, _, _, force_refresh)
+      auth_calls = auth_calls + 1
+      if force_refresh then
+        return true, "token-2"
+      end
+      return true, "token-1"
+    end
+
+    client.request = function(_, _, _, _, headers)
+      request_calls = request_calls + 1
+      if request_calls == 1 then
+        assert.are.equal("Bearer token-1", headers["Authorization"])
+        return false, 401, "Unauthorized"
+      end
+      assert.are.equal("Bearer token-2", headers["Authorization"])
+      return true, 200, {}
+    end
+
+    local ok, items = client:getBookRecommendations(5, "user", "pass")
+    assert.is_true(ok)
+    assert.is_table(items)
+    assert.are.equal(2, request_calls)
+    assert.are.equal(2, auth_calls)
+  end)
+
+  it("returns a clear error when recommendations response shape is invalid", function()
+    client.getOrRefreshBearerToken = function()
+      return true, "token-1"
+    end
+
+    client.request = function()
+      return true, 200, "not-a-table"
+    end
+
+    local ok, err = client:getBookRecommendations(5, "user", "pass")
+    assert.is_false(ok)
+    assert.are.equal("Unexpected recommendations response shape", err)
+  end)
+
   it("resolves shelf source by explicit shelf id", function()
     client.getOrRefreshBearerToken = function()
       return true, "token-1"

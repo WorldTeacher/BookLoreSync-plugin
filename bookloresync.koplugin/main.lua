@@ -36,6 +36,7 @@ local PendingSyncModuleFactory = require("booklore_pending_sync")
 local MatchingModuleFactory = require("booklore_matching_module")
 local DeletionModuleFactory = require("booklore_deletion_module")
 local MenuActionsModuleFactory = require("booklore_menu_actions")
+local RecommendationsModuleFactory = require("booklore_recommendations")
 local ok_branding, Branding = pcall(require, "booklore_branding")
 if not ok_branding or type(Branding) ~= "table" then
     Branding = {
@@ -222,6 +223,16 @@ local MenuActionsModule = MenuActionsModuleFactory.new({
     _ = _,
     FileManager = FileManager,
     UIManager = UIManager,
+})
+
+local RecommendationsModule = RecommendationsModuleFactory.new({
+    _ = _,
+    T = T,
+    UIManager = UIManager,
+    InfoMessage = InfoMessage,
+    ConfirmBox = ConfirmBox,
+    ButtonDialog = ButtonDialog,
+    Menu = Menu,
 })
 
 --[[--
@@ -890,6 +901,14 @@ function BookloreSync:init()
     self.enable_spine_context_cache = self.settings:readSetting("enable_spine_context_cache")
     if self.enable_spine_context_cache == nil then
         self.enable_spine_context_cache = true
+    end
+
+    -- Post-finish recommendations: when enabled, after the user finishes a
+    -- book and returns to the file browser, fetch and display a small dialog
+    -- of recommended books retrieved from /api/v1/books/{id}/recommendations.
+    self.show_post_rating_recommendations = self.settings:readSetting("show_post_rating_recommendations")
+    if self.show_post_rating_recommendations == nil then
+        self.show_post_rating_recommendations = false
     end
 
     self.epub_context_cache = nil
@@ -4055,6 +4074,43 @@ function BookloreSync:_fileDialogApplyReadingStatus(file_path, status, label)
 end
 
 --[[--
+File manager long-press: fetch and show recommendations for a matched book.
+
+@param file_path string  Absolute path to the book file
+--]]
+---BookloreSync:fileDialogGetRecommendations.
+function BookloreSync:fileDialogGetRecommendations(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
+        return
+    end
+
+    local username, password = self:_refreshCredentials()
+    if username == "" or password == "" then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
+        return
+    end
+
+    local book = self.db:getBookByFilePath(file_path)
+    if not book then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book not found in local database.\nOpen the book first to register it."),
+        })
+        return
+    end
+
+    local book_id = tonumber(book.book_id)
+    if not book_id then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book is not yet matched to Booklore.\nUse \"Match Book\" first."),
+        })
+        return
+    end
+
+    self:showRecommendationsForBook(book_id)
+end
+
+--[[--
 Toggle tracking for a book from the file manager long-press menu.
 
 When tracking is disabled the book's cache row is updated immediately
@@ -4942,6 +4998,32 @@ function BookloreSync:addToMainMenu(menu_items)
         end,
     }
 
+    local recommendations_menu = {
+        text = _("Recommendations"),
+        help_text = _("Show recommended books after you finish reading. When enabled, finishing a book opens a dialog of similar titles fetched from Booklore so you can preview details and download a new book."),
+        sub_item_table = {
+            {
+                text = _("Show recommendations after finishing a book"),
+                help_text = _("After you finish a book and return to the file browser, fetch up to 10 recommendations for that book and show a selection dialog. Tap a book to view details, then choose Fetch to download it. Rating is optional."),
+                checked_func = function()
+                    return self.show_post_rating_recommendations
+                end,
+                callback = function()
+                    self.show_post_rating_recommendations = not self.show_post_rating_recommendations
+                    self.settings:saveSetting("show_post_rating_recommendations", self.show_post_rating_recommendations)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.show_post_rating_recommendations
+                            and _("Post-finish recommendations enabled")
+                            or _("Post-finish recommendations disabled"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+        },
+    }
+
     local what_to_sync_menu = {
         text = _("What to Sync"),
         sub_item_table = {
@@ -4949,6 +5031,7 @@ function BookloreSync:addToMainMenu(menu_items)
             progress_sync_menu,
             Settings:buildRatingMenu(self),
             annotations_and_bookmarks_menu,
+            recommendations_menu,
             {
                 text = "────────────────",
                 enabled = false,
@@ -6118,23 +6201,69 @@ Resolve server pagecount for a pending session.
 --]]
 ---BookloreSync:getServerPagecountForSession.
 function BookloreSync:getServerPagecountForSession(session)
-    if not self.db or type(session) ~= "table" then
+    if type(session) ~= "table" then
         return nil
     end
 
-    local session_book = nil
-    local book_hash = session.bookHash or session.book_hash
-    if book_hash and book_hash ~= "" then
-        session_book = self.db:getBookByHash(book_hash)
+    local direct_pagecount = tonumber(session.server_pagecount or session.serverPagecount)
+    if direct_pagecount and direct_pagecount > 0 then
+        return math.floor(direct_pagecount + 0.5)
     end
+
+    local book_hash = session.bookHash or session.book_hash
     local book_id = session.bookId or session.book_id
-    if not session_book and book_id then
-        session_book = self.db:getBookByBookId(book_id)
+
+    local cache_key = nil
+    if book_hash and book_hash ~= "" then
+        cache_key = "hash:" .. tostring(book_hash)
+    elseif book_id then
+        cache_key = "id:" .. tostring(book_id)
+    end
+
+    if cache_key then
+        self._server_pagecount_session_cache = self._server_pagecount_session_cache or {}
+        local cached_pagecount = self._server_pagecount_session_cache[cache_key]
+        if cached_pagecount ~= nil then
+            return cached_pagecount or nil
+        end
+    end
+
+    local session_book = nil
+    if self.db then
+        if book_hash and book_hash ~= "" then
+            session_book = self.db:getBookByHash(book_hash)
+        end
+        if not session_book and book_id then
+            session_book = self.db:getBookByBookId(book_id)
+        end
     end
 
     local server_pagecount = session_book and tonumber(session_book.server_pagecount) or nil
     if server_pagecount and server_pagecount > 0 then
-        return math.floor(server_pagecount + 0.5)
+        local rounded = math.floor(server_pagecount + 0.5)
+        if cache_key then
+            self._server_pagecount_session_cache[cache_key] = rounded
+        end
+        return rounded
+    end
+
+    if (not server_pagecount or server_pagecount <= 0)
+        and book_hash and book_hash ~= ""
+        and type(self.getBookIdByHash) == "function"
+    then
+        local _, _, _, refreshed_pagecount = self:getBookIdByHash(book_hash)
+        local refreshed = tonumber(refreshed_pagecount)
+        if refreshed and refreshed > 0 then
+            local rounded = math.floor(refreshed + 0.5)
+            if cache_key then
+                self._server_pagecount_session_cache[cache_key] = rounded
+            end
+            return rounded
+        end
+    end
+
+    if cache_key then
+        self._server_pagecount_session_cache[cache_key] = false
     end
     return nil
 end
@@ -7776,6 +7905,23 @@ function BookloreSync:onCloseDocument()
     self:releaseCloseSyncContext(close_ctx, "onCloseDocument_complete")
     self:applyAirplaneModeSyncModeIntegration()
 
+    -- ── Step 6: Post-finish recommendations ───────────────────────────────
+    -- When the user finishes a book and returns to the file browser, fetch
+    -- and show recommendations. Triggered only when the toggle is enabled,
+    -- the book is finished (>=99%), and we have a resolved book_id. Runs
+    -- non-blocking via UIManager:scheduleIn so it doesn't delay close and
+    -- gives any rating dialog time to surface first.
+    if self.show_post_rating_recommendations
+       and pre_book_id
+       and pre_end_progress and pre_end_progress >= 99 then
+        local ok_rec, rec_err = pcall(function()
+            self:scheduleRecommendationsAfterFinish(pre_book_id)
+        end)
+        if not ok_rec then
+            self:logWarn("BookloreSync: Failed to schedule recommendations:", tostring(rec_err))
+        end
+    end
+
     return closeReturn(false)
 end
 
@@ -8835,6 +8981,33 @@ Falls back to "BookID_{id}.{extension}" when no usable title is available.
 ---BookloreSync:_generateFilename.
 function BookloreSync:_generateFilename(book)
     return ShelfSyncModule.generateFilename(self, book)
+end
+
+--[[--
+Schedule the post-finish recommendations dialog for a book.
+
+Called from onCloseDocument when the book was finished. Non-blocking:
+fetches recommendations and shows the selection UI after a short delay so
+that any rating dialog opened by the close path appears first.
+
+@param book_id number  Booklore book ID of the just-finished book
+@return boolean        true when scheduled
+--]]
+---BookloreSync:scheduleRecommendationsAfterFinish.
+function BookloreSync:scheduleRecommendationsAfterFinish(book_id)
+    return RecommendationsModule.scheduleAfterFinish(self, book_id)
+end
+
+--[[--
+Show the recommendations dialog immediately for a book.
+
+Useful for manual testing or for surfacing recommendations on demand.
+
+@param book_id number  Booklore book ID
+--]]
+---BookloreSync:showRecommendationsForBook.
+function BookloreSync:showRecommendationsForBook(book_id)
+    return RecommendationsModule.show(self, book_id, true)
 end
 
 --[[--

@@ -177,7 +177,7 @@ msgstr "Aus Sidecar extrahieren"
 
 #: bookloresync.koplugin/booklore_menu_actions.lua:65
 msgid "Get recommendations"
-msgstr ""
+msgstr "Empfehlungen abrufen"
 
 #: bookloresync.koplugin/booklore_menu_actions.lua:81
 msgid "Enable tracking"
@@ -190,7 +190,7 @@ msgstr "Erfassung deaktivieren"
 #: bookloresync.koplugin/booklore_menu_actions.lua:91
 #: bookloresync.koplugin/main.lua:4028
 msgid "Set Reading Status"
-msgstr ""
+msgstr "Lesestatus festlegen"
 
 #: bookloresync.koplugin/booklore_pending_sync.lua:587
 msgid "Progress: %1 synced, %2 failed"
@@ -281,62 +281,62 @@ msgstr "S: alle fehlgeschlagen – Verbindung prüfen"
 #: bookloresync.koplugin/booklore_recommendations.lua:74
 #: bookloresync.koplugin/booklore_recommendations.lua:482
 msgid "Untitled"
-msgstr ""
+msgstr "Ohne Titel"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:135
 msgid "by %1"
-msgstr ""
+msgstr "von %1"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:145
-#, fuzzy
+
 msgid "Series: %1"
-msgstr "Gelöscht: %1"
+msgstr "Serie: %1"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:150
 msgid "Publisher: %1"
-msgstr ""
+msgstr "Verlag: %1"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:155
 msgid "Published: %1"
-msgstr ""
+msgstr "Veröffentlicht: %1"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:161
-#, fuzzy
+
 msgid "Pages: %1"
-msgstr "Magic: %1"
+msgstr "Seiten: %1"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:166
 msgid "Language: %1"
-msgstr ""
+msgstr "Sprache: %1"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:172
 msgid "ISBN-13: %1"
-msgstr ""
+msgstr "ISBN-13: %1"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:174
 msgid "ISBN-10: %1"
-msgstr ""
+msgstr "ISBN-10: %1"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:244
 msgid "Loading recommendations…"
-msgstr ""
+msgstr "Empfehlungen werden geladen…"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:256
 msgid "Could not load recommendations: %1"
-msgstr ""
+msgstr "Empfehlungen konnten nicht geladen werden: %1"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:264
 msgid "No recommendations available for this book"
-msgstr ""
+msgstr "Keine Empfehlungen für dieses Buch verfügbar"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:287
 #: bookloresync.koplugin/main.lua:5002
 msgid "Recommendations"
-msgstr ""
+msgstr "Empfehlungen"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:311
 msgid "Return to recommendations"
-msgstr ""
+msgstr "Zurück zu den Empfehlungen"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:320
 #: bookloresync.koplugin/booklore_recommendations.lua:427
@@ -347,21 +347,21 @@ msgstr "Schließen"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:326
 msgid "Fetch"
-msgstr ""
+msgstr "Abrufen"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:342
 msgid "Recommendation has no book ID — cannot fetch"
-msgstr ""
+msgstr "Empfehlung hat keine Buch-ID — Abruf nicht möglich"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:350
-#, fuzzy
+
 msgid "WiFi not enabled — cannot download"
-msgstr "WLAN nicht aktiviert - Zuordnung übersprungen"
+msgstr "WLAN nicht aktiviert — Download nicht möglich"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:362
-#, fuzzy
+
 msgid "Download directory not configured"
-msgstr "Download-Verzeichnis"
+msgstr "Download-Verzeichnis nicht konfiguriert"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:371
 #: bookloresync.koplugin/booklore_shelf_sync.lua:93
@@ -369,9 +369,9 @@ msgid "Cannot create download directory: %1"
 msgstr "Download-Verzeichnis kann nicht erstellt werden: %1"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:409
-#, fuzzy
+
 msgid "Downloading: %1"
-msgstr "Download-Verzeichnis: %1"
+msgstr "Lade herunter: %1"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:425
 msgid ""
@@ -379,6 +379,9 @@ msgid ""
 "\n"
 "Return to recommendations?"
 msgstr ""
+"Download fehlgeschlagen: %1\n"
+"\n"
+"Zurück zu den Empfehlungen?"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:426
 #: bookloresync.koplugin/booklore_recommendations.lua:487
@@ -392,6 +395,9 @@ msgid ""
 "\n"
 "Open it now?"
 msgstr ""
+"\"%1\" heruntergeladen.\n"
+"\n"
+"Jetzt öffnen?"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:488
 #: bookloresync.koplugin/main.lua:4510 bookloresync.koplugin/main.lua:5427
@@ -400,12 +406,12 @@ msgstr "Nein"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:493
 msgid "Could not open ReaderUI"
-msgstr ""
+msgstr "ReaderUI konnte nicht geöffnet werden"
 
 #: bookloresync.koplugin/booklore_recommendations.lua:504
-#, fuzzy
+
 msgid "Could not open book: %1"
-msgstr "Konnte keine WLAN-Verbindung herstellen"
+msgstr "Buch konnte nicht geöffnet werden: %1"
 
 #: bookloresync.koplugin/booklore_settings.lua:44
 #: bookloresync.koplugin/booklore_settings.lua:1193
@@ -1128,18 +1134,24 @@ msgid ""
 "Authentication failed while accessing shelf. Please re-check your BookLore "
 "credentials."
 msgstr ""
+"Authentifizierung beim Zugriff auf das Regal fehlgeschlagen. Bitte "
+"BookLore-Zugangsdaten überprüfen."
 
 #: bookloresync.koplugin/booklore_shelf_sync.lua:415
 msgid ""
 "Shelf access denied. The selected shelf may be private or not shared with "
 "this account."
 msgstr ""
+"Regalzugriff verweigert. Das ausgewählte Regal ist möglicherweise privat "
+"oder wird nicht mit diesem Konto geteilt."
 
 #: bookloresync.koplugin/booklore_shelf_sync.lua:417
 msgid ""
 "Configured shelf is not accessible. Verify the shelf ID/name in Shelf Sync "
 "settings."
 msgstr ""
+"Konfiguriertes Regal ist nicht zugänglich. Überprüfen Sie die Regal-ID/den "
+"Namen in den Regal-Sync-Einstellungen."
 
 #: bookloresync.koplugin/booklore_shelf_sync.lua:419
 #: bookloresync.koplugin/booklore_shelf_sync.lua:420
@@ -1149,7 +1161,7 @@ msgstr "Sync fehlgeschlagen: %1"
 
 #: bookloresync.koplugin/booklore_shelf_sync.lua:454
 msgid "Sync failed: invalid shelf payload"
-msgstr ""
+msgstr "Sync fehlgeschlagen: ungültige Regaldaten"
 
 #: bookloresync.koplugin/booklore_shelf_sync.lua:521
 msgid "Shelf up to date - nothing to do"
@@ -1776,9 +1788,9 @@ msgstr ""
 "Anmerkungen werden beim Schließen des Buches erfasst."
 
 #: bookloresync.koplugin/main.lua:3546
-#, fuzzy
+
 msgid "Booklore: failed to prepare local data for matching (%1)."
-msgstr "Booklore: Erfassungseinstellung konnte nicht aktualisiert werden"
+msgstr "Booklore: Lokale Daten für die Zuordnung konnten nicht vorbereitet werden (%1)."
 
 #: bookloresync.koplugin/main.lua:3552
 msgid ""
@@ -1909,33 +1921,33 @@ msgstr "Bewertung: Sync fehlgeschlagen oder bereits synchronisiert"
 
 #: bookloresync.koplugin/main.lua:4001
 msgid "Unread"
-msgstr ""
+msgstr "Ungelesen"
 
 #: bookloresync.koplugin/main.lua:4002
 msgid "Paused"
-msgstr ""
+msgstr "Pausiert"
 
 #: bookloresync.koplugin/main.lua:4003
 msgid "Partially read"
-msgstr ""
+msgstr "Teilweise gelesen"
 
 #: bookloresync.koplugin/main.lua:4004
 msgid "Abandoned"
-msgstr ""
+msgstr "Abgebrochen"
 
 #: bookloresync.koplugin/main.lua:4005
 msgid "Won't read"
-msgstr ""
+msgstr "Wird nicht gelesen"
 
 #: bookloresync.koplugin/main.lua:4064
-#, fuzzy
+
 msgid "Booklore: reading status set to %1"
-msgstr "Booklore: Suche nach: %1"
+msgstr "Booklore: Lesestatus auf %1 gesetzt"
 
 #: bookloresync.koplugin/main.lua:4071
-#, fuzzy
+
 msgid "Booklore: failed to update reading status (%1)"
-msgstr "Booklore: Erfassungseinstellung konnte nicht aktualisiert werden"
+msgstr "Booklore: Lesestatus konnte nicht aktualisiert werden (%1)"
 
 #: bookloresync.koplugin/main.lua:4145
 msgid ""
@@ -1993,12 +2005,12 @@ msgstr "Sitzungen verwalten"
 #: bookloresync.koplugin/main.lua:4222 bookloresync.koplugin/main.lua:4227
 #: bookloresync.koplugin/main.lua:4232
 msgid "  Synced:  "
-msgstr "Sync fehlgeschlagen: %1"
+msgstr "  Synchronisiert:  "
 
 #: bookloresync.koplugin/main.lua:4223 bookloresync.koplugin/main.lua:4228
 #: bookloresync.koplugin/main.lua:4233
 msgid "  Pending: "
-msgstr "Jetzt ausstehende synchronisieren"
+msgstr "  Ausstehend: "
 
 #: bookloresync.koplugin/main.lua:4224 bookloresync.koplugin/main.lua:4229
 #: bookloresync.koplugin/main.lua:4234
@@ -2070,7 +2082,7 @@ msgstr ""
 "%2"
 
 #: bookloresync.koplugin/main.lua:4335 bookloresync.koplugin/main.lua:4337
-#, fuzzy
+
 msgid "yes"
 msgstr "Ja"
 
@@ -2559,10 +2571,13 @@ msgid ""
 "book opens a dialog of similar titles fetched from Booklore so you can "
 "preview details and download a new book."
 msgstr ""
+"Empfohlene Bücher nach dem Lesen anzeigen. Wenn aktiviert, öffnet sich nach "
+"Abschluss eines Buches ein Dialog mit ähnlichen Titeln von Booklore, "
+"sodass Sie Details ansehen und ein neues Buch herunterladen können."
 
 #: bookloresync.koplugin/main.lua:5006
 msgid "Show recommendations after finishing a book"
-msgstr ""
+msgstr "Empfehlungen nach Abschluss eines Buches anzeigen"
 
 #: bookloresync.koplugin/main.lua:5007
 msgid ""
@@ -2570,14 +2585,18 @@ msgid ""
 "recommendations for that book and show a selection dialog. Tap a book to "
 "view details, then choose Fetch to download it. Rating is optional."
 msgstr ""
+"Nachdem Sie ein Buch beendet haben und zum Dateibrowser zurückgekehrt sind, "
+"werden bis zu 10 Empfehlungen für dieses Buch abgerufen und in einem "
+"Auswahldialog angezeigt. Tippen Sie auf ein Buch, um Details anzuzeigen, "
+"dann wählen Sie 'Abrufen', um es herunterzuladen. Bewertung ist optional."
 
 #: bookloresync.koplugin/main.lua:5017
 msgid "Post-finish recommendations enabled"
-msgstr ""
+msgstr "Empfehlungen nach Abschluss aktiviert"
 
 #: bookloresync.koplugin/main.lua:5018
 msgid "Post-finish recommendations disabled"
-msgstr ""
+msgstr "Empfehlungen nach Abschluss deaktiviert"
 
 #: bookloresync.koplugin/main.lua:5028 bookloresync.koplugin/main.lua:5043
 msgid "What to Sync"
@@ -3406,7 +3425,7 @@ msgstr "%1s"
 
 #: bookloresync.koplugin/main.lua:6719
 msgid "Unknown device"
-msgstr "Unbekannter Fehler"
+msgstr "Unbekanntes Gerät"
 
 #: bookloresync.koplugin/main.lua:6722
 msgid "Sync to latest location %1% from device '%2'?"
@@ -3418,7 +3437,7 @@ msgstr "Auf vorherige Position %1% vom Gerat '%2' synchronisieren?"
 
 #: bookloresync.koplugin/main.lua:6742
 msgid "Failed to pull progress: %1"
-msgstr "Exportdatei konnte nicht geschrieben werden: %1"
+msgstr "Fortschritt konnte nicht abgerufen werden: %1"
 
 #: bookloresync.koplugin/main.lua:6751
 msgid "No remote progress found"

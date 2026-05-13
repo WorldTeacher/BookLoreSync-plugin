@@ -390,8 +390,20 @@ function M.new(deps)
             end
         end
 
+        local function joinDownloadPath(dir, name)
+            local base = tostring(dir or "")
+            if base == "/" then
+                return "/" .. name
+            end
+            base = base:gsub("/+$", "")
+            if base == "" then
+                return "/" .. name
+            end
+            return base .. "/" .. name
+        end
+
         local filename = self:_generateFilename(book)
-        local filepath = download_dir .. "/" .. filename
+        local filepath = joinDownloadPath(download_dir, filename)
 
         -- If the file already exists, skip the download and go straight to
         -- the open prompt.
@@ -452,6 +464,11 @@ function M.new(deps)
         local md = type(book.metadata) == "table" and book.metadata or {}
         local isbn10 = book.isbn10 or md.isbn10 or nil
         local isbn13 = book.isbn13 or md.isbn13 or nil
+        local hardcover_id = tonumber(book.hardcover_id)
+            or tonumber(book.hardcoverId)
+            or tonumber(md.hardcoverBookId)
+            or tonumber(md.hardcoverId)
+            or tonumber(md.hardcover_id)
         local pagecount = tonumber(book.pagecount)
             or tonumber(md.pageCount) or tonumber(md.pagecount)
 
@@ -467,6 +484,9 @@ function M.new(deps)
             self:logWarn("BookloreSync: Failed to save book_cache for downloaded recommendation:", filepath)
         else
             self:logInfo("BookloreSync: Saved recommendation metadata for", filepath, "book_id:", book.id)
+            if hardcover_id and hardcover_id > 0 then
+                self.db:updateHardcoverId(hash, hardcover_id)
+            end
         end
 
         -- Refresh the file manager so the new book appears immediately.

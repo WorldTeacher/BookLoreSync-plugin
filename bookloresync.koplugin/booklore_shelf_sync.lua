@@ -13,6 +13,18 @@ function M.new(deps)
 
     local module = {}
 
+    local function joinDownloadPath(dir, name)
+        local base = tostring(dir or "")
+        if base == "/" then
+            return "/" .. name
+        end
+        base = base:gsub("/+$", "")
+        if base == "" then
+            return "/" .. name
+        end
+        return base .. "/" .. name
+    end
+
     function module.detectDefaultDownloadDir(_self)
         local lfs = require("libs/libkoreader-lfs")
 
@@ -560,7 +572,7 @@ function M.new(deps)
             end
 
             local filename = genFilename(book)
-            local filepath = download_dir .. "/" .. filename
+            local filepath = joinDownloadPath(download_dir, filename)
 
             -- ── Migration: rename old-scheme files to the new ID-tagged name ───
             if lfs.attributes(filepath, "mode") ~= "file" then
@@ -588,12 +600,12 @@ function M.new(deps)
                 end
                 local candidates = {}
                 if old_safe_title ~= "" then
-                    table.insert(candidates, download_dir .. "/" .. old_safe_title .. ext_suffix)
+                    table.insert(candidates, joinDownloadPath(download_dir, old_safe_title .. ext_suffix))
                 end
                 if old_safe_orig ~= "" and old_safe_orig ~= old_safe_title then
-                    table.insert(candidates, download_dir .. "/" .. old_safe_orig .. ext_suffix)
+                    table.insert(candidates, joinDownloadPath(download_dir, old_safe_orig .. ext_suffix))
                 end
-                table.insert(candidates, download_dir .. "/BookID_" .. tostring(book_id) .. ext_suffix)
+                table.insert(candidates, joinDownloadPath(download_dir, "BookID_" .. tostring(book_id) .. ext_suffix))
                 for _, old_path in ipairs(candidates) do
                     if old_path ~= filepath and lfs.attributes(old_path, "mode") == "file" then
                         local ok_mv = os.rename(old_path, filepath)
@@ -662,6 +674,13 @@ function M.new(deps)
             local cap_author   = book.author or book.authors
             local cap_isbn10   = book.isbn10 or (type(book.metadata) == "table" and book.metadata.isbn10) or nil
             local cap_isbn13   = book.isbn13 or (type(book.metadata) == "table" and book.metadata.isbn13) or nil
+            local cap_hardcover_id = tonumber(book.hardcover_id)
+                or tonumber(book.hardcoverId)
+                or (type(book.metadata) == "table" and (
+                    tonumber(book.metadata.hardcoverBookId)
+                    or tonumber(book.metadata.hardcoverId)
+                    or tonumber(book.metadata.hardcover_id)
+                ))
             local cap_server_pagecount = tonumber(book.pagecount)
                 or tonumber(book.server_pagecount)
                 or (type(book.metadata) == "table" and (tonumber(book.metadata.pagecount) or tonumber(book.metadata.pageCount)))
@@ -725,6 +744,7 @@ function M.new(deps)
                             filepath = cap_filepath, hash = book_result.hash,
                             book_id  = cap_book_id,  title = cap_title,
                             author   = cap_author,   isbn10 = cap_isbn10, isbn13 = cap_isbn13,
+                            hardcover_id = cap_hardcover_id,
                             server_pagecount = cap_server_pagecount,
                         })
                     elseif book_result.status == "skipped_uncached" then
@@ -733,6 +753,7 @@ function M.new(deps)
                             filepath = cap_filepath, hash = book_result.hash,
                             book_id  = cap_book_id,  title = cap_title,
                             author   = cap_author,   isbn10 = cap_isbn10, isbn13 = cap_isbn13,
+                            hardcover_id = cap_hardcover_id,
                             server_pagecount = cap_server_pagecount,
                         })
                     elseif book_result.status == "skipped" then
@@ -756,6 +777,7 @@ function M.new(deps)
                     filepath = cap_filepath, hash = book_result.hash,
                     book_id  = cap_book_id,  title = cap_title,
                     author   = cap_author,   isbn10 = cap_isbn10, isbn13 = cap_isbn13,
+                    hardcover_id = cap_hardcover_id,
                     server_pagecount = cap_server_pagecount,
                 })
             elseif book_result.status == "skipped_uncached" then
@@ -764,6 +786,7 @@ function M.new(deps)
                     filepath = cap_filepath, hash = book_result.hash,
                     book_id  = cap_book_id,  title = cap_title,
                     author   = cap_author,   isbn10 = cap_isbn10, isbn13 = cap_isbn13,
+                    hardcover_id = cap_hardcover_id,
                     server_pagecount = cap_server_pagecount,
                 })
             elseif book_result.status == "skipped" then
@@ -786,6 +809,9 @@ function M.new(deps)
             for _, nb in ipairs(new_books) do
                 self.db:saveBookCache(nb.filepath, nb.hash, nb.book_id,
                     nb.title, nb.author, nb.isbn10, nb.isbn13, nb.server_pagecount)
+                if nb.hardcover_id and nb.hardcover_id > 0 then
+                    self.db:updateHardcoverId(nb.hash, nb.hardcover_id)
+                end
             end
 
             if delete_removed then
@@ -824,7 +850,7 @@ function M.new(deps)
                     for bid in pairs(curr_books) do shelf_book_ids[bid] = true end
                     for entry in lfs.dir(download_dir) do
                         if entry ~= "." and entry ~= ".." then
-                            local fp = download_dir .. "/" .. entry
+                            local fp = joinDownloadPath(download_dir, entry)
                             if lfs.attributes(fp, "mode") == "file" then
                                 local cached = self.db and self.db:getBookByFilePath(fp)
                                 local lid = cached and cached.book_id

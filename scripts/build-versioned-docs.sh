@@ -91,7 +91,7 @@ while IFS= read -r tag; do
     # URL path uses the raw tag name
     VERSIONS+=("$tag|refs/tags/$tag|$tag|$TAG_DISPLAY")
     TAG_COUNT=$((TAG_COUNT + 1))
-done < <(git tag --sort=-version:refname 2>/dev/null)
+done < <(git tag --sort=-version:refname 2>/dev/null | grep -v '^v')
 
 echo "  [$TAG_COUNT tags]  (showing newest $MAX_TAGS)"
 
@@ -124,6 +124,12 @@ for version_info in "${VERSIONS[@]}"; do
 
     # Reinitialize submodules (theme may have changed between branches/tags)
     git submodule update --init --recursive 2>/dev/null || true
+
+    # For the dev build, pre-generate the changelog with unreleased changes
+    if [ "$label" = "dev" ]; then
+        echo "    Generating unreleased changelog..."
+        bash "$REPO_ROOT/scripts/changelog-pregen.sh" --docs || true
+    fi
 
     # Determine base_url and output directory
     if [ -z "$path" ] || [ "$path" = "." ]; then

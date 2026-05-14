@@ -220,7 +220,7 @@ open('$DOCS_DIR/zola.versioned.toml', 'w').write(content)
     cd "$DOCS_DIR"
     if ! zola --config zola.versioned.toml build \
         --base-url "$version_base_url" \
-        --output-dir "$output_dir" 2>&1; then
+        --output-dir "$output_dir" --force 2>&1; then
         echo "  WARNING: zola build failed for $label, continuing"
     fi
 

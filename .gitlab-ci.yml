@@ -56,10 +56,12 @@ pages:
     - zola --version
   script:
     - git submodule update --init --recursive
+    - mkdir -p public
     - bash scripts/build-versioned-docs.sh
   artifacts:
     paths:
       - public
+  publish: public
 
 # The Butler image ships with a binary entrypoint. Clear it so GitLab Runner
 # can execute the generated shell wrapper instead of appending it as CLI args

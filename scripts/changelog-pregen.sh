@@ -278,7 +278,11 @@ update_docs_changelog() {
                 next_upcoming_version="${up_major}.${up_minor}.${up_patch}"
             fi
 
-            printf '## %s (%s)\n\n' "$next_upcoming_version" "$upcoming_date"
+            if [ "$IS_UNRELEASED" -eq 1 ]; then
+                printf '## Unreleased\n\n'
+            else
+                printf '## %s (%s)\n\n' "$next_upcoming_version" "$upcoming_date"
+            fi
 
             if [ "${#up_features[@]}" -gt 0 ]; then
                 printf '### Features\n\n'

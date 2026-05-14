@@ -49,6 +49,25 @@ describe("BookloreSync helper methods", function()
     assert.is_true(plugin.progress_sync_enabled)
   end)
 
+  describe("roundKoreaderSyncPercentage", function()
+    it("keeps a 0-1 ratio unchanged", function()
+      assert.are.equal(0.3650, plugin:roundKoreaderSyncPercentage(0.365))
+      assert.are.equal(0.5, plugin:roundKoreaderSyncPercentage(0.5))
+      assert.are.equal(1.0, plugin:roundKoreaderSyncPercentage(1.0))
+    end)
+
+    it("rounds to 4 decimals", function()
+      assert.are.equal(0.3333, plugin:roundKoreaderSyncPercentage(0.333333))
+      assert.are.equal(0.6667, plugin:roundKoreaderSyncPercentage(0.666666))
+    end)
+
+    it("clamps to [0, 1]", function()
+      assert.are.equal(0.0, plugin:roundKoreaderSyncPercentage(-0.5))
+      assert.are.equal(1.0, plugin:roundKoreaderSyncPercentage(2.0))
+      assert.are.equal(1.0, plugin:roundKoreaderSyncPercentage(100))
+    end)
+  end)
+
   it("keeps progress sync disabled when persisted setting is not true", function()
     plugin.progress_sync_enabled = false
     plugin.settings = {

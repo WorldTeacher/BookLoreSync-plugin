@@ -22,6 +22,13 @@ local STUB_KEYS = {
   "booklore_updater",
   "booklore_file_logger",
   "booklore_metadata_extractor",
+  "booklore_progress_sync",
+  "booklore_pending_sync",
+  "booklore_shelf_sync",
+  "booklore_updates_module",
+  "booklore_matching_module",
+  "booklore_deletion_module",
+  "booklore_settings_scan",
   "gettext",
   "random",
   "ffi",
@@ -38,6 +45,7 @@ local function install()
   for _, k in ipairs(STUB_KEYS) do
     original[k] = package.preload[k]
     original_loaded[k] = package.loaded[k]
+    package.loaded[k] = nil
   end
 
   package.path = table.concat({

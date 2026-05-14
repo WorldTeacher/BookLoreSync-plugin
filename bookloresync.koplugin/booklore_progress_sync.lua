@@ -41,30 +41,40 @@ function M.new(deps)
     end
 
     function module.getCurrentKoreaderSyncProgress(self)
-        local fallback_pct, fallback_loc = self:getCurrentProgress()
-        local percentage_ratio = (tonumber(fallback_pct) or 0) / 100
-        local progress_value = tostring(fallback_loc or "0")
+        local percentage_ratio = 0
+        local progress_value = "0"
         local is_paged_document = self.ui and self.ui.document and self.ui.document.info and self.ui.document.info.has_pages
 
         if is_paged_document then
             if self.ui.paging then
                 if self.ui.paging.getLastPercent then
-                    percentage_ratio = tonumber(self.ui.paging:getLastPercent()) or percentage_ratio
+                    local pct = self.ui.paging:getLastPercent()
+                    if pct ~= nil then
+                        percentage_ratio = tonumber(pct)
+                    end
                 end
                 if self.ui.paging.getLastProgress then
-                    progress_value = tostring(self.ui.paging:getLastProgress() or progress_value)
+                    local prog = self.ui.paging:getLastProgress()
+                    if prog ~= nil then
+                        progress_value = tostring(prog)
+                    end
                 end
             end
         elseif self.ui and self.ui.rolling then
             if self.ui.rolling.getLastPercent then
-                percentage_ratio = tonumber(self.ui.rolling:getLastPercent()) or percentage_ratio
+                local pct = self.ui.rolling:getLastPercent()
+                if pct ~= nil then
+                    percentage_ratio = tonumber(pct)
+                end
             end
             if self.ui.rolling.getLastProgress then
-                progress_value = tostring(self.ui.rolling:getLastProgress() or progress_value)
+                local prog = self.ui.rolling:getLastProgress()
+                if prog ~= nil then
+                    progress_value = tostring(prog)
+                end
             end
 
             local xpointer = getReflowableXPointer(self)
-
             if xpointer then
                 progress_value = tostring(xpointer)
             end

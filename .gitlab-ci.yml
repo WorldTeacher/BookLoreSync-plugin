@@ -217,11 +217,11 @@ changelog-pregen:
     - git config --global --add safe.directory "$CI_PROJECT_DIR"
   script:
     - echo "Generating unreleased changelog..."
-    - bash scripts/changelog-pregen.sh
+    - bash scripts/changelog-pregen.sh --docs
   artifacts:
     name: "changelog-pregen-$CI_COMMIT_SHORT_SHA"
     paths:
-      - CHANGELOG.pregen.md
+      - docs/content/reference/changelog.md
     expire_in: 30 days
 
 zip-koplugin-release:

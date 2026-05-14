@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-11 17:01+0200\n"
+"POT-Creation-Date: 2026-05-14 14:17+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -19,7 +19,7 @@ msgstr ""
 
 #: bookloresync.koplugin/_meta.lua:16
 #: bookloresync.koplugin/booklore_menu_actions.lua:23
-#: bookloresync.koplugin/main.lua:3840 bookloresync.koplugin/main.lua:5808
+#: bookloresync.koplugin/main.lua:3847 bookloresync.koplugin/main.lua:5895
 msgid "Booklore Sync"
 msgstr ""
 
@@ -32,12 +32,12 @@ msgid "manual matching for unmatched books"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:21
-#: bookloresync.koplugin/main.lua:5636 bookloresync.koplugin/main.lua:11062
+#: bookloresync.koplugin/main.lua:5723 bookloresync.koplugin/main.lua:11149
 msgid "WiFi not enabled - manual matching skipped"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:22
-#: bookloresync.koplugin/main.lua:5637 bookloresync.koplugin/main.lua:11063
+#: bookloresync.koplugin/main.lua:5724 bookloresync.koplugin/main.lua:11150
 msgid "Airplane mode is enabled - manual matching skipped"
 msgstr ""
 
@@ -46,19 +46,19 @@ msgid "All books are already matched"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:46
-#: bookloresync.koplugin/main.lua:10457
+#: bookloresync.koplugin/main.lua:10544
 msgid "Matching complete!"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:55
-#: bookloresync.koplugin/main.lua:10464 bookloresync.koplugin/main.lua:10569
-#: bookloresync.koplugin/main.lua:10595 bookloresync.koplugin/main.lua:10642
-#: bookloresync.koplugin/main.lua:10689 bookloresync.koplugin/main.lua:11097
+#: bookloresync.koplugin/main.lua:10551 bookloresync.koplugin/main.lua:10656
+#: bookloresync.koplugin/main.lua:10682 bookloresync.koplugin/main.lua:10729
+#: bookloresync.koplugin/main.lua:10776 bookloresync.koplugin/main.lua:11184
 msgid "Book %1 of %2"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:61
-#: bookloresync.koplugin/main.lua:10645
+#: bookloresync.koplugin/main.lua:10732
 msgid ""
 "Searching for: %1\n"
 "\n"
@@ -67,12 +67,12 @@ msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:70
 #: bookloresync.koplugin/booklore_recommendations.lua:253
-#: bookloresync.koplugin/booklore_recommendations.lua:425
+#: bookloresync.koplugin/booklore_recommendations.lua:437
 #: bookloresync.koplugin/booklore_updates_module.lua:112
 #: bookloresync.koplugin/booklore_updates_module.lua:348
-#: bookloresync.koplugin/main.lua:3546 bookloresync.koplugin/main.lua:3585
-#: bookloresync.koplugin/main.lua:3700 bookloresync.koplugin/main.lua:4071
-#: bookloresync.koplugin/main.lua:11194
+#: bookloresync.koplugin/main.lua:3553 bookloresync.koplugin/main.lua:3592
+#: bookloresync.koplugin/main.lua:3707 bookloresync.koplugin/main.lua:4078
+#: bookloresync.koplugin/main.lua:11281
 msgid "Unknown error"
 msgstr ""
 
@@ -88,23 +88,23 @@ msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:74
 #: bookloresync.koplugin/booklore_matching_module.lua:91
-#: bookloresync.koplugin/main.lua:10582 bookloresync.koplugin/main.lua:10626
-#: bookloresync.koplugin/main.lua:10658 bookloresync.koplugin/main.lua:11115
-#: bookloresync.koplugin/main.lua:11150 bookloresync.koplugin/main.lua:11198
-#: bookloresync.koplugin/main.lua:11224 bookloresync.koplugin/main.lua:11283
+#: bookloresync.koplugin/main.lua:10669 bookloresync.koplugin/main.lua:10713
+#: bookloresync.koplugin/main.lua:10745 bookloresync.koplugin/main.lua:11202
+#: bookloresync.koplugin/main.lua:11237 bookloresync.koplugin/main.lua:11285
+#: bookloresync.koplugin/main.lua:11311 bookloresync.koplugin/main.lua:11370
 msgid "Skip"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:75
-#: bookloresync.koplugin/main.lua:3680 bookloresync.koplugin/main.lua:3703
-#: bookloresync.koplugin/main.lua:3714 bookloresync.koplugin/main.lua:10659
-#: bookloresync.koplugin/main.lua:11149 bookloresync.koplugin/main.lua:11197
-#: bookloresync.koplugin/main.lua:11223
+#: bookloresync.koplugin/main.lua:3687 bookloresync.koplugin/main.lua:3710
+#: bookloresync.koplugin/main.lua:3721 bookloresync.koplugin/main.lua:10746
+#: bookloresync.koplugin/main.lua:11236 bookloresync.koplugin/main.lua:11284
+#: bookloresync.koplugin/main.lua:11310
 msgid "Retry"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:89
-#: bookloresync.koplugin/main.lua:10674
+#: bookloresync.koplugin/main.lua:10761
 msgid ""
 "No matches found for:\n"
 "%1\n"
@@ -115,17 +115,17 @@ msgid ""
 msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:127
-#: bookloresync.koplugin/main.lua:10711 bookloresync.koplugin/main.lua:11649
+#: bookloresync.koplugin/main.lua:10798 bookloresync.koplugin/main.lua:11736
 msgid "Skip this book"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:135
-#: bookloresync.koplugin/main.lua:10720
+#: bookloresync.koplugin/main.lua:10807
 msgid "Cancel matching"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:144
-#: bookloresync.koplugin/main.lua:11311
+#: bookloresync.koplugin/main.lua:11398
 msgid ""
 "Select match for:\n"
 "%1\n"
@@ -138,12 +138,12 @@ msgid "Invalid book ID - match not saved"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_matching_module.lua:187
-#: bookloresync.koplugin/main.lua:10748
+#: bookloresync.koplugin/main.lua:10835
 msgid "Failed to save match to database"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_menu_actions.lua:30
-#: bookloresync.koplugin/main.lua:4295
+#: bookloresync.koplugin/main.lua:4302
 msgid "Match Book"
 msgstr ""
 
@@ -168,7 +168,7 @@ msgid "Disable tracking"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_menu_actions.lua:91
-#: bookloresync.koplugin/main.lua:4028
+#: bookloresync.koplugin/main.lua:4035
 msgid "Set Reading Status"
 msgstr ""
 
@@ -181,9 +181,9 @@ msgid "Progress: %1 synced"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_pending_sync.lua:608
-#: bookloresync.koplugin/main.lua:1386 bookloresync.koplugin/main.lua:10284
-#: bookloresync.koplugin/main.lua:10840 bookloresync.koplugin/main.lua:10881
-#: bookloresync.koplugin/main.lua:10985
+#: bookloresync.koplugin/main.lua:1393 bookloresync.koplugin/main.lua:10371
+#: bookloresync.koplugin/main.lua:10927 bookloresync.koplugin/main.lua:10968
+#: bookloresync.koplugin/main.lua:11072
 msgid "Database not initialized"
 msgstr ""
 
@@ -242,7 +242,7 @@ msgid "P: %1 synced"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_pending_sync.lua:783
-#: bookloresync.koplugin/main.lua:1305
+#: bookloresync.koplugin/main.lua:1312
 msgid "No pending items to sync"
 msgstr ""
 
@@ -259,7 +259,7 @@ msgid "S: all failed - check connection"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_recommendations.lua:74
-#: bookloresync.koplugin/booklore_recommendations.lua:482
+#: bookloresync.koplugin/booklore_recommendations.lua:502
 msgid "Untitled"
 msgstr ""
 
@@ -308,7 +308,7 @@ msgid "No recommendations available for this book"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_recommendations.lua:287
-#: bookloresync.koplugin/main.lua:5002
+#: bookloresync.koplugin/main.lua:5009
 msgid "Recommendations"
 msgstr ""
 
@@ -317,8 +317,7 @@ msgid "Return to recommendations"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_recommendations.lua:320
-#: bookloresync.koplugin/booklore_recommendations.lua:427
-#: bookloresync.koplugin/booklore_shelf_sync.lua:914
+#: bookloresync.koplugin/booklore_recommendations.lua:439
 #: bookloresync.koplugin/booklore_updates_module.lua:245
 msgid "Close"
 msgstr ""
@@ -340,44 +339,44 @@ msgid "Download directory not configured"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_recommendations.lua:371
-#: bookloresync.koplugin/booklore_shelf_sync.lua:93
+#: bookloresync.koplugin/booklore_shelf_sync.lua:167
 msgid "Cannot create download directory: %1"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_recommendations.lua:409
+#: bookloresync.koplugin/booklore_recommendations.lua:421
 msgid "Downloading: %1"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_recommendations.lua:425
+#: bookloresync.koplugin/booklore_recommendations.lua:437
 msgid ""
 "Download failed: %1\n"
 "\n"
 "Return to recommendations?"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_recommendations.lua:426
-#: bookloresync.koplugin/booklore_recommendations.lua:487
-#: bookloresync.koplugin/main.lua:4509 bookloresync.koplugin/main.lua:5426
+#: bookloresync.koplugin/booklore_recommendations.lua:438
+#: bookloresync.koplugin/booklore_recommendations.lua:507
+#: bookloresync.koplugin/main.lua:4516 bookloresync.koplugin/main.lua:5513
 msgid "Yes"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_recommendations.lua:486
+#: bookloresync.koplugin/booklore_recommendations.lua:506
 msgid ""
 "\"%1\" downloaded.\n"
 "\n"
 "Open it now?"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_recommendations.lua:488
-#: bookloresync.koplugin/main.lua:4510 bookloresync.koplugin/main.lua:5427
+#: bookloresync.koplugin/booklore_recommendations.lua:508
+#: bookloresync.koplugin/main.lua:4517 bookloresync.koplugin/main.lua:5514
 msgid "No"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_recommendations.lua:493
+#: bookloresync.koplugin/booklore_recommendations.lua:513
 msgid "Could not open ReaderUI"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_recommendations.lua:504
+#: bookloresync.koplugin/booklore_recommendations.lua:524
 msgid "Could not open book: %1"
 msgstr ""
 
@@ -401,21 +400,20 @@ msgstr ""
 #: bookloresync.koplugin/booklore_settings.lua:464
 #: bookloresync.koplugin/booklore_settings.lua:516
 #: bookloresync.koplugin/booklore_settings.lua:568
-#: bookloresync.koplugin/booklore_shelf_sync.lua:302
 #: bookloresync.koplugin/booklore_updates_module.lua:163
 #: bookloresync.koplugin/booklore_updates_module.lua:307
-#: bookloresync.koplugin/main.lua:1807 bookloresync.koplugin/main.lua:3623
-#: bookloresync.koplugin/main.lua:3659 bookloresync.koplugin/main.lua:3681
-#: bookloresync.koplugin/main.lua:3704 bookloresync.koplugin/main.lua:3715
-#: bookloresync.koplugin/main.lua:3745 bookloresync.koplugin/main.lua:3870
-#: bookloresync.koplugin/main.lua:4021 bookloresync.koplugin/main.lua:5182
-#: bookloresync.koplugin/main.lua:5223 bookloresync.koplugin/main.lua:5264
-#: bookloresync.koplugin/main.lua:5313 bookloresync.koplugin/main.lua:5824
-#: bookloresync.koplugin/main.lua:5845 bookloresync.koplugin/main.lua:9124
-#: bookloresync.koplugin/main.lua:9168 bookloresync.koplugin/main.lua:9369
-#: bookloresync.koplugin/main.lua:9505 bookloresync.koplugin/main.lua:9652
-#: bookloresync.koplugin/main.lua:9664 bookloresync.koplugin/main.lua:10891
-#: bookloresync.koplugin/main.lua:11107 bookloresync.koplugin/main.lua:11302
+#: bookloresync.koplugin/main.lua:1814 bookloresync.koplugin/main.lua:3630
+#: bookloresync.koplugin/main.lua:3666 bookloresync.koplugin/main.lua:3688
+#: bookloresync.koplugin/main.lua:3711 bookloresync.koplugin/main.lua:3722
+#: bookloresync.koplugin/main.lua:3752 bookloresync.koplugin/main.lua:3877
+#: bookloresync.koplugin/main.lua:4028 bookloresync.koplugin/main.lua:5195
+#: bookloresync.koplugin/main.lua:5236 bookloresync.koplugin/main.lua:5281
+#: bookloresync.koplugin/main.lua:5330 bookloresync.koplugin/main.lua:5911
+#: bookloresync.koplugin/main.lua:5932 bookloresync.koplugin/main.lua:9211
+#: bookloresync.koplugin/main.lua:9255 bookloresync.koplugin/main.lua:9456
+#: bookloresync.koplugin/main.lua:9592 bookloresync.koplugin/main.lua:9739
+#: bookloresync.koplugin/main.lua:9751 bookloresync.koplugin/main.lua:10978
+#: bookloresync.koplugin/main.lua:11194 bookloresync.koplugin/main.lua:11389
 msgid "Cancel"
 msgstr ""
 
@@ -426,9 +424,9 @@ msgstr ""
 #: bookloresync.koplugin/booklore_settings.lua:470
 #: bookloresync.koplugin/booklore_settings.lua:522
 #: bookloresync.koplugin/booklore_settings.lua:574
-#: bookloresync.koplugin/main.lua:5184 bookloresync.koplugin/main.lua:5225
-#: bookloresync.koplugin/main.lua:5281 bookloresync.koplugin/main.lua:5317
-#: bookloresync.koplugin/main.lua:5851
+#: bookloresync.koplugin/main.lua:5197 bookloresync.koplugin/main.lua:5238
+#: bookloresync.koplugin/main.lua:5298 bookloresync.koplugin/main.lua:5334
+#: bookloresync.koplugin/main.lua:5938
 msgid "Save"
 msgstr ""
 
@@ -493,7 +491,7 @@ msgstr ""
 #: bookloresync.koplugin/booklore_settings.lua:281
 #: bookloresync.koplugin/booklore_settings.lua:330
 #: bookloresync.koplugin/booklore_settings.lua:402
-#: bookloresync.koplugin/main.lua:5830
+#: bookloresync.koplugin/main.lua:5917
 msgid "Next"
 msgstr ""
 
@@ -526,22 +524,22 @@ msgid "Credentials saved"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_settings.lua:390
-#: bookloresync.koplugin/main.lua:5818
+#: bookloresync.koplugin/main.lua:5905
 msgid "Booklore Username"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_settings.lua:392
-#: bookloresync.koplugin/main.lua:5820
+#: bookloresync.koplugin/main.lua:5907
 msgid "Enter Booklore username"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_settings.lua:410
-#: bookloresync.koplugin/main.lua:5838
+#: bookloresync.koplugin/main.lua:5925
 msgid "Booklore Password"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_settings.lua:412
-#: bookloresync.koplugin/main.lua:5840
+#: bookloresync.koplugin/main.lua:5927
 msgid "Enter Booklore password"
 msgstr ""
 
@@ -569,7 +567,7 @@ msgid "Please enter a valid number greater than 0"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_settings.lua:509
-#: bookloresync.koplugin/main.lua:4606
+#: bookloresync.koplugin/main.lua:4613
 msgid "Minimum Pages Read"
 msgstr ""
 
@@ -607,7 +605,8 @@ msgstr ""
 
 #: bookloresync.koplugin/booklore_settings.lua:636
 #: bookloresync.koplugin/booklore_settings.lua:671
-#: bookloresync.koplugin/main.lua:4909
+#: bookloresync.koplugin/main.lua:4916 bookloresync.koplugin/main.lua:5371
+#: bookloresync.koplugin/main.lua:5405
 msgid "Set"
 msgstr ""
 
@@ -671,7 +670,7 @@ msgid "Hardcover token loaded successfully."
 msgstr ""
 
 #: bookloresync.koplugin/booklore_settings.lua:760
-#: bookloresync.koplugin/main.lua:4543
+#: bookloresync.koplugin/main.lua:4550
 msgid "Connection Setup"
 msgstr ""
 
@@ -735,7 +734,7 @@ msgid "Automatic network switching disabled"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_settings.lua:823
-#: bookloresync.koplugin/main.lua:3856
+#: bookloresync.koplugin/main.lua:3863
 msgid "Rating"
 msgstr ""
 
@@ -805,8 +804,8 @@ msgid "Hardcover rating sync disabled"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_settings.lua:913
-#: bookloresync.koplugin/main.lua:3843 bookloresync.koplugin/main.lua:4226
-#: bookloresync.koplugin/main.lua:9438 bookloresync.koplugin/main.lua:9492
+#: bookloresync.koplugin/main.lua:3850 bookloresync.koplugin/main.lua:4233
+#: bookloresync.koplugin/main.lua:9525 bookloresync.koplugin/main.lua:9579
 msgid "Annotations"
 msgstr ""
 
@@ -897,8 +896,8 @@ msgid "Upload strategy: on read complete"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_settings.lua:1045
-#: bookloresync.koplugin/main.lua:4231 bookloresync.koplugin/main.lua:9462
-#: bookloresync.koplugin/main.lua:9494
+#: bookloresync.koplugin/main.lua:4238 bookloresync.koplugin/main.lua:9549
+#: bookloresync.koplugin/main.lua:9581
 msgid "Bookmarks"
 msgstr ""
 
@@ -941,7 +940,7 @@ msgid ""
 msgstr ""
 
 #: bookloresync.koplugin/booklore_settings.lua:1130
-#: bookloresync.koplugin/main.lua:5741
+#: bookloresync.koplugin/main.lua:5828
 msgid "Appearance & Diagnostics"
 msgstr ""
 
@@ -998,102 +997,130 @@ msgid ""
 "automatically for shortcuts."
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:70
+#: bookloresync.koplugin/booklore_shelf_sync.lua:144
 msgid "Sync already in progress"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:80
+#: bookloresync.koplugin/booklore_shelf_sync.lua:154
 msgid ""
 "Booklore credentials not configured. Please configure your Booklore account "
 "first."
 msgstr ""
 
+#: bookloresync.koplugin/booklore_shelf_sync.lua:212
+msgid "Downloading  %1 / %2"
+msgstr ""
+
+#: bookloresync.koplugin/booklore_shelf_sync.lua:229
+msgid "%1 / %2 MB  (%3%)"
+msgstr ""
+
+#: bookloresync.koplugin/booklore_shelf_sync.lua:236
+msgid "Downloaded: %1 MB"
+msgstr ""
+
+#: bookloresync.koplugin/booklore_shelf_sync.lua:248
+msgid "Stop syncing"
+msgstr ""
+
+#: bookloresync.koplugin/booklore_shelf_sync.lua:282
+msgid "Shelf sync: %1 downloaded, %2 skipped, %3 failed"
+msgstr ""
+
+#: bookloresync.koplugin/booklore_shelf_sync.lua:291
+#: bookloresync.koplugin/booklore_shelf_sync.lua:783
+msgid "Shelf Sync Complete"
+msgstr ""
+
+#: bookloresync.koplugin/booklore_shelf_sync.lua:294
+#: bookloresync.koplugin/booklore_shelf_sync.lua:786
+msgid "Downloaded:  %1"
+msgstr ""
+
+#: bookloresync.koplugin/booklore_shelf_sync.lua:297
+#: bookloresync.koplugin/booklore_shelf_sync.lua:789
+msgid "Already on device:  %1"
+msgstr ""
+
 #: bookloresync.koplugin/booklore_shelf_sync.lua:300
+#: bookloresync.koplugin/booklore_shelf_sync.lua:792
+msgid "Removed:  %1"
+msgstr ""
+
+#: bookloresync.koplugin/booklore_shelf_sync.lua:303
+#: bookloresync.koplugin/booklore_shelf_sync.lua:795
+msgid "Failed:  %1"
+msgstr ""
+
+#: bookloresync.koplugin/booklore_shelf_sync.lua:307
+msgid "Everything is up to date."
+msgstr ""
+
+#: bookloresync.koplugin/booklore_shelf_sync.lua:335
 msgid "Fetching book list from shelf..."
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:387
-#: bookloresync.koplugin/booklore_shelf_sync.lua:389
-#: bookloresync.koplugin/booklore_shelf_sync.lua:548
-msgid "Sync cancelled"
-msgstr ""
-
-#: bookloresync.koplugin/booklore_shelf_sync.lua:397
-msgid "Sync failed: subprocess returned no data"
-msgstr ""
-
-#: bookloresync.koplugin/booklore_shelf_sync.lua:413
+#: bookloresync.koplugin/booklore_shelf_sync.lua:352
+#: bookloresync.koplugin/booklore_shelf_sync.lua:411
 msgid ""
 "Authentication failed while accessing shelf. Please re-check your BookLore "
 "credentials."
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:415
+#: bookloresync.koplugin/booklore_shelf_sync.lua:354
+#: bookloresync.koplugin/booklore_shelf_sync.lua:413
 msgid ""
 "Shelf access denied. The selected shelf may be private or not shared with "
 "this account."
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:417
+#: bookloresync.koplugin/booklore_shelf_sync.lua:356
+#: bookloresync.koplugin/booklore_shelf_sync.lua:415
 msgid ""
 "Configured shelf is not accessible. Verify the shelf ID/name in Shelf Sync "
 "settings."
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:419
-#: bookloresync.koplugin/booklore_shelf_sync.lua:420
-#: bookloresync.koplugin/booklore_shelf_sync.lua:867
+#: bookloresync.koplugin/booklore_shelf_sync.lua:358
+#: bookloresync.koplugin/booklore_shelf_sync.lua:359
+#: bookloresync.koplugin/booklore_shelf_sync.lua:392
+#: bookloresync.koplugin/booklore_shelf_sync.lua:417
+#: bookloresync.koplugin/booklore_shelf_sync.lua:418
+#: bookloresync.koplugin/booklore_shelf_sync.lua:449
+#: bookloresync.koplugin/booklore_shelf_sync.lua:839
 msgid "Sync failed: %1"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:454
-msgid "Sync failed: invalid shelf payload"
+#: bookloresync.koplugin/booklore_shelf_sync.lua:371
+msgid "Resolved magic shelf source missing shelf id"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:521
-msgid "Shelf up to date - nothing to do"
+#: bookloresync.koplugin/booklore_shelf_sync.lua:430
+msgid "Resolved shelf source missing shelf id"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:523
-msgid "Syncing shelf: %1 new, %2 removed"
+#: bookloresync.koplugin/booklore_shelf_sync.lua:527
+msgid "Shelf up to date"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:543
-msgid "Sync cancelled after %1 of %2 books"
+#: bookloresync.koplugin/booklore_shelf_sync.lua:531
+msgid "Shelf up to date - Everything is already synced."
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:653
-msgid "Skipping: %1 (%2/%3)"
+#: bookloresync.koplugin/booklore_shelf_sync.lua:552
+msgid "Cleaning up removed books..."
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:655
-msgid "Downloading: %1 (%2/%3)"
+#: bookloresync.koplugin/booklore_shelf_sync.lua:648
+msgid "Insufficient disk space for: %1"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:896
-msgid ""
-"No space left on device\n"
-"\n"
-"Book: %1\n"
-"File size: %2 MB\n"
-"Available space: %3 MB\n"
-"Required space: %4 MB (file + %5 MB buffer)\n"
-"\n"
-"Downloaded %6 of %7 books before stopping."
+#: bookloresync.koplugin/booklore_shelf_sync.lua:779
+msgid "Sync cancelled"
 msgstr ""
 
-#: bookloresync.koplugin/booklore_shelf_sync.lua:922
-msgid "Sync stopped: insufficient disk space"
-msgstr ""
-
-#: bookloresync.koplugin/booklore_shelf_sync.lua:928
-msgid ""
-"Sync complete!\n"
-"\n"
-"Downloaded: %1\n"
-"Skipped: %2\n"
-"Deleted: %3\n"
-"Errors: %4"
+#: bookloresync.koplugin/booklore_shelf_sync.lua:798
+msgid "(Cancelled by user)"
 msgstr ""
 
 #: bookloresync.koplugin/booklore_updates_module.lua:18
@@ -1290,172 +1317,172 @@ msgid ""
 "Next check will fetch fresh data."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:304
+#: bookloresync.koplugin/main.lua:303
 msgid "Plugin directory is not available"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:310
+#: bookloresync.koplugin/main.lua:309
 msgid ""
 "Missing dev-build.location file:\n"
 "%1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:324
+#: bookloresync.koplugin/main.lua:323
 msgid "dev-build.location is empty"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:328
+#: bookloresync.koplugin/main.lua:327
 msgid "dev-build.location must contain an http(s) URL"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:555
+#: bookloresync.koplugin/main.lua:554
 msgid "Airplanemode plugin is not installed"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:626
+#: bookloresync.koplugin/main.lua:625
 msgid "Failed to initialize Booklore database"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:661
+#: bookloresync.koplugin/main.lua:660
 msgid "Failed to migrate old data. Check logs."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:666
+#: bookloresync.koplugin/main.lua:665
 msgid "Migrated data to new database format"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:672
+#: bookloresync.koplugin/main.lua:671
 msgid "Migration completed with some errors. Check logs."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1057
+#: bookloresync.koplugin/main.lua:1064
 msgid "BookLoreSync: Toggle Sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1064
+#: bookloresync.koplugin/main.lua:1071
 msgid "BookLoreSync: Sync Pending Items"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1072
+#: bookloresync.koplugin/main.lua:1079
 msgid "BookLoreSync: Toggle Booklore Manual Sync Only"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1079
+#: bookloresync.koplugin/main.lua:1086
 msgid "BookLoreSync: Test Connection"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1085
+#: bookloresync.koplugin/main.lua:1092
 msgid "BookLoreSync: Sync Booklore Shelf"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1091
+#: bookloresync.koplugin/main.lua:1098
 msgid "BookLoreSync: Pull Current Book Progress"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1097
+#: bookloresync.koplugin/main.lua:1104
 msgid "BookLoreSync: Push Current Book Progress"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1106
+#: bookloresync.koplugin/main.lua:1113
 msgid "Airplane mode is enabled - network action skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1119 bookloresync.koplugin/main.lua:4358
-#: bookloresync.koplugin/main.lua:5929
+#: bookloresync.koplugin/main.lua:1126 bookloresync.koplugin/main.lua:4365
+#: bookloresync.koplugin/main.lua:6016
 msgid "Booklore credentials not configured"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1126
+#: bookloresync.koplugin/main.lua:1133
 msgid "sync Booklore shelf"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1165
+#: bookloresync.koplugin/main.lua:1172
 msgid "WiFi not enabled - shelf sync skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1166
+#: bookloresync.koplugin/main.lua:1173
 msgid "Airplane mode is enabled - shelf sync skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1201
+#: bookloresync.koplugin/main.lua:1208
 msgid "Open a book to pull progress"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1208 bookloresync.koplugin/main.lua:1238
+#: bookloresync.koplugin/main.lua:1215 bookloresync.koplugin/main.lua:1245
 msgid "Progress sync is disabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1214
+#: bookloresync.koplugin/main.lua:1221
 msgid "pull current book progress"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1218
+#: bookloresync.koplugin/main.lua:1225
 msgid "WiFi not enabled - pull skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1219
+#: bookloresync.koplugin/main.lua:1226
 msgid "Airplane mode is enabled - pull skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1231
+#: bookloresync.koplugin/main.lua:1238
 msgid "Open a book to push progress"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1244
+#: bookloresync.koplugin/main.lua:1251
 msgid "push current book progress"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1248
+#: bookloresync.koplugin/main.lua:1255
 msgid "Could not build current progress payload: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1257
+#: bookloresync.koplugin/main.lua:1264
 msgid "Current book progress pushed"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1262
+#: bookloresync.koplugin/main.lua:1269
 msgid "Failed to push progress: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1268
+#: bookloresync.koplugin/main.lua:1275
 msgid "WiFi not enabled - push skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1269
+#: bookloresync.koplugin/main.lua:1276
 msgid "Airplane mode is enabled - push skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1292 bookloresync.koplugin/main.lua:5382
+#: bookloresync.koplugin/main.lua:1299 bookloresync.koplugin/main.lua:5469
 msgid "sync pending items"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1296 bookloresync.koplugin/main.lua:5386
+#: bookloresync.koplugin/main.lua:1303 bookloresync.koplugin/main.lua:5473
 msgid "WiFi not enabled - pending items remain queued"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1297 bookloresync.koplugin/main.lua:5387
+#: bookloresync.koplugin/main.lua:1304 bookloresync.koplugin/main.lua:5474
 msgid "Airplane mode is enabled - pending items remain queued"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1331 bookloresync.koplugin/main.lua:4534
+#: bookloresync.koplugin/main.lua:1338 bookloresync.koplugin/main.lua:4541
 msgid "Booklore sync disabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1331 bookloresync.koplugin/main.lua:4534
+#: bookloresync.koplugin/main.lua:1338 bookloresync.koplugin/main.lua:4541
 msgid "Booklore sync enabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1350
+#: bookloresync.koplugin/main.lua:1357
 msgid ""
 "Manual sync only: sessions will be cached until you sync pending sessions "
 "manually"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1352
+#: bookloresync.koplugin/main.lua:1359
 msgid "Manual sync only disabled: automatic syncing restored where enabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1406
+#: bookloresync.koplugin/main.lua:1413
 msgid ""
 "Book cache\n"
 "  Total: %1  Matched: %2  Unmatched: %3\n"
@@ -1471,243 +1498,243 @@ msgid ""
 "  Synced progress rows: %9"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1800
+#: bookloresync.koplugin/main.lua:1807
 msgid "Rate this book (1-10)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1813
+#: bookloresync.koplugin/main.lua:1820
 msgid "Submit"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1819
+#: bookloresync.koplugin/main.lua:1826
 msgid "Please enter a whole number between 1 and 10"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1859
+#: bookloresync.koplugin/main.lua:1866
 msgid "Rating %1/10 saved (will sync once book is matched)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1867
+#: bookloresync.koplugin/main.lua:1874
 msgid "Rating %1/10 saved (use 'Sync Pending Now' to upload)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1873 bookloresync.koplugin/main.lua:1928
+#: bookloresync.koplugin/main.lua:1880 bookloresync.koplugin/main.lua:1935
 msgid "Rating %1/10 saved (will retry on next sync)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1882
+#: bookloresync.koplugin/main.lua:1889
 msgid "upload rating"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1895
+#: bookloresync.koplugin/main.lua:1902
 msgid "Rating %1/10 saved and synced"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:1936
+#: bookloresync.koplugin/main.lua:1943
 msgid "Rating %1/10 saved (will sync when WiFi is available)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3471 bookloresync.koplugin/main.lua:3532
-#: bookloresync.koplugin/main.lua:3770 bookloresync.koplugin/main.lua:3829
-#: bookloresync.koplugin/main.lua:3975 bookloresync.koplugin/main.lua:4084
-#: bookloresync.koplugin/main.lua:4126 bookloresync.koplugin/main.lua:4169
-#: bookloresync.koplugin/main.lua:4260 bookloresync.koplugin/main.lua:11049
+#: bookloresync.koplugin/main.lua:3478 bookloresync.koplugin/main.lua:3539
+#: bookloresync.koplugin/main.lua:3777 bookloresync.koplugin/main.lua:3836
+#: bookloresync.koplugin/main.lua:3982 bookloresync.koplugin/main.lua:4091
+#: bookloresync.koplugin/main.lua:4133 bookloresync.koplugin/main.lua:4176
+#: bookloresync.koplugin/main.lua:4267 bookloresync.koplugin/main.lua:11136
 msgid "Booklore: database not initialised"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3475
+#: bookloresync.koplugin/main.lua:3482
 msgid "Booklore: annotation sync is disabled in settings"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3480 bookloresync.koplugin/main.lua:3539
-#: bookloresync.koplugin/main.lua:3775 bookloresync.koplugin/main.lua:3834
-#: bookloresync.koplugin/main.lua:3981 bookloresync.koplugin/main.lua:4045
-#: bookloresync.koplugin/main.lua:4090 bookloresync.koplugin/main.lua:11053
+#: bookloresync.koplugin/main.lua:3487 bookloresync.koplugin/main.lua:3546
+#: bookloresync.koplugin/main.lua:3782 bookloresync.koplugin/main.lua:3841
+#: bookloresync.koplugin/main.lua:3988 bookloresync.koplugin/main.lua:4052
+#: bookloresync.koplugin/main.lua:4097 bookloresync.koplugin/main.lua:11140
 msgid "Booklore: credentials not configured"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3487 bookloresync.koplugin/main.lua:3782
-#: bookloresync.koplugin/main.lua:3889 bookloresync.koplugin/main.lua:3988
-#: bookloresync.koplugin/main.lua:4097
+#: bookloresync.koplugin/main.lua:3494 bookloresync.koplugin/main.lua:3789
+#: bookloresync.koplugin/main.lua:3896 bookloresync.koplugin/main.lua:3995
+#: bookloresync.koplugin/main.lua:4104
 msgid ""
 "Booklore: book not found in local database.\n"
 "Open the book first to register it."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3493 bookloresync.koplugin/main.lua:3788
-#: bookloresync.koplugin/main.lua:3895 bookloresync.koplugin/main.lua:3994
-#: bookloresync.koplugin/main.lua:4053 bookloresync.koplugin/main.lua:4105
+#: bookloresync.koplugin/main.lua:3500 bookloresync.koplugin/main.lua:3795
+#: bookloresync.koplugin/main.lua:3902 bookloresync.koplugin/main.lua:4001
+#: bookloresync.koplugin/main.lua:4060 bookloresync.koplugin/main.lua:4112
 msgid ""
 "Booklore: book is not yet matched to Booklore.\n"
 "Use \"Match Book\" first."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3502
+#: bookloresync.koplugin/main.lua:3509
 msgid "Booklore: syncing annotations…"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3516
+#: bookloresync.koplugin/main.lua:3523
 msgid "Booklore: synced %1 annotation(s), %2 failed"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3518
+#: bookloresync.koplugin/main.lua:3525
 msgid "Booklore: %1 annotation(s) failed to sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3520
+#: bookloresync.koplugin/main.lua:3527
 msgid ""
 "Booklore: no pending annotations to sync for this book.\n"
 "Annotations are captured when you close the book."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3546
+#: bookloresync.koplugin/main.lua:3553
 msgid "Booklore: failed to prepare local data for matching (%1)."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3552
+#: bookloresync.koplugin/main.lua:3559
 msgid ""
 "Booklore: this book is already matched (id %1).\n"
 "Re-match it?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3553
+#: bookloresync.koplugin/main.lua:3560
 msgid "Re-match"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3576 bookloresync.koplugin/main.lua:3694
+#: bookloresync.koplugin/main.lua:3583 bookloresync.koplugin/main.lua:3701
 msgid "Booklore: searching for: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3587
+#: bookloresync.koplugin/main.lua:3594
 msgid "Booklore: search failed: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3594
+#: bookloresync.koplugin/main.lua:3601
 msgid ""
 "Booklore: no matches found for:\n"
 "%1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3630 bookloresync.koplugin/main.lua:3752
+#: bookloresync.koplugin/main.lua:3637 bookloresync.koplugin/main.lua:3759
 msgid ""
 "Select match for:\n"
 "%1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3653
+#: bookloresync.koplugin/main.lua:3660
 msgid ""
 "Match book:\n"
 "%1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3654
+#: bookloresync.koplugin/main.lua:3661
 msgid "accepts title or id"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3665 bookloresync.koplugin/main.lua:11134
+#: bookloresync.koplugin/main.lua:3672 bookloresync.koplugin/main.lua:11221
 msgid "Search"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3679 bookloresync.koplugin/main.lua:11148
+#: bookloresync.koplugin/main.lua:3686 bookloresync.koplugin/main.lua:11235
 msgid ""
 "Booklore: no book found with ID %1.\n"
 "Retry?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3702 bookloresync.koplugin/main.lua:11196
+#: bookloresync.koplugin/main.lua:3709 bookloresync.koplugin/main.lua:11283
 msgid ""
 "Booklore: search failed: %1\n"
 "Retry?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3713 bookloresync.koplugin/main.lua:11222
+#: bookloresync.koplugin/main.lua:3720 bookloresync.koplugin/main.lua:11309
 msgid ""
 "Booklore: no results for:\n"
 "%1\n"
 "Retry?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3808
+#: bookloresync.koplugin/main.lua:3815
 msgid ""
 "Booklore: this book has not been rated in KOReader yet.\n"
 "Set a star rating and try again."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3847
+#: bookloresync.koplugin/main.lua:3854
 msgid "Will only sync to webUI, not in book, as spine is missing"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3848 bookloresync.koplugin/main.lua:9651
+#: bookloresync.koplugin/main.lua:3855 bookloresync.koplugin/main.lua:9738
 msgid "Continue"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3863
+#: bookloresync.koplugin/main.lua:3870
 msgid "Both"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3915
+#: bookloresync.koplugin/main.lua:3922
 msgid "Annotations: %1 synced, %2 failed"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3917
+#: bookloresync.koplugin/main.lua:3924
 msgid "Annotations: none pending"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3920
+#: bookloresync.koplugin/main.lua:3927
 msgid "Annotations: disabled in settings"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3928
+#: bookloresync.koplugin/main.lua:3935
 msgid "Bookmarks: %1 synced, %2 failed"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3948
+#: bookloresync.koplugin/main.lua:3955
 msgid "Rating: not rated in KOReader yet"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3955
+#: bookloresync.koplugin/main.lua:3962
 msgid "Rating: synced"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:3957
+#: bookloresync.koplugin/main.lua:3964
 msgid "Rating: sync failed or already synced"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4001
+#: bookloresync.koplugin/main.lua:4008
 msgid "Unread"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4002
+#: bookloresync.koplugin/main.lua:4009
 msgid "Paused"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4003
+#: bookloresync.koplugin/main.lua:4010
 msgid "Partially read"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4004
+#: bookloresync.koplugin/main.lua:4011
 msgid "Abandoned"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4005
+#: bookloresync.koplugin/main.lua:4012
 msgid "Won't read"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4064
+#: bookloresync.koplugin/main.lua:4071
 msgid "Booklore: reading status set to %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4071
+#: bookloresync.koplugin/main.lua:4078
 msgid "Booklore: failed to update reading status (%1)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4145
+#: bookloresync.koplugin/main.lua:4152
 msgid ""
 "Tracking enabled for:\n"
 "%1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4146
+#: bookloresync.koplugin/main.lua:4153
 msgid ""
 "Tracking disabled for:\n"
 "%1\n"
@@ -1715,68 +1742,68 @@ msgid ""
 "Sessions will not be uploaded."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4152
+#: bookloresync.koplugin/main.lua:4159
 msgid "Booklore: failed to update tracking setting"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4176
+#: bookloresync.koplugin/main.lua:4183
 msgid ""
 "Booklore: no local record found for this book.\n"
 "Open the book first to register it."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4209 bookloresync.koplugin/main.lua:4217
+#: bookloresync.koplugin/main.lua:4216 bookloresync.koplugin/main.lua:4224
 msgid "Server ID:"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4212 bookloresync.koplugin/main.lua:4214
-#: bookloresync.koplugin/main.lua:4218
+#: bookloresync.koplugin/main.lua:4219 bookloresync.koplugin/main.lua:4221
+#: bookloresync.koplugin/main.lua:4225
 msgid "Server pagecount:"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4214
+#: bookloresync.koplugin/main.lua:4221
 msgid "(unknown)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4217 bookloresync.koplugin/main.lua:4218
+#: bookloresync.koplugin/main.lua:4224 bookloresync.koplugin/main.lua:4225
 msgid "(not matched)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4221 bookloresync.koplugin/main.lua:4551
+#: bookloresync.koplugin/main.lua:4228 bookloresync.koplugin/main.lua:4558
 msgid "Reading Sessions"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4222 bookloresync.koplugin/main.lua:4227
-#: bookloresync.koplugin/main.lua:4232
+#: bookloresync.koplugin/main.lua:4229 bookloresync.koplugin/main.lua:4234
+#: bookloresync.koplugin/main.lua:4239
 msgid "  Synced:  "
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4223 bookloresync.koplugin/main.lua:4228
-#: bookloresync.koplugin/main.lua:4233
+#: bookloresync.koplugin/main.lua:4230 bookloresync.koplugin/main.lua:4235
+#: bookloresync.koplugin/main.lua:4240
 msgid "  Pending: "
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4224 bookloresync.koplugin/main.lua:4229
-#: bookloresync.koplugin/main.lua:4234
+#: bookloresync.koplugin/main.lua:4231 bookloresync.koplugin/main.lua:4236
+#: bookloresync.koplugin/main.lua:4241
 msgid "  Total:   "
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4239
+#: bookloresync.koplugin/main.lua:4246
 msgid "Stored Data"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4270
+#: bookloresync.koplugin/main.lua:4277
 msgid "Booklore: no annotations or bookmarks found in sidecar for this book."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4285
+#: bookloresync.koplugin/main.lua:4292
 msgid ""
 "Highlights: %1\n"
 "Notes: %2\n"
 "Bookmarks: %3"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4293
+#: bookloresync.koplugin/main.lua:4300
 msgid ""
 "Sidecar data detected:\n"
 "\n"
@@ -1786,7 +1813,7 @@ msgid ""
 "Match it now to enable sync?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4308
+#: bookloresync.koplugin/main.lua:4315
 msgid ""
 "Sidecar data detected:\n"
 "\n"
@@ -1795,385 +1822,385 @@ msgid ""
 "Sync these to Booklore now?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4309
+#: bookloresync.koplugin/main.lua:4316
 msgid "Sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4328
+#: bookloresync.koplugin/main.lua:4335
 msgid ""
 "%1\n"
 "\n"
 "%2"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4335 bookloresync.koplugin/main.lua:4337
+#: bookloresync.koplugin/main.lua:4342 bookloresync.koplugin/main.lua:4344
 msgid "yes"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4336 bookloresync.koplugin/main.lua:4338
+#: bookloresync.koplugin/main.lua:4343 bookloresync.koplugin/main.lua:4345
 msgid "no"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4365
+#: bookloresync.koplugin/main.lua:4372
 msgid "Loading shelves..."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4380
+#: bookloresync.koplugin/main.lua:4387
 msgid "Shelf"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4389 bookloresync.koplugin/main.lua:4432
+#: bookloresync.koplugin/main.lua:4396 bookloresync.koplugin/main.lua:4439
 msgid "Type"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4390 bookloresync.koplugin/main.lua:4433
+#: bookloresync.koplugin/main.lua:4397 bookloresync.koplugin/main.lua:4440
 msgid "Public"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4391 bookloresync.koplugin/main.lua:4434
+#: bookloresync.koplugin/main.lua:4398 bookloresync.koplugin/main.lua:4441
 msgid "# Titles"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4407
+#: bookloresync.koplugin/main.lua:4414
 msgid "Magic Shelf"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4459
+#: bookloresync.koplugin/main.lua:4466
 msgid "Standard: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4463
+#: bookloresync.koplugin/main.lua:4470
 msgid "Magic: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4466
+#: bookloresync.koplugin/main.lua:4473
 msgid ""
 "Failed to load shelves:\n"
 "%1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4468
+#: bookloresync.koplugin/main.lua:4475
 msgid "No selectable shelves found"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4474 bookloresync.koplugin/main.lua:5145
+#: bookloresync.koplugin/main.lua:4481 bookloresync.koplugin/main.lua:5158
 msgid "Select Shelf"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4508
+#: bookloresync.koplugin/main.lua:4515
 msgid ""
 "Selected shelf: %1\n"
 "\n"
 "Sync now?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4524
+#: bookloresync.koplugin/main.lua:4531
 msgid "Enable Sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4525
+#: bookloresync.koplugin/main.lua:4532
 msgid ""
 "Enable or disable automatic syncing of reading sessions to Booklore server. "
 "When disabled, no sessions will be tracked or synced."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4544
+#: bookloresync.koplugin/main.lua:4551
 msgid ""
 "Set server URL, KOReader credentials, Booklore credentials, and run "
 "connection tests."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4552
+#: bookloresync.koplugin/main.lua:4559
 msgid "Configure how reading sessions are detected and recorded."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4555
+#: bookloresync.koplugin/main.lua:4562
 msgid "Detection Mode"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4556
+#: bookloresync.koplugin/main.lua:4563
 msgid ""
 "Choose how sessions are validated: Duration-based (minimum seconds) or Pages-"
 "based (minimum pages read). Default is duration-based."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4559
+#: bookloresync.koplugin/main.lua:4566
 msgid "Duration-based"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4560
+#: bookloresync.koplugin/main.lua:4567
 msgid ""
 "Sessions must last a minimum number of seconds. Good for general reading "
 "tracking."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4569
+#: bookloresync.koplugin/main.lua:4576
 msgid "Session detection set to duration-based"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4576
+#: bookloresync.koplugin/main.lua:4583
 msgid "Pages-based"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4577
+#: bookloresync.koplugin/main.lua:4584
 msgid ""
 "Sessions must include a minimum number of pages read. Better for avoiding "
 "accidental sessions."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4586
+#: bookloresync.koplugin/main.lua:4593
 msgid "Session detection set to pages-based"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4595
+#: bookloresync.koplugin/main.lua:4602
 msgid "Minimum Duration (seconds)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4596
+#: bookloresync.koplugin/main.lua:4603
 msgid ""
 "Set the minimum number of seconds a reading session must last to be synced. "
 "Sessions shorter than this will be discarded. Default is 30 seconds. Only "
 "applies when using duration-based detection."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4607
+#: bookloresync.koplugin/main.lua:4614
 msgid ""
 "Set the minimum number of pages that must be read in a session for it to be "
 "synced. Default is 1 page. Only applies when using pages-based detection."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4617
+#: bookloresync.koplugin/main.lua:4624
 msgid "Progress Decimal Places"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4618
+#: bookloresync.koplugin/main.lua:4625
 msgid ""
 "Set the number of decimal places to use when reporting reading progress "
 "percentage (0-5). Higher precision may be useful for large books. Default is "
 "2."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4628
+#: bookloresync.koplugin/main.lua:4635
 msgid "Sync Mode"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4629
+#: bookloresync.koplugin/main.lua:4636
 msgid "Choose between automatic syncing and manual queue-only mode."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4632
+#: bookloresync.koplugin/main.lua:4639
 msgid "Networking"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4633
+#: bookloresync.koplugin/main.lua:4640
 msgid "Configure WiFi connection behavior for sync actions."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4637
+#: bookloresync.koplugin/main.lua:4644
 msgid "WiFi connect timeout (seconds) (%1)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4639
+#: bookloresync.koplugin/main.lua:4646
 msgid ""
 "How long to wait for WiFi to become connected after enabling it, before "
 "giving up. Increase this on slower devices."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4649
+#: bookloresync.koplugin/main.lua:4656
 msgid "Sync delay after connect"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4650
+#: bookloresync.koplugin/main.lua:4657
 msgid ""
 "Wait this many seconds after network becomes connected before running sync "
 "requests. Useful on devices where routing/DNS is not immediately ready after "
 "WiFi connect."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4657
+#: bookloresync.koplugin/main.lua:4664
 msgid "Run until connect"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4658
+#: bookloresync.koplugin/main.lua:4665
 msgid ""
 "Disable plugin-side connect timeout and wait until WiFi connects or the "
 "underlying network stack times out on its own."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4672
+#: bookloresync.koplugin/main.lua:4679
 msgid "Automatic (sync on suspend when connected)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4673
+#: bookloresync.koplugin/main.lua:4680
 msgid ""
 "Automatically sync sessions on suspend and resume only when WiFi is already "
 "connected. The plugin does not enable WiFi on suspend; if disconnected, data "
 "stays queued until the next sync trigger."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4681
+#: bookloresync.koplugin/main.lua:4688
 msgid "Sync mode set to Automatic"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4688
+#: bookloresync.koplugin/main.lua:4695
 msgid "Manual only (cache everything)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4689
+#: bookloresync.koplugin/main.lua:4696
 msgid ""
 "Cache all sessions and prevent automatic syncing. Use 'Sync Pending Now' "
 "when ready to upload."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4697
+#: bookloresync.koplugin/main.lua:4704
 msgid "Sync mode set to Manual only"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4707
+#: bookloresync.koplugin/main.lua:4714
 msgid "Progress Sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4708
+#: bookloresync.koplugin/main.lua:4715
 msgid "Configure KOReader document-position sync with Booklore."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4711
+#: bookloresync.koplugin/main.lua:4718
 msgid "General"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4714
+#: bookloresync.koplugin/main.lua:4721
 msgid "Automatically sync progress"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4715
+#: bookloresync.koplugin/main.lua:4722
 msgid "Automatically keep document position in sync across devices."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4724
+#: bookloresync.koplugin/main.lua:4731
 msgid "Automatic progress sync disabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4724
+#: bookloresync.koplugin/main.lua:4731
 msgid "Automatic progress sync enabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4730
+#: bookloresync.koplugin/main.lua:4737
 msgid "Pull progress on book open"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4731
+#: bookloresync.koplugin/main.lua:4738
 msgid ""
 "When WiFi is already connected, check for remote progress when opening a "
 "book."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4746
+#: bookloresync.koplugin/main.lua:4753
 msgid "Pull progress on resume"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4747
+#: bookloresync.koplugin/main.lua:4754
 msgid ""
 "When WiFi is already connected, check for remote progress after wake/resume."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4762
+#: bookloresync.koplugin/main.lua:4769
 msgid "Pull progress now"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4763
+#: bookloresync.koplugin/main.lua:4770
 msgid "Immediately pull progress for the currently open book."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4773
+#: bookloresync.koplugin/main.lua:4780
 msgid "Push progress now"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4774
+#: bookloresync.koplugin/main.lua:4781
 msgid "Immediately push progress for the currently open book."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4787
+#: bookloresync.koplugin/main.lua:4794
 msgid "Conflict handling"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4788
+#: bookloresync.koplugin/main.lua:4795
 msgid "Control how incoming progress updates are applied."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4795
+#: bookloresync.koplugin/main.lua:4802
 msgid "Sync to a newer state (%1)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4799 bookloresync.koplugin/main.lua:4834
-#: bookloresync.koplugin/main.lua:6630
+#: bookloresync.koplugin/main.lua:4806 bookloresync.koplugin/main.lua:4841
+#: bookloresync.koplugin/main.lua:6717
 msgid "Silently"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4808 bookloresync.koplugin/main.lua:4843
-#: bookloresync.koplugin/main.lua:6632
+#: bookloresync.koplugin/main.lua:4815 bookloresync.koplugin/main.lua:4850
+#: bookloresync.koplugin/main.lua:6719
 msgid "Prompt"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4817 bookloresync.koplugin/main.lua:4852
-#: bookloresync.koplugin/main.lua:6634
+#: bookloresync.koplugin/main.lua:4824 bookloresync.koplugin/main.lua:4859
+#: bookloresync.koplugin/main.lua:6721
 msgid "Disable"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4830
+#: bookloresync.koplugin/main.lua:4837
 msgid "Sync to an older state (%1)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4867
+#: bookloresync.koplugin/main.lua:4874
 msgid "Update frequency"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4873
+#: bookloresync.koplugin/main.lua:4880
 msgid "Periodic page-turn updates"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4874
+#: bookloresync.koplugin/main.lua:4881
 msgid ""
 "Enable or disable periodic page-turn progress updates. Book-open and book-"
 "close positions are always stored."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4886
+#: bookloresync.koplugin/main.lua:4893
 msgid "Periodic page-turn updates disabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4886
+#: bookloresync.koplugin/main.lua:4893
 msgid "Periodic page-turn updates enabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4893
+#: bookloresync.koplugin/main.lua:4900
 msgid "Periodically sync every # pages (%1)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4895
+#: bookloresync.koplugin/main.lua:4902
 msgid ""
 "How many page turns before a periodic sync update is queued. Minimum is 1 "
 "when periodic updates are enabled."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4903
+#: bookloresync.koplugin/main.lua:4910
 msgid ""
 "This value determines how many page turns it takes to update book progress.\n"
 "Minimum value is 1."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4910
+#: bookloresync.koplugin/main.lua:4917
 msgid "Number of pages before update"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4932 bookloresync.koplugin/main.lua:5506
+#: bookloresync.koplugin/main.lua:4939 bookloresync.koplugin/main.lua:5593
 msgid "Advanced"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4935
+#: bookloresync.koplugin/main.lua:4942
 msgid "Normalize session locations"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4936
+#: bookloresync.koplugin/main.lua:4943
 msgid ""
 "When enabled, start/end session locations are converted to the server page-"
 "count scale so the displayed book page is correct instead of using KOReader-"
@@ -2181,93 +2208,94 @@ msgid ""
 "re-synced in Sync & Cache -> Advanced. Progress percentages are unchanged."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4946
+#: bookloresync.koplugin/main.lua:4953
 msgid "Session location normalization enabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4947
+#: bookloresync.koplugin/main.lua:4954
 msgid "Session location normalization disabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4954
+#: bookloresync.koplugin/main.lua:4961
 msgid "Set book to read on rating"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4955
+#: bookloresync.koplugin/main.lua:4962
 msgid ""
 "When a rating is submitted, queue progress as 100% for sync, even if the "
 "real reading progress is lower."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4964
+#: bookloresync.koplugin/main.lua:4971
 msgid "Set book to read on rating disabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4964
+#: bookloresync.koplugin/main.lua:4971
 msgid "Set book to read on rating enabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4976
+#: bookloresync.koplugin/main.lua:4983
 msgid "Annotations & Bookmarks"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4977
+#: bookloresync.koplugin/main.lua:4984
 msgid "Configure syncing of highlights, notes, and bookmarks to Booklore."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4991 bookloresync.koplugin/main.lua:4995
+#: bookloresync.koplugin/main.lua:4998 bookloresync.koplugin/main.lua:5002
+#: bookloresync.koplugin/main.lua:5077
 msgid "Sync Behavior"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:4996
+#: bookloresync.koplugin/main.lua:5003
 msgid "Choose automatic syncing or manual queue-only mode."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5003
+#: bookloresync.koplugin/main.lua:5010
 msgid ""
 "Show recommended books after you finish reading. When enabled, finishing a "
 "book opens a dialog of similar titles fetched from Booklore so you can "
 "preview details and download a new book."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5006
+#: bookloresync.koplugin/main.lua:5013
 msgid "Show recommendations after finishing a book"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5007
+#: bookloresync.koplugin/main.lua:5014
 msgid ""
 "After you finish a book and return to the file browser, fetch up to 10 "
 "recommendations for that book and show a selection dialog. Tap a book to "
 "view details, then choose Fetch to download it. Rating is optional."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5017
+#: bookloresync.koplugin/main.lua:5024
 msgid "Post-finish recommendations enabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5018
+#: bookloresync.koplugin/main.lua:5025
 msgid "Post-finish recommendations disabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5028 bookloresync.koplugin/main.lua:5043
+#: bookloresync.koplugin/main.lua:5035 bookloresync.koplugin/main.lua:5050
 msgid "What to Sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5044
+#: bookloresync.koplugin/main.lua:5051
 msgid ""
 "Configure reading session rules, progress sync, rating sync, annotations, "
 "and bookmarks."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5050 bookloresync.koplugin/main.lua:5342
+#: bookloresync.koplugin/main.lua:5057 bookloresync.koplugin/main.lua:5429
 msgid "Shelf Sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5053
+#: bookloresync.koplugin/main.lua:5060
 msgid "Sync Booklore Shelf"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5054
+#: bookloresync.koplugin/main.lua:5061
 msgid ""
 "Syncronizes the selected shelf with KOReader. Downloads books on the shelf "
 "to the device and optionally deletes local files for removed shelf books. "
@@ -2276,77 +2304,81 @@ msgid ""
 "removal for static shelves only"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5060
+#: bookloresync.koplugin/main.lua:5067
 msgid "Force full re-sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5061
+#: bookloresync.koplugin/main.lua:5068
 msgid ""
 "Clear the cached shelf state and perform a full sync pass. Useful after "
 "manually deleting downloaded books so the plugin re-downloads them."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5070
+#: bookloresync.koplugin/main.lua:5078
+msgid "Configure auto-sync, file deletion, and naming behavior for shelf sync."
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5081
 msgid "Auto-sync shelf on wake"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5071
+#: bookloresync.koplugin/main.lua:5082
 msgid ""
 "Automatically pull the Booklore shelf 15 seconds after the device wakes from "
 "suspend, once WiFi is connected."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5081
+#: bookloresync.koplugin/main.lua:5092
 msgid "Auto-sync shelf on wake enabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5082
+#: bookloresync.koplugin/main.lua:5093
 msgid "Auto-sync shelf on wake disabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5088
+#: bookloresync.koplugin/main.lua:5099
 msgid "Delete removed shelf books"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5089
+#: bookloresync.koplugin/main.lua:5100
 msgid ""
 "When syncing, delete local files (in the download directory) whose BookID is "
 "no longer on the Booklore shelf. Disabled by default for safety."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5099
+#: bookloresync.koplugin/main.lua:5110
 msgid ""
 "Delete removed shelf books enabled - local files not on shelf will be "
 "removed during sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5100
+#: bookloresync.koplugin/main.lua:5111
 msgid "Delete removed shelf books disabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5106
+#: bookloresync.koplugin/main.lua:5117
 msgid "Use original server filename"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5107
+#: bookloresync.koplugin/main.lua:5118
 msgid ""
 "Save downloaded books using the original filename from the Booklore server "
 "instead of deriving the name from the book title."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5117
+#: bookloresync.koplugin/main.lua:5128
 msgid "Will use original server filename when downloading"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5118
+#: bookloresync.koplugin/main.lua:5129
 msgid "Will use book title as filename when downloading"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5124
+#: bookloresync.koplugin/main.lua:5135
 msgid "Also delete sidecar (.sdr) on removal"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5125
+#: bookloresync.koplugin/main.lua:5136
 msgid ""
 "When a shelf book is deleted during sync, also delete its KOReader sidecar "
 "directory (.sdr folder containing reading progress, highlights, etc.). Only "
@@ -2354,222 +2386,275 @@ msgid ""
 "default."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5138
+#: bookloresync.koplugin/main.lua:5149
 msgid "Sidecar (.sdr) deletion enabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5139
+#: bookloresync.koplugin/main.lua:5150
 msgid "Sidecar (.sdr) deletion disabled"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5146
+#: bookloresync.koplugin/main.lua:5159
 msgid ""
 "Select a standard or Magic shelf source and configure the matching source "
 "name."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5150
+#: bookloresync.koplugin/main.lua:5163
 msgid "Magic"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5150
+#: bookloresync.koplugin/main.lua:5163
 msgid "Standard"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5153
+#: bookloresync.koplugin/main.lua:5166
 msgid "(not set)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5155
+#: bookloresync.koplugin/main.lua:5168
 msgid "Current source: %1 | %2"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5160
+#: bookloresync.koplugin/main.lua:5173
 msgid "Select shelf (Standard + Magic)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5161
+#: bookloresync.koplugin/main.lua:5174
 msgid ""
 "Load all accessible standard and Magic shelves from Booklore and pick one as "
 "sync source."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5169
+#: bookloresync.koplugin/main.lua:5182
 msgid "Shelf source name: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5171
+#: bookloresync.koplugin/main.lua:5184
 msgid "Name of the standard shelf source to sync."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5179
+#: bookloresync.koplugin/main.lua:5192
 msgid "Booklore shelf source name"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5210
+#: bookloresync.koplugin/main.lua:5223
 msgid "Magic Shelf name: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5212
+#: bookloresync.koplugin/main.lua:5225
 msgid "Name of the Magic Shelf source to sync."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5220
+#: bookloresync.koplugin/main.lua:5233
 msgid "Booklore Magic Shelf name"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5253
+#: bookloresync.koplugin/main.lua:5265
+msgid "Display & Storage"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5266
+msgid ""
+"Configure storage paths, disk-space limits, and progress-display appearance."
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5270
 msgid "Download dir: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5255
+#: bookloresync.koplugin/main.lua:5272
 msgid ""
 "Local directory where shelf books are downloaded. Detected automatically "
 "from device type; override here if needed."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5260
+#: bookloresync.koplugin/main.lua:5277
 msgid "Download directory"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5268
+#: bookloresync.koplugin/main.lua:5285
 msgid "Reset"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5275
+#: bookloresync.koplugin/main.lua:5292
 msgid "Reset to: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5301
+#: bookloresync.koplugin/main.lua:5318
 msgid "Minimum free space: %1 MB"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5303
+#: bookloresync.koplugin/main.lua:5320
 msgid ""
 "Minimum free disk space (in MB) required before downloading books. Sync will "
 "stop if available space drops below this threshold. Default: 500 MB"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5308
+#: bookloresync.koplugin/main.lua:5325
 msgid "Minimum free space (MB)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5326
+#: bookloresync.koplugin/main.lua:5343
 msgid "Minimum free space set to %1 MB"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5343
+#: bookloresync.koplugin/main.lua:5358
+msgid "Progress bar width: %1"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5360
+msgid ""
+"Width of the progress bar shown during shelf sync downloads (in characters). "
+"Wider is more detailed on larger screens. Default: 20"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5365
+msgid "Width of the download progress bar (in characters)."
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5372
+msgid "Progress bar width (chars)"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5382
+msgid "Progress bar width set to %1"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5392
+msgid "Short title length: %1"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5394
+msgid ""
+"Maximum title length (in characters) shown in the progress dialog before "
+"truncation. Shorter values keep the progress dialog compact. Default: 30"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5399
+msgid "Maximum book title length shown during download progress."
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5406
+msgid "Short title length (chars)"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5416
+msgid "Short title length set to %1"
+msgstr ""
+
+#: bookloresync.koplugin/main.lua:5430
 msgid ""
 "Configure two-way Booklore shelf sync, storage location, file naming, and "
 "cleanup behavior."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5349 bookloresync.koplugin/main.lua:5544
+#: bookloresync.koplugin/main.lua:5436 bookloresync.koplugin/main.lua:5631
 msgid "Sync & Cache"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5353 bookloresync.koplugin/main.lua:5361
+#: bookloresync.koplugin/main.lua:5440 bookloresync.koplugin/main.lua:5448
 msgid "Sync Pending Now"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5364 bookloresync.koplugin/main.lua:5457
+#: bookloresync.koplugin/main.lua:5451 bookloresync.koplugin/main.lua:5544
 msgid "%1 S"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5365 bookloresync.koplugin/main.lua:5458
+#: bookloresync.koplugin/main.lua:5452 bookloresync.koplugin/main.lua:5545
 msgid "%1 A"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5366 bookloresync.koplugin/main.lua:5459
+#: bookloresync.koplugin/main.lua:5453 bookloresync.koplugin/main.lua:5546
 msgid "%1 R"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5367 bookloresync.koplugin/main.lua:5460
+#: bookloresync.koplugin/main.lua:5454 bookloresync.koplugin/main.lua:5547
 msgid "%1 B"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5368 bookloresync.koplugin/main.lua:5461
+#: bookloresync.koplugin/main.lua:5455 bookloresync.koplugin/main.lua:5548
 msgid "%1 P"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5369
+#: bookloresync.koplugin/main.lua:5456
 msgid "Sync Pending Now (%1)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5371
+#: bookloresync.koplugin/main.lua:5458
 msgid ""
 "Manually upload all pending items that failed to sync previously - reading "
 "sessions, annotations (highlights and notes), ratings, bookmarks, and "
 "progress. Items are cached locally when the network is unavailable."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5395
+#: bookloresync.koplugin/main.lua:5482
 msgid "View Pending Sessions"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5396
+#: bookloresync.koplugin/main.lua:5483
 msgid ""
 "Display statistics about the local cache: number of book hashes cached, file "
 "paths cached, and pending sessions."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5404 bookloresync.koplugin/main.lua:5407
+#: bookloresync.koplugin/main.lua:5491 bookloresync.koplugin/main.lua:5494
 msgid "Match Unmatched Books"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5408
+#: bookloresync.koplugin/main.lua:5495
 msgid "Match Unmatched Books (%1)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5410
+#: bookloresync.koplugin/main.lua:5497
 msgid ""
 "Query the Booklore server to resolve book IDs for any cached books that were "
 "opened while the server was offline. Requires a network connection."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5418
+#: bookloresync.koplugin/main.lua:5505
 msgid "resolve unmatched books"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5425
+#: bookloresync.koplugin/main.lua:5512
 msgid ""
 "No new matches found (%1 still unmatched).\n"
 "\n"
 "Do you want to manually match the books?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5434
+#: bookloresync.koplugin/main.lua:5521
 msgid "All books matched"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5441
+#: bookloresync.koplugin/main.lua:5528
 msgid "WiFi not enabled - matching skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5442
+#: bookloresync.koplugin/main.lua:5529
 msgid "Airplane mode is enabled - matching skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5449 bookloresync.koplugin/main.lua:5455
+#: bookloresync.koplugin/main.lua:5536 bookloresync.koplugin/main.lua:5542
 msgid "Clear Pending..."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5462
+#: bookloresync.koplugin/main.lua:5549
 msgid "Clear Pending... (%1)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5464
+#: bookloresync.koplugin/main.lua:5551
 msgid ""
 "Choose which types of pending items to delete from the local queue: "
 "sessions, annotations (highlights/notes), ratings, bookmarks, and/or "
 "progress."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5479
+#: bookloresync.koplugin/main.lua:5566
 msgid "Clear Cache"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5480
+#: bookloresync.koplugin/main.lua:5567
 msgid ""
 "Delete cached book mappings AND related synced history (synced annotations, "
 "synced bookmarks, rating sync history, and stored metadata). This broad "
@@ -2579,545 +2664,545 @@ msgid ""
 "affected."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5493
+#: bookloresync.koplugin/main.lua:5580
 msgid "Local book cache cleared"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5498
+#: bookloresync.koplugin/main.lua:5585
 msgid "Failed to clear local book cache"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5507
+#: bookloresync.koplugin/main.lua:5594
 msgid "Advanced data management options. Use with care."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5510
+#: bookloresync.koplugin/main.lua:5597
 msgid "Re-match All Books in Cache"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5511
+#: bookloresync.koplugin/main.lua:5598
 msgid ""
 "Run this when you re-created the library and all IDs have changed. Resets "
 "all stored book IDs and re-resolves them from the server."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5517
+#: bookloresync.koplugin/main.lua:5604
 msgid "Re-sync Stored Metadata"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5518
+#: bookloresync.koplugin/main.lua:5605
 msgid ""
 "Re-fetch metadata for all cached books that already have a Booklore ID. "
 "Updates fields like server pagecount for existing cache entries."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5525 bookloresync.koplugin/main.lua:5531
+#: bookloresync.koplugin/main.lua:5612 bookloresync.koplugin/main.lua:5618
 msgid "Clear..."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5532
+#: bookloresync.koplugin/main.lua:5619
 msgid "Clear... (%1)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5534
+#: bookloresync.koplugin/main.lua:5621
 msgid ""
 "Clear historical sessions, synced annotation records, synced bookmark "
 "records, synced progress records, and/or rating sync history."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5545
+#: bookloresync.koplugin/main.lua:5632
 msgid ""
 "Sync pending items now, inspect queue/cache, match unmatched books, and "
 "clear local data."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5557
+#: bookloresync.koplugin/main.lua:5644
 msgid "Extract Historical Data"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5558
+#: bookloresync.koplugin/main.lua:5645
 msgid ""
 "One-time extraction of reading sessions from KOReader's statistics database. "
 "This reads page statistics and groups them into sessions. Run this first "
 "before matching."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5567
+#: bookloresync.koplugin/main.lua:5654
 msgid "Match Historical Sessions"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5568
+#: bookloresync.koplugin/main.lua:5655
 msgid ""
 "Match extracted sessions with books on Booklore server. For each unmatched "
 "book, searches by title and lets you select the correct match. Matched "
 "sessions are automatically synced."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5573
+#: bookloresync.koplugin/main.lua:5660
 msgid "match historical sessions"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5577
+#: bookloresync.koplugin/main.lua:5664
 msgid "WiFi not enabled - historical matching skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5578
+#: bookloresync.koplugin/main.lua:5665
 msgid "Airplane mode is enabled - historical matching skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5584
+#: bookloresync.koplugin/main.lua:5671
 msgid "View Match Statistics"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5585
+#: bookloresync.koplugin/main.lua:5672
 msgid ""
 "Display statistics about historical sessions: total sessions extracted, "
 "matched sessions, unmatched sessions, and synced sessions."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5591
+#: bookloresync.koplugin/main.lua:5678
 msgid "Re-sync All Historical"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5592
+#: bookloresync.koplugin/main.lua:5679
 msgid ""
 "Re-sync all previously synced historical sessions to the server. Sessions "
 "with invalid book IDs (404 errors) will be marked for re-matching."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5597
+#: bookloresync.koplugin/main.lua:5684
 msgid "re-sync all historical sessions"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5601
+#: bookloresync.koplugin/main.lua:5688
 msgid "WiFi not enabled - historical re-sync skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5602
+#: bookloresync.koplugin/main.lua:5689
 msgid "Airplane mode is enabled - historical re-sync skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5610
+#: bookloresync.koplugin/main.lua:5697
 msgid "Sync Re-matched Sessions"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5611
+#: bookloresync.koplugin/main.lua:5698
 msgid ""
 "Sync sessions that were previously marked for re-matching (404 errors) and "
 "have now been matched to valid books."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5616
+#: bookloresync.koplugin/main.lua:5703
 msgid "sync re-matched sessions"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5620
+#: bookloresync.koplugin/main.lua:5707
 msgid "WiFi not enabled - re-matched sync skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5621
+#: bookloresync.koplugin/main.lua:5708
 msgid "Airplane mode is enabled - re-matched sync skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5629
+#: bookloresync.koplugin/main.lua:5716
 msgid "Manual Matching"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5630
+#: bookloresync.koplugin/main.lua:5717
 msgid "Manually search for and match a book to a Booklore entry."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5632 bookloresync.koplugin/main.lua:11058
+#: bookloresync.koplugin/main.lua:5719 bookloresync.koplugin/main.lua:11145
 msgid "manual matching"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5645
+#: bookloresync.koplugin/main.lua:5732
 msgid "Hardcover"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5646
+#: bookloresync.koplugin/main.lua:5733
 msgid "Configure Hardcover.app integration and sync book metadata."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5649
+#: bookloresync.koplugin/main.lua:5736
 msgid "Configure Hardcover Account"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5650
+#: bookloresync.koplugin/main.lua:5737
 msgid ""
 "Load your Hardcover API token from the hardcover.token file in the plugin "
 "folder. Create the file and paste your token into it (get it from "
 "hardcover.app → Profile → API), then tap here to load it."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5657
+#: bookloresync.koplugin/main.lua:5744
 msgid "Fetch Hardcover Book IDs"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5658
+#: bookloresync.koplugin/main.lua:5745
 msgid ""
 "Fetch metadata from the Booklore server for every matched book and store any "
 "Hardcover book IDs returned. For books without a Hardcover ID in Booklore, "
 "searches Hardcover by ISBN or title and lets you select the correct match."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5668
+#: bookloresync.koplugin/main.lua:5755
 msgid "Airplanemode plugin"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5669
+#: bookloresync.koplugin/main.lua:5756
 msgid "Integrate Booklore sync mode with KOReader's Airplanemode plugin."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5672
+#: bookloresync.koplugin/main.lua:5759
 msgid "Switch sync mode based on airplane status"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5673
+#: bookloresync.koplugin/main.lua:5760
 msgid ""
 "When entering file manager: if airplane mode is ON, set sync mode to Manual; "
 "if OFF, set sync mode to Automatic."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5692
+#: bookloresync.koplugin/main.lua:5779
 msgid ""
 "Airplanemode integration enabled. This overrides Sync Mode based on airplane "
 "status."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5701
+#: bookloresync.koplugin/main.lua:5788
 msgid "Airplanemode plugin not installed"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5714 bookloresync.koplugin/main.lua:5718
+#: bookloresync.koplugin/main.lua:5801 bookloresync.koplugin/main.lua:5805
 msgid "Import & Matching"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5719
+#: bookloresync.koplugin/main.lua:5806
 msgid ""
 "Import historical KOReader sessions and match them to Booklore books for "
 "upload."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5725 bookloresync.koplugin/main.lua:5732
+#: bookloresync.koplugin/main.lua:5812 bookloresync.koplugin/main.lua:5819
 msgid "Integrations"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5733
+#: bookloresync.koplugin/main.lua:5820
 msgid ""
 "Configure external integrations, including Hardcover and Airplanemode plugin "
 "integration."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5742
+#: bookloresync.koplugin/main.lua:5829
 msgid ""
 "Configure silent mode, log-to-file diagnostics, settings export, and plugin "
 "naming."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5751 bookloresync.koplugin/main.lua:5787
+#: bookloresync.koplugin/main.lua:5838 bookloresync.koplugin/main.lua:5874
 msgid "About & Updates"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5751
+#: bookloresync.koplugin/main.lua:5838
 msgid "About & Updates ⚠"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5754
+#: bookloresync.koplugin/main.lua:5841
 msgid "Plugin Information"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5761
+#: bookloresync.koplugin/main.lua:5848
 msgid "Check for Updates"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5761
+#: bookloresync.koplugin/main.lua:5848
 msgid "Check for Updates ⚠ Update Available!"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5768
+#: bookloresync.koplugin/main.lua:5855
 msgid "Auto-check on Startup"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5777
+#: bookloresync.koplugin/main.lua:5864
 msgid "Clear Update Cache"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5778
+#: bookloresync.koplugin/main.lua:5865
 msgid "Force a fresh check by clearing cached release info"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5788
+#: bookloresync.koplugin/main.lua:5875
 msgid ""
 "View plugin version details and manage update checks, channels, and update "
 "cache."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5796
+#: bookloresync.koplugin/main.lua:5883
 msgid "Use Dev Builds"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5797
+#: bookloresync.koplugin/main.lua:5884
 msgid ""
 "Install development builds from dev-build.location in the plugin folder."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5861
+#: bookloresync.koplugin/main.lua:5948
 msgid "Booklore login credentials saved"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5883
+#: bookloresync.koplugin/main.lua:5970
 msgid "Testing connection..."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5893
+#: bookloresync.koplugin/main.lua:5980
 msgid "Error: Server URL not configured"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5907
+#: bookloresync.koplugin/main.lua:5994
 msgid "KOReader credentials not configured"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5924
+#: bookloresync.koplugin/main.lua:6011
 msgid "Booklore login successful"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5926
+#: bookloresync.koplugin/main.lua:6013
 msgid "Booklore login failed"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5940
+#: bookloresync.koplugin/main.lua:6027
 msgid "Skipped (no successful auth)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5944
+#: bookloresync.koplugin/main.lua:6031
 msgid "Not configured"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5951
+#: bookloresync.koplugin/main.lua:6038
 msgid "Remote"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5953
+#: bookloresync.koplugin/main.lua:6040
 msgid "Local (fallback)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5957
+#: bookloresync.koplugin/main.lua:6044
 msgid "Local"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5959
+#: bookloresync.koplugin/main.lua:6046
 msgid "Remote (fallback)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5964
+#: bookloresync.koplugin/main.lua:6051
 msgid "Connection type: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5967 bookloresync.koplugin/main.lua:5973
+#: bookloresync.koplugin/main.lua:6054 bookloresync.koplugin/main.lua:6060
 msgid "Success"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5967
+#: bookloresync.koplugin/main.lua:6054
 msgid "✓ KOReader: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5969
+#: bookloresync.koplugin/main.lua:6056
 msgid "✗ KOReader: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5973
+#: bookloresync.koplugin/main.lua:6060
 msgid "✓ Booklore: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5975
+#: bookloresync.koplugin/main.lua:6062
 msgid "✗ Booklore: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5979
+#: bookloresync.koplugin/main.lua:6066
 msgid "OK"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5979
+#: bookloresync.koplugin/main.lua:6066
 msgid "✓ by-hash endpoint: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5981
+#: bookloresync.koplugin/main.lua:6068
 msgid "✗ by-hash endpoint: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:5988
+#: bookloresync.koplugin/main.lua:6075
 msgid ""
 "Warning: the by-hash endpoint is unavailable. Book matching will not work. "
 "Please update your Booklore server."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6008
+#: bookloresync.koplugin/main.lua:6095
 msgid "0s"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6018 bookloresync.koplugin/main.lua:10060
+#: bookloresync.koplugin/main.lua:6105 bookloresync.koplugin/main.lua:10147
 msgid "%1h"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6022 bookloresync.koplugin/main.lua:10063
+#: bookloresync.koplugin/main.lua:6109 bookloresync.koplugin/main.lua:10150
 msgid "%1m"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6026 bookloresync.koplugin/main.lua:10066
+#: bookloresync.koplugin/main.lua:6113 bookloresync.koplugin/main.lua:10153
 #, lua-format
 msgid "%1s"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6719
+#: bookloresync.koplugin/main.lua:6806
 msgid "Unknown device"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6722
+#: bookloresync.koplugin/main.lua:6809
 msgid "Sync to latest location %1% from device '%2'?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6724
+#: bookloresync.koplugin/main.lua:6811
 msgid "Sync to previous location %1% from device '%2'?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6742
+#: bookloresync.koplugin/main.lua:6829
 msgid "Failed to pull progress: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6751
+#: bookloresync.koplugin/main.lua:6838
 msgid "No remote progress found"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6844
+#: bookloresync.koplugin/main.lua:6931
 msgid "Latest progress is coming from this device."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6856
+#: bookloresync.koplugin/main.lua:6943
 msgid "Remote progress is at 0%; keeping current location."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:6868
+#: bookloresync.koplugin/main.lua:6955
 msgid "The progress has already been synchronized."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7218
+#: bookloresync.koplugin/main.lua:7305
 msgid ""
 "No match found based on hash or ISBN.\n"
 "Does this book exist in your Booklore library?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7227
+#: bookloresync.koplugin/main.lua:7314
 msgid ""
 "No match found based on hash.\n"
 "Does this book exist in your Booklore library?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7396
+#: bookloresync.koplugin/main.lua:7483
 msgid "Failed to save reading session"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7517
+#: bookloresync.koplugin/main.lua:7604
 msgid "sync reading progress"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7630
+#: bookloresync.koplugin/main.lua:7717
 msgid "Session not saved: criteria not met"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7805 bookloresync.koplugin/main.lua:8358
+#: bookloresync.koplugin/main.lua:7892 bookloresync.koplugin/main.lua:8445
 msgid "upload session and annotations"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7820
+#: bookloresync.koplugin/main.lua:7907
 msgid "Booklore Sync: Saved locally"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7821 bookloresync.koplugin/main.lua:7867
+#: bookloresync.koplugin/main.lua:7908 bookloresync.koplugin/main.lua:7954
 msgid "S: 1 queued"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7823
+#: bookloresync.koplugin/main.lua:7910
 msgid "A: %1 synced now"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7826 bookloresync.koplugin/main.lua:7869
+#: bookloresync.koplugin/main.lua:7913 bookloresync.koplugin/main.lua:7956
 msgid "A: %1 queued"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7829
+#: bookloresync.koplugin/main.lua:7916
 msgid "B: %1 synced now"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7832 bookloresync.koplugin/main.lua:7872
+#: bookloresync.koplugin/main.lua:7919 bookloresync.koplugin/main.lua:7959
 msgid "B: %1 queued"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7835
+#: bookloresync.koplugin/main.lua:7922
 msgid "B: %1 failed now"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7838 bookloresync.koplugin/main.lua:7875
+#: bookloresync.koplugin/main.lua:7925 bookloresync.koplugin/main.lua:7962
 msgid "P: 1 queued"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7840
+#: bookloresync.koplugin/main.lua:7927
 msgid "Will flush shortly after close"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7842
+#: bookloresync.koplugin/main.lua:7929
 msgid "Book not found in Booklore - saved locally"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7843
+#: bookloresync.koplugin/main.lua:7930
 msgid "S: 1 cached"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7845
+#: bookloresync.koplugin/main.lua:7932
 msgid "A: %1 cached"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7848
+#: bookloresync.koplugin/main.lua:7935
 msgid "B: %1 cached"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7851
+#: bookloresync.koplugin/main.lua:7938
 msgid "R: 1 cached"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7854
+#: bookloresync.koplugin/main.lua:7941
 msgid "P: 1 cached"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7856
+#: bookloresync.koplugin/main.lua:7943
 msgid "Will sync automatically when matched"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7866
+#: bookloresync.koplugin/main.lua:7953
 msgid "Booklore Sync: Session saved"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:7877
+#: bookloresync.koplugin/main.lua:7964
 msgid "Use 'Sync Pending Now' to upload"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:8125
+#: bookloresync.koplugin/main.lua:8212
 msgid "Booklore Sync failed unexpectedly. See logs."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:8137
+#: bookloresync.koplugin/main.lua:8224
 msgid "Airplane mode is enabled - network sync skipped"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:8202
+#: bookloresync.koplugin/main.lua:8289
 msgid "Failed to enable WiFi"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:8228
+#: bookloresync.koplugin/main.lua:8315
 msgid "Could not connect to WiFi"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9122
+#: bookloresync.koplugin/main.lua:9209
 msgid ""
 "This will reset all stored book IDs and re-resolve them from the server.\n"
 "\n"
@@ -3126,31 +3211,31 @@ msgid ""
 "Continue?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9123
+#: bookloresync.koplugin/main.lua:9210
 msgid "Reset & Re-match"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9129
+#: bookloresync.koplugin/main.lua:9216
 msgid "Failed to reset book IDs. Check logs."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9135
+#: bookloresync.koplugin/main.lua:9222
 msgid "All book IDs reset. Resolving from server..."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9139
+#: bookloresync.koplugin/main.lua:9226
 msgid "re-match all books in cache"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9143
+#: bookloresync.koplugin/main.lua:9230
 msgid "WiFi not enabled. Books will be re-matched on next sync."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9144
+#: bookloresync.koplugin/main.lua:9231
 msgid "Airplane mode is enabled. Books will be re-matched on next sync."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9166
+#: bookloresync.koplugin/main.lua:9253
 msgid ""
 "This will re-fetch metadata for all matched cached books from the server.\n"
 "\n"
@@ -3159,97 +3244,97 @@ msgid ""
 "Continue?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9167
+#: bookloresync.koplugin/main.lua:9254
 msgid "Re-sync Metadata"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9170
+#: bookloresync.koplugin/main.lua:9257
 msgid "re-sync stored metadata"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9174
+#: bookloresync.koplugin/main.lua:9261
 msgid "WiFi not enabled. Metadata refresh skipped."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9175
+#: bookloresync.koplugin/main.lua:9262
 msgid "Airplane mode is enabled. Metadata refresh skipped."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9229
+#: bookloresync.koplugin/main.lua:9316
 msgid "No matched cached books found."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9236
+#: bookloresync.koplugin/main.lua:9323
 msgid "Metadata refresh complete: %1 updated, %2 failed."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9261
+#: bookloresync.koplugin/main.lua:9348
 msgid "Nothing to clear"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9281 bookloresync.koplugin/main.lua:9417
+#: bookloresync.koplugin/main.lua:9368 bookloresync.koplugin/main.lua:9504
 msgid "%1 %2 (%3)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9290 bookloresync.koplugin/main.lua:9355
+#: bookloresync.koplugin/main.lua:9377 bookloresync.koplugin/main.lua:9442
 msgid "Historical Sessions"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9302 bookloresync.koplugin/main.lua:9356
+#: bookloresync.koplugin/main.lua:9389 bookloresync.koplugin/main.lua:9443
 msgid "Synced Annotations"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9314 bookloresync.koplugin/main.lua:9357
+#: bookloresync.koplugin/main.lua:9401 bookloresync.koplugin/main.lua:9444
 msgid "Synced Bookmarks"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9326 bookloresync.koplugin/main.lua:9358
+#: bookloresync.koplugin/main.lua:9413 bookloresync.koplugin/main.lua:9445
 msgid "Rating Sync History"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9338 bookloresync.koplugin/main.lua:9359
+#: bookloresync.koplugin/main.lua:9425 bookloresync.koplugin/main.lua:9446
 msgid "Synced Progress"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9350 bookloresync.koplugin/main.lua:9486
+#: bookloresync.koplugin/main.lua:9437 bookloresync.koplugin/main.lua:9573
 msgid "Clear Selected"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9362 bookloresync.koplugin/main.lua:9498
+#: bookloresync.koplugin/main.lua:9449 bookloresync.koplugin/main.lua:9585
 msgid "Cleared: %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9377
+#: bookloresync.koplugin/main.lua:9464
 msgid "Clear Synced History"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9426 bookloresync.koplugin/main.lua:9491
+#: bookloresync.koplugin/main.lua:9513 bookloresync.koplugin/main.lua:9578
 msgid "Sessions"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9450 bookloresync.koplugin/main.lua:9493
+#: bookloresync.koplugin/main.lua:9537 bookloresync.koplugin/main.lua:9580
 msgid "Ratings"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9474 bookloresync.koplugin/main.lua:9495
+#: bookloresync.koplugin/main.lua:9561 bookloresync.koplugin/main.lua:9582
 msgid "Progress"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9513
+#: bookloresync.koplugin/main.lua:9600
 msgid "Clear Pending Items"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9637
+#: bookloresync.koplugin/main.lua:9724
 msgid "Resolved %1 books from server"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9650
+#: bookloresync.koplugin/main.lua:9737
 msgid ""
 "Historical sessions already extracted. Re-running will add duplicate "
 "sessions. Continue?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9662
+#: bookloresync.koplugin/main.lua:9749
 msgid ""
 "This will extract reading sessions from KOReader's statistics database.\n"
 "\n"
@@ -3258,42 +3343,42 @@ msgid ""
 "Continue?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9663
+#: bookloresync.koplugin/main.lua:9750
 msgid "Extract Sessions"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9674
+#: bookloresync.koplugin/main.lua:9761
 msgid "Extracting sessions from KOReader database..."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9681
+#: bookloresync.koplugin/main.lua:9768
 msgid "KOReader statistics database not found"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9693
+#: bookloresync.koplugin/main.lua:9780
 msgid "Failed to open statistics database"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9735
+#: bookloresync.koplugin/main.lua:9822
 msgid ""
 "Found %1 reading sessions from %2 books\n"
 "\n"
 "Stored in database"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9741
+#: bookloresync.koplugin/main.lua:9828
 msgid "Failed to store sessions in database"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:9747
+#: bookloresync.koplugin/main.lua:9834
 msgid "No reading sessions found in KOReader database"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10292
+#: bookloresync.koplugin/main.lua:10379
 msgid "No historical sessions found. Please copy sessions from KOReader first."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10329
+#: bookloresync.koplugin/main.lua:10416
 msgid ""
 "Auto-syncing matched sessions...\n"
 "\n"
@@ -3304,7 +3389,7 @@ msgid ""
 "Failed: 0"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10354
+#: bookloresync.koplugin/main.lua:10441
 msgid ""
 "Auto-sync complete!\n"
 "\n"
@@ -3313,13 +3398,13 @@ msgid ""
 "Failed: %3"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10361
+#: bookloresync.koplugin/main.lua:10448
 msgid ""
 "\n"
 "Marked for re-matching (404): %1"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10391
+#: bookloresync.koplugin/main.lua:10478
 msgid ""
 "Auto-syncing matched sessions...\n"
 "\n"
@@ -3332,25 +3417,25 @@ msgid ""
 "Current: %7"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10440
+#: bookloresync.koplugin/main.lua:10527
 msgid "All historical sessions are matched and synced!"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10507
+#: bookloresync.koplugin/main.lua:10594
 msgid ""
 "Looking up by ISBN: %1\n"
 "\n"
 "%2"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10544
+#: bookloresync.koplugin/main.lua:10631
 msgid ""
 "Looking up by hash: %1\n"
 "\n"
 "%2"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10579
+#: bookloresync.koplugin/main.lua:10666
 msgid ""
 "Auto-matched by MD5 hash:\n"
 "\n"
@@ -3363,11 +3448,11 @@ msgid ""
 "Accept this match?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10581
+#: bookloresync.koplugin/main.lua:10668
 msgid "Accept"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10601
+#: bookloresync.koplugin/main.lua:10688
 msgid ""
 "%1\n"
 "\n"
@@ -3376,15 +3461,15 @@ msgid ""
 "%3"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10608
+#: bookloresync.koplugin/main.lua:10695
 msgid "Proceed"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10617
+#: bookloresync.koplugin/main.lua:10704
 msgid "Manual Match"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10656
+#: bookloresync.koplugin/main.lua:10743
 msgid ""
 "Search failed for:\n"
 "%1\n"
@@ -3396,11 +3481,11 @@ msgid ""
 "Skip this book?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10701
+#: bookloresync.koplugin/main.lua:10788
 msgid "%1. %2 (Score: %3)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10727
+#: bookloresync.koplugin/main.lua:10814
 msgid ""
 "Select match for:\n"
 "%1\n"
@@ -3410,46 +3495,46 @@ msgid ""
 "%3"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10765 bookloresync.koplugin/main.lua:10780
+#: bookloresync.koplugin/main.lua:10852 bookloresync.koplugin/main.lua:10867
 msgid "No sessions found to sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10798
+#: bookloresync.koplugin/main.lua:10885
 msgid "All sessions already synced"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10815
+#: bookloresync.koplugin/main.lua:10902
 msgid ""
 "Synced %1 sessions for:\n"
 "%2"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10820
+#: bookloresync.koplugin/main.lua:10907
 msgid ""
 "\n"
 "\n"
 "%1 sessions failed to sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10823 bookloresync.koplugin/main.lua:11026
+#: bookloresync.koplugin/main.lua:10910 bookloresync.koplugin/main.lua:11113
 msgid ""
 "\n"
 "\n"
 "%1 sessions marked for re-matching (404)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10850
+#: bookloresync.koplugin/main.lua:10937
 msgid "Failed to retrieve statistics"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10864
+#: bookloresync.koplugin/main.lua:10951
 msgid ""
 "No historical sessions found.\n"
 "\n"
 "Please copy sessions from KOReader first."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10871
+#: bookloresync.koplugin/main.lua:10958
 msgid ""
 "Historical Session Statistics:\n"
 "\n"
@@ -3459,7 +3544,7 @@ msgid ""
 "Synced to server: %4"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10889
+#: bookloresync.koplugin/main.lua:10976
 msgid ""
 "This will re-sync all previously synced historical sessions to the server.\n"
 "\n"
@@ -3468,22 +3553,22 @@ msgid ""
 "Continue?"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10890
+#: bookloresync.koplugin/main.lua:10977
 msgid "Re-sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10905
+#: bookloresync.koplugin/main.lua:10992
 msgid "No synced historical sessions found to re-sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10925
+#: bookloresync.koplugin/main.lua:11012
 msgid ""
 "Re-syncing historical sessions...\n"
 "\n"
 "0 / %1 books (0 sessions)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10952
+#: bookloresync.koplugin/main.lua:11039
 msgid ""
 "Re-syncing historical sessions...\n"
 "\n"
@@ -3494,7 +3579,7 @@ msgid ""
 "404 errors: %6"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10963
+#: bookloresync.koplugin/main.lua:11050
 msgid ""
 "Re-sync complete!\n"
 "\n"
@@ -3503,66 +3588,66 @@ msgid ""
 "Marked for re-matching (404): %3"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10967
+#: bookloresync.koplugin/main.lua:11054
 msgid ""
 "\n"
 "\n"
 "Use 'Match Historical Data' to re-match sessions with 404 errors."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:10996
+#: bookloresync.koplugin/main.lua:11083
 msgid "No re-matched sessions found to sync"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11021
+#: bookloresync.koplugin/main.lua:11108
 msgid "Successfully synced %1 re-matched session(s)"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11023
+#: bookloresync.koplugin/main.lua:11110
 msgid ""
 "\n"
 "\n"
 "%1 sessions failed"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11072
+#: bookloresync.koplugin/main.lua:11159
 msgid "Booklore: no unmatched books found"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11101
+#: bookloresync.koplugin/main.lua:11188
 msgid ""
 "Match book (%1)\n"
 "%2"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11102
+#: bookloresync.koplugin/main.lua:11189
 msgid "Enter Title / BookLore ID"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11125 bookloresync.koplugin/main.lua:11162
-#: bookloresync.koplugin/main.lua:11181 bookloresync.koplugin/main.lua:11210
-#: bookloresync.koplugin/main.lua:11236 bookloresync.koplugin/main.lua:11273
-#: bookloresync.koplugin/main.lua:11293
+#: bookloresync.koplugin/main.lua:11212 bookloresync.koplugin/main.lua:11249
+#: bookloresync.koplugin/main.lua:11268 bookloresync.koplugin/main.lua:11297
+#: bookloresync.koplugin/main.lua:11323 bookloresync.koplugin/main.lua:11360
+#: bookloresync.koplugin/main.lua:11380
 msgid "Booklore: manual matching complete"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11420
+#: bookloresync.koplugin/main.lua:11507
 msgid "Booklore URL is not configured."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11427
+#: bookloresync.koplugin/main.lua:11514
 msgid "Booklore credentials are not configured."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11437
+#: bookloresync.koplugin/main.lua:11524
 msgid "Fetching book metadata from Booklore…"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11446
+#: bookloresync.koplugin/main.lua:11533
 msgid "No matched books found in the local cache."
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11528 bookloresync.koplugin/main.lua:11563
+#: bookloresync.koplugin/main.lua:11615 bookloresync.koplugin/main.lua:11650
 msgid ""
 "Metadata fetch complete.\n"
 "\n"
@@ -3572,7 +3657,7 @@ msgid ""
 "Errors: %4"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11554
+#: bookloresync.koplugin/main.lua:11641
 msgid ""
 "Metadata fetch complete.\n"
 "\n"
@@ -3583,13 +3668,13 @@ msgid ""
 "Errors: %5"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11579
+#: bookloresync.koplugin/main.lua:11666
 msgid ""
 "Searching Hardcover…\n"
 "\n"
 "(%1 / %2)  %3"
 msgstr ""
 
-#: bookloresync.koplugin/main.lua:11657
+#: bookloresync.koplugin/main.lua:11744
 msgid "Match Hardcover book (%1/%2)"
 msgstr ""

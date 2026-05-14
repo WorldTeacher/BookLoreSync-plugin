@@ -427,7 +427,25 @@ if [ "$DOCS_MODE" -eq 1 ]; then
     exit 0
 fi
 
-latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+get_latest_semver_tag() {
+    git for-each-ref --format='%(refname:short)' refs/tags \
+        | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $0, v }' \
+        | sort -t $'\t' -k2,2Vr \
+        | head -n1 \
+        | cut -f1
+}
+
+latest_tag="$(get_latest_semver_tag || true)"
+
+# Fallback to closest reachable tag only when no semver tag exists at all.
+if [ -z "$latest_tag" ]; then
+    latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+fi
+
+if [ -n "$latest_tag" ] && ! git merge-base --is-ancestor "$latest_tag" HEAD; then
+    echo "WARN: latest semantic tag '$latest_tag' is not an ancestor of HEAD; generating changelog against global latest tag." >&2
+fi
+
 log_range="HEAD"
 
 if [ -n "$latest_tag" ]; then

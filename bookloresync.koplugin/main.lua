@@ -176,7 +176,6 @@ local ShelfSyncModule = ShelfSyncModuleFactory.new({
     InfoMessage = InfoMessage,
     ButtonDialog = ButtonDialog,
     json = json,
-    Trapper = Trapper,
     ffiutil = ffiutil,
     strbuf = strbuf,
 })
@@ -847,6 +846,14 @@ function BookloreSync:init()
     self.min_free_space_mb = self.settings:readSetting("min_free_space_mb")
     if self.min_free_space_mb == nil then
         self.min_free_space_mb = 500  -- Default: 500MB minimum free space
+    end
+    self.progress_bar_width = self.settings:readSetting("progress_bar_width")
+    if self.progress_bar_width == nil then
+        self.progress_bar_width = 20  -- Default: 20 characters wide
+    end
+    self.short_title_length = self.settings:readSetting("short_title_length")
+    if self.short_title_length == nil then
+        self.short_title_length = 30  -- Default: 30 characters before truncation
     end
 
     -- Resume/wake-sync state (not persisted - reset each session)
@@ -5067,79 +5074,85 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("Auto-sync shelf on wake"),
-                help_text = _("Automatically pull the Booklore shelf 15 seconds after the device wakes from suspend, once WiFi is connected."),
-                checked_func = function()
-                    return self.auto_sync_shelf_on_resume
-                end,
-                callback = function()
-                    self.auto_sync_shelf_on_resume = not self.auto_sync_shelf_on_resume
-                    self.settings:saveSetting("auto_sync_shelf_on_resume", self.auto_sync_shelf_on_resume)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.auto_sync_shelf_on_resume
-                            and _("Auto-sync shelf on wake enabled")
-                            or  _("Auto-sync shelf on wake disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("Delete removed shelf books"),
-                help_text = _("When syncing, delete local files (in the download directory) whose BookID is no longer on the Booklore shelf. Disabled by default for safety."),
-                checked_func = function()
-                    return self.delete_removed_shelf_books
-                end,
-                callback = function()
-                    self.delete_removed_shelf_books = not self.delete_removed_shelf_books
-                    self.settings:saveSetting("delete_removed_shelf_books", self.delete_removed_shelf_books)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.delete_removed_shelf_books
-                            and _("Delete removed shelf books enabled - local files not on shelf will be removed during sync")
-                            or  _("Delete removed shelf books disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("Use original server filename"),
-                help_text = _("Save downloaded books using the original filename from the Booklore server instead of deriving the name from the book title."),
-                checked_func = function()
-                    return self.shelf_use_original_filename
-                end,
-                callback = function()
-                    self.shelf_use_original_filename = not self.shelf_use_original_filename
-                    self.settings:saveSetting("shelf_use_original_filename", self.shelf_use_original_filename)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.shelf_use_original_filename
-                            and _("Will use original server filename when downloading")
-                            or  _("Will use book title as filename when downloading"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("Also delete sidecar (.sdr) on removal"),
-                help_text = _("When a shelf book is deleted during sync, also delete its KOReader sidecar directory (.sdr folder containing reading progress, highlights, etc.). Only applies when 'Delete removed shelf books' is also enabled. Disabled by default."),
-                enabled_func = function()
-                    return self.delete_removed_shelf_books
-                end,
-                checked_func = function()
-                    return self.delete_sdr_on_book_delete
-                end,
-                callback = function()
-                    self.delete_sdr_on_book_delete = not self.delete_sdr_on_book_delete
-                    self.settings:saveSetting("delete_sdr_on_book_delete", self.delete_sdr_on_book_delete)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.delete_sdr_on_book_delete
-                            and _("Sidecar (.sdr) deletion enabled")
-                            or  _("Sidecar (.sdr) deletion disabled"),
-                        timeout = 2,
-                    })
-                end,
+                text = _("Sync Behavior"),
+                help_text = _("Configure auto-sync, file deletion, and naming behavior for shelf sync."),
+                sub_item_table = {
+                    {
+                        text = _("Auto-sync shelf on wake"),
+                        help_text = _("Automatically pull the Booklore shelf 15 seconds after the device wakes from suspend, once WiFi is connected."),
+                        checked_func = function()
+                            return self.auto_sync_shelf_on_resume
+                        end,
+                        callback = function()
+                            self.auto_sync_shelf_on_resume = not self.auto_sync_shelf_on_resume
+                            self.settings:saveSetting("auto_sync_shelf_on_resume", self.auto_sync_shelf_on_resume)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.auto_sync_shelf_on_resume
+                                    and _("Auto-sync shelf on wake enabled")
+                                    or  _("Auto-sync shelf on wake disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                    {
+                        text = _("Delete removed shelf books"),
+                        help_text = _("When syncing, delete local files (in the download directory) whose BookID is no longer on the Booklore shelf. Disabled by default for safety."),
+                        checked_func = function()
+                            return self.delete_removed_shelf_books
+                        end,
+                        callback = function()
+                            self.delete_removed_shelf_books = not self.delete_removed_shelf_books
+                            self.settings:saveSetting("delete_removed_shelf_books", self.delete_removed_shelf_books)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.delete_removed_shelf_books
+                                    and _("Delete removed shelf books enabled - local files not on shelf will be removed during sync")
+                                    or  _("Delete removed shelf books disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                    {
+                        text = _("Use original server filename"),
+                        help_text = _("Save downloaded books using the original filename from the Booklore server instead of deriving the name from the book title."),
+                        checked_func = function()
+                            return self.shelf_use_original_filename
+                        end,
+                        callback = function()
+                            self.shelf_use_original_filename = not self.shelf_use_original_filename
+                            self.settings:saveSetting("shelf_use_original_filename", self.shelf_use_original_filename)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.shelf_use_original_filename
+                                    and _("Will use original server filename when downloading")
+                                    or  _("Will use book title as filename when downloading"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                    {
+                        text = _("Also delete sidecar (.sdr) on removal"),
+                        help_text = _("When a shelf book is deleted during sync, also delete its KOReader sidecar directory (.sdr folder containing reading progress, highlights, etc.). Only applies when 'Delete removed shelf books' is also enabled. Disabled by default."),
+                        enabled_func = function()
+                            return self.delete_removed_shelf_books
+                        end,
+                        checked_func = function()
+                            return self.delete_sdr_on_book_delete
+                        end,
+                        callback = function()
+                            self.delete_sdr_on_book_delete = not self.delete_sdr_on_book_delete
+                            self.settings:saveSetting("delete_sdr_on_book_delete", self.delete_sdr_on_book_delete)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.delete_sdr_on_book_delete
+                                    and _("Sidecar (.sdr) deletion enabled")
+                                    or  _("Sidecar (.sdr) deletion disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                },
             },
             {
                 text = _("Select Shelf"),
@@ -5249,92 +5262,166 @@ function BookloreSync:addToMainMenu(menu_items)
                 },
             },
             {
-                text_func = function()
-                    return T(_("Download dir: %1"), self.download_dir)
-                end,
-                help_text = _("Local directory where shelf books are downloaded. Detected automatically from device type; override here if needed."),
-                keep_menu_open = true,
-                callback = function()
-                    local dialog
-                    dialog = InputDialog:new{
-                        title   = _("Download directory"),
-                        input   = self.download_dir,
-                        buttons = {{
-                            {
-                                text     = _("Cancel"),
-                                callback = function() UIManager:close(dialog) end,
-                            },
-                            {
-                                text     = _("Reset"),
-                                callback = function()
-                                    self.download_dir = self:_detectDefaultDownloadDir()
-                                    self.settings:saveSetting("download_dir", self.download_dir)
+                text = _("Display & Storage"),
+                help_text = _("Configure storage paths, disk-space limits, and progress-display appearance."),
+                sub_item_table = {
+                    {
+                        text_func = function()
+                            return T(_("Download dir: %1"), self.download_dir)
+                        end,
+                        help_text = _("Local directory where shelf books are downloaded. Detected automatically from device type; override here if needed."),
+                        keep_menu_open = true,
+                        callback = function()
+                            local dialog
+                            dialog = InputDialog:new{
+                                title   = _("Download directory"),
+                                input   = self.download_dir,
+                                buttons = {{
+                                    {
+                                        text     = _("Cancel"),
+                                        callback = function() UIManager:close(dialog) end,
+                                    },
+                                    {
+                                        text     = _("Reset"),
+                                        callback = function()
+                                            self.download_dir = self:_detectDefaultDownloadDir()
+                                            self.settings:saveSetting("download_dir", self.download_dir)
+                                            self.settings:flush()
+                                            UIManager:close(dialog)
+                                            UIManager:show(InfoMessage:new{
+                                                text = T(_("Reset to: %1"), self.download_dir),
+                                                timeout = 2,
+                                            })
+                                        end,
+                                    },
+                                    {
+                                        text     = _("Save"),
+                                        is_enter_default = true,
+                                        callback = function()
+                                            local val = dialog:getInputText()
+                                            if val and val ~= "" then
+                                                self.download_dir = val
+                                                self.settings:saveSetting("download_dir", val)
+                                                self.settings:flush()
+                                            end
+                                            UIManager:close(dialog)
+                                        end,
+                                    },
+                                }},
+                            }
+                            UIManager:show(dialog)
+                            dialog:onShowKeyboard()
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Minimum free space: %1 MB"), self.min_free_space_mb)
+                        end,
+                        help_text = _("Minimum free disk space (in MB) required before downloading books. Sync will stop if available space drops below this threshold. Default: 500 MB"),
+                        keep_menu_open = true,
+                        callback = function()
+                            local dialog
+                            dialog = InputDialog:new{
+                                title   = _("Minimum free space (MB)"),
+                                input   = tostring(self.min_free_space_mb),
+                                input_type = "number",
+                                buttons = {{
+                                    {
+                                        text     = _("Cancel"),
+                                        callback = function() UIManager:close(dialog) end,
+                                    },
+                                    {
+                                        text     = _("Save"),
+                                        is_enter_default = true,
+                                        callback = function()
+                                            local val = tonumber(dialog:getInputText())
+                                            if val and val >= 0 then
+                                                self.min_free_space_mb = val
+                                                self.settings:saveSetting("min_free_space_mb", val)
+                                                self.settings:flush()
+                                                UIManager:show(InfoMessage:new{
+                                                    text = T(_("Minimum free space set to %1 MB"), val),
+                                                    timeout = 2,
+                                                })
+                                            end
+                                            UIManager:close(dialog)
+                                        end,
+                                    },
+                                }},
+                            }
+                            UIManager:show(dialog)
+                            dialog:onShowKeyboard()
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Progress bar width: %1"), self.progress_bar_width)
+                        end,
+                        help_text = _("Width of the progress bar shown during shelf sync downloads (in characters). Wider is more detailed on larger screens. Default: 20"),
+                        keep_menu_open = true,
+                        callback = function()
+                            local SpinWidget = require("ui/widget/spinwidget")
+                            local widget = SpinWidget:new{
+                                text = _("Width of the download progress bar (in characters)."),
+                                value = self.progress_bar_width or 20,
+                                value_min = 5,
+                                value_max = 60,
+                                value_step = 1,
+                                value_hold_step = 5,
+                                ok_text = _("Set"),
+                                title_text = _("Progress bar width (chars)"),
+                                default_value = 20,
+                                callback = function(spin)
+                                    local n = math.floor(tonumber(spin.value) or 20)
+                                    if n < 5 then n = 5 end
+                                    if n > 60 then n = 60 end
+                                    self.progress_bar_width = n
+                                    self.settings:saveSetting("progress_bar_width", n)
                                     self.settings:flush()
-                                    UIManager:close(dialog)
                                     UIManager:show(InfoMessage:new{
-                                        text = T(_("Reset to: %1"), self.download_dir),
+                                        text = T(_("Progress bar width set to %1"), tostring(n)),
                                         timeout = 2,
                                     })
                                 end,
-                            },
-                            {
-                                text     = _("Save"),
-                                is_enter_default = true,
-                                callback = function()
-                                    local val = dialog:getInputText()
-                                    if val and val ~= "" then
-                                        self.download_dir = val
-                                        self.settings:saveSetting("download_dir", val)
-                                        self.settings:flush()
-                                    end
-                                    UIManager:close(dialog)
+                            }
+                            UIManager:show(widget)
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Short title length: %1"), self.short_title_length)
+                        end,
+                        help_text = _("Maximum title length (in characters) shown in the progress dialog before truncation. Shorter values keep the progress dialog compact. Default: 30"),
+                        keep_menu_open = true,
+                        callback = function()
+                            local SpinWidget = require("ui/widget/spinwidget")
+                            local widget = SpinWidget:new{
+                                text = _("Maximum book title length shown during download progress."),
+                                value = self.short_title_length or 30,
+                                value_min = 5,
+                                value_max = 120,
+                                value_step = 1,
+                                value_hold_step = 10,
+                                ok_text = _("Set"),
+                                title_text = _("Short title length (chars)"),
+                                default_value = 30,
+                                callback = function(spin)
+                                    local n = math.floor(tonumber(spin.value) or 30)
+                                    if n < 5 then n = 5 end
+                                    if n > 120 then n = 120 end
+                                    self.short_title_length = n
+                                    self.settings:saveSetting("short_title_length", n)
+                                    self.settings:flush()
+                                    UIManager:show(InfoMessage:new{
+                                        text = T(_("Short title length set to %1"), tostring(n)),
+                                        timeout = 2,
+                                    })
                                 end,
-                            },
-                        }},
-                    }
-                    UIManager:show(dialog)
-                    dialog:onShowKeyboard()
-                end,
-            },
-            {
-                text_func = function()
-                    return T(_("Minimum free space: %1 MB"), self.min_free_space_mb)
-                end,
-                help_text = _("Minimum free disk space (in MB) required before downloading books. Sync will stop if available space drops below this threshold. Default: 500 MB"),
-                keep_menu_open = true,
-                callback = function()
-                    local dialog
-                    dialog = InputDialog:new{
-                        title   = _("Minimum free space (MB)"),
-                        input   = tostring(self.min_free_space_mb),
-                        input_type = "number",
-                        buttons = {{
-                            {
-                                text     = _("Cancel"),
-                                callback = function() UIManager:close(dialog) end,
-                            },
-                            {
-                                text     = _("Save"),
-                                is_enter_default = true,
-                                callback = function()
-                                    local val = tonumber(dialog:getInputText())
-                                    if val and val >= 0 then
-                                        self.min_free_space_mb = val
-                                        self.settings:saveSetting("min_free_space_mb", val)
-                                        self.settings:flush()
-                                        UIManager:show(InfoMessage:new{
-                                            text = T(_("Minimum free space set to %1 MB"), val),
-                                            timeout = 2,
-                                        })
-                                    end
-                                    UIManager:close(dialog)
-                                end,
-                            },
-                        }},
-                    }
-                    UIManager:show(dialog)
-                    dialog:onShowKeyboard()
-                end,
+                            }
+                            UIManager:show(widget)
+                        end,
+                    },
+                },
             },
         },
         hold_callback = function()

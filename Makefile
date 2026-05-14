@@ -26,4 +26,11 @@ generate_version: ## Generate version file
 	sh ./scripts/generate-version.sh
 
 changelog-pregen: ## Pre-generate changelog (CHG_ARGS=--docs for docs changelog)
+	@if echo "$(CHG_ARGS)" | grep -q -- '--docs'; then \
+		current_branch=$$(git rev-parse --abbrev-ref HEAD 2>/dev/null); \
+		if [ "$$current_branch" != "develop" ]; then \
+			echo "ERROR: --docs can only be used on the 'develop' branch (current: $$current_branch)" >&2; \
+			exit 1; \
+		fi; \
+	fi
 	bash ./scripts/changelog-pregen.sh $(CHG_ARGS)

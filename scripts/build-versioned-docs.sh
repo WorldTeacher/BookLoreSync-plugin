@@ -58,7 +58,7 @@ VERSIONS=()
 
 # Main branch → latest
 if git show-ref --verify refs/remotes/origin/main &>/dev/null 2>&1; then
-    TAG_ON_MAIN=$(git tag --merged origin/main --sort=-version:refname 2>/dev/null | head -1 || true)
+    TAG_ON_MAIN=$(git tag --merged origin/main --sort=-version:refname 2>/dev/null | grep -v '^v' | head -1 || true)
     if [ -n "$TAG_ON_MAIN" ]; then
         # Latest tag on main → use it for the display version (no v prefix)
         DISPLAY="${TAG_ON_MAIN#v}"
@@ -218,8 +218,7 @@ open('$DOCS_DIR/zola.versioned.toml', 'w').write(content)
     # Build with the temporary config
     echo "    Running: zola build ..."
     cd "$DOCS_DIR"
-    if ! zola build \
-        --config zola.versioned.toml \
+    if ! zola --config zola.versioned.toml build \
         --base-url "$version_base_url" \
         --output-dir "$output_dir" 2>&1; then
         echo "  WARNING: zola build failed for $label, continuing"

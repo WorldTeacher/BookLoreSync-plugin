@@ -16,3 +16,15 @@ insert_anchor_links = "left"
 mode = "docs"
 gitlab = "https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin"
 show_theme_toggle = true
+
+# Version selector — shows a dropdown to switch between docs versions.
+# In CI (GitLab Pages deployment), the build script generates a full version
+# list dynamically from git branches (main, develop) and tags.
+# The config below is used for local development via `zola serve` and for
+# merge-request validation builds.
+[extra.versions]
+current = "latest"
+list = [
+    { version = "latest", url = "https://docs.worldteacher.dev/wt-booklore/booklore-koreader-plugin/", label = "latest" },
+    { version = "dev", url = "https://docs.worldteacher.dev/wt-booklore/booklore-koreader-plugin/dev/", label = "dev" },
+]

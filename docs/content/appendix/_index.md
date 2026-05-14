@@ -1,7 +1,6 @@
 +++
 title = "Appendix"
-render = false
-
-[extra]
-hide_from_toc = true
+description = "Supplementary reference information."
+sort_by = "weight"
+template = "section.html"
 +++

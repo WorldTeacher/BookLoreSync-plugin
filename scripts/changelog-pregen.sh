@@ -99,8 +99,9 @@ update_docs_changelog() {
         tag_names+=("$tag")
         tag_versions+=("$normalized_version")
     done < <(
-        git tag --sort=-version:refname \
-            | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $0, v }'
+        git tag --merged HEAD \
+            | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $0, v }' \
+            | sort -t$'\t' -k2,2Vr
     )
 
     if [ "${#tag_names[@]}" -eq 0 ]; then
@@ -115,7 +116,7 @@ update_docs_changelog() {
             printf '# Changelog\n\n'
             printf 'All notable changes to the BookLore Sync plugin are documented here.\n\n'
             printf '%s\n\n' '---'
-            printf '## Unreleased\n\n'
+            printf '## Unreleased (upcoming)\n\n'
             while IFS= read -r -d $'\x1e' entry; do
                 [ -z "$entry" ] && continue
                 entry="${entry#$'\n'}"
@@ -279,7 +280,7 @@ update_docs_changelog() {
             fi
 
             if [ "$IS_UNRELEASED" -eq 1 ]; then
-                printf '## Unreleased\n\n'
+                printf '## Unreleased (upcoming)\n\n'
             else
                 printf '## %s (%s)\n\n' "$next_upcoming_version" "$upcoming_date"
             fi
@@ -478,8 +479,9 @@ if [ "$DOCS_MODE" -eq 1 ]; then
 fi
 
 get_latest_semver_tag() {
-    git tag --sort=-version:refname \
+    git tag --merged HEAD \
         | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $0, v }' \
+        | sort -t$'\t' -k2,2Vr \
         | head -n1 \
         | cut -f1
 }
@@ -665,7 +667,7 @@ fi
 
 {
     if [ "$IS_UNRELEASED" -eq 1 ]; then
-        printf '## Unreleased\n\n'
+        printf '## Unreleased (upcoming)\n\n'
     elif [ -n "$latest_tag" ] && [ -n "$repo_url" ]; then
         printf '## [%s](%s/compare/%s...%s) (%s)\n\n' "$next_version" "$repo_url" "$latest_tag" "$next_version" "$release_date"
     elif [ -n "$latest_tag" ]; then

@@ -99,7 +99,7 @@ update_docs_changelog() {
         tag_names+=("$tag")
         tag_versions+=("$normalized_version")
     done < <(
-        git tag --merged HEAD \
+        git tag \
             | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $0, v }' \
             | sort -t$'\t' -k2,2Vr
     )
@@ -156,8 +156,24 @@ update_docs_changelog() {
         printf 'All notable changes to the BookLore Sync plugin are documented here.\n\n'
         printf '%s\n\n' '---'
 
-        local latest_tag="${tag_names[0]}"
-        local latest_version="${tag_versions[0]}"
+        local latest_tag=""
+        local latest_version=""
+        local up_i
+        for up_i in "${!tag_names[@]}"; do
+            local candidate_tag="${tag_names[$up_i]}"
+            if git merge-base --is-ancestor "$candidate_tag" HEAD 2>/dev/null; then
+                latest_tag="$candidate_tag"
+                latest_version="${tag_versions[$up_i]}"
+                break
+            fi
+        done
+        if [ -z "$latest_tag" ]; then
+            # Fallback: no semver tag on this branch — treat as Unreleased-only
+            # (falls through to the no-tags-found path above, but in practice
+            # this shouldn't be reached since we already handle that case)
+            latest_tag="${tag_names[0]:-}"
+            latest_version="${tag_versions[0]:-}"
+        fi
         local upcoming_date
         upcoming_date="$(date -u +%Y-%m-%d)"
 

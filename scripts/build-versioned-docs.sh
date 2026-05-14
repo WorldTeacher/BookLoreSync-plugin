@@ -58,7 +58,7 @@ VERSIONS=()
 
 # Main branch → latest
 if git show-ref --verify refs/remotes/origin/main &>/dev/null 2>&1; then
-    TAG_ON_MAIN=$(git tag --merged origin/main --sort=-version:refname 2>/dev/null | head -1)
+    TAG_ON_MAIN=$(git tag --merged origin/main --sort=-version:refname 2>/dev/null | head -1 || true)
     if [ -n "$TAG_ON_MAIN" ]; then
         # Latest tag on main → use it for the display version (no v prefix)
         DISPLAY="${TAG_ON_MAIN#v}"

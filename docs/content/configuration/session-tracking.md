@@ -8,7 +8,7 @@ weight = 2
 
 Found at: **Tools → BookLore Sync → What to Sync**
 
-This menu contains four sections: Reading Sessions, Progress Sync, Rating Sync, and Annotations & Bookmarks.
+This menu contains five sections: Reading Sessions, Progress Sync, Rating Sync, Recommendations, and Annotations & Bookmarks.
 
 ---
 
@@ -89,6 +89,27 @@ A 1–10 rating dialog is shown when you close a book that has reached 99% or mo
 Toggle on to also sync the rating to your [Hardcover](https://hardcover.app) account when a session ends. Uses the Hardcover book ID stored in Booklore for the matched book.
 
 Requires **Enable rating sync** to be on. Hardcover account setup (API token and book ID fetch) is covered in [Hardcover](@/configuration/hardcover.md).
+
+---
+
+## Recommendations
+
+### Show recommendations after finishing a book
+
+**Default:** Off
+
+When enabled and you close a book that has reached at least 99% progress, the plugin fetches up to 10 recommendations from your BookLore server and shows them in a selection dialog.
+
+From the list you can:
+- Tap a title to view details (description, series, page count, ISBN, etc.)
+- **Fetch** a recommended book to download it to your device
+- Return to the list or dismiss the dialog
+
+The recommendations dialog appears after a short delay (3 seconds) so any rating dialog from the **Select at complete** rating mode can appear first.
+
+> **Requirement:** BookLore account credentials must be configured and a network connection must be available. Recommendations are fetched live — there is no offline queue for this feature.
+
+See [Recommendations](@/features/recommendations.md) for full details.
 
 ---
 

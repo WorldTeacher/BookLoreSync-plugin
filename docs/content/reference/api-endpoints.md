@@ -161,6 +161,28 @@ Used when resolving a book by numeric ID during manual matching, and when fetchi
 
 ---
 
+### `GET /api/v1/books/<id>/recommendations?limit=N`
+
+Fetches recommended books for a given BookLore book.
+
+**Authentication:** Bearer token
+
+**Path parameter:** `<id>` - the BookLore book ID (integer).
+
+**Query parameter:** `limit` - maximum number of recommendations to return (default: `10`).
+
+**Successful response:** An array of `BookRecommendation` objects, each containing a `book` field with full book metadata (title, authors, description, ISBN, series, publisher, page count, language, etc.) and a `similarityScore` (0–1) indicating match strength. Alternatively, the response may be wrapped in an object (e.g. `{ recommendations: [...] }` or `{ content: [...] }`).
+
+The plugin sorts results by similarity score (highest first), then alphabetically by title.
+
+**On success:** The recommendations list is shown in an interactive dialog. Tapping a title opens a detail view with **Fetch** (download) and **Return to recommendations** options.
+
+**On failure or empty response:** A "No recommendations available" or error message is displayed.
+
+Used by the **Post-Finish Recommendations** feature and the **Get recommendations** file manager action.
+
+---
+
 ## Reading session endpoints
 
 ### `POST /api/v1/reading-sessions`

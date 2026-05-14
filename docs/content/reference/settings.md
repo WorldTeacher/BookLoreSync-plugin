@@ -107,6 +107,14 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 
 ---
 
+## Recommendations settings
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `show_post_rating_recommendations` | boolean | `false` | When enabled, finishing a book (≥99% progress) fetches and shows up to 10 recommendations from the BookLore server. |
+
+---
+
 ## Annotation sync settings
 
 | Key | Type | Default | Description |

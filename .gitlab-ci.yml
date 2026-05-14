@@ -204,6 +204,26 @@ build-koplugin-artifact:
       - bookloresync.koplugin.zip
     expire_in: 10 days
 
+# Pre-generate the changelog with unreleased changes for the develop branch
+# so the changelog can be viewed as a pipeline artifact.
+changelog-pregen:
+  stage: build
+  image: alpine:latest
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"'
+  needs: []
+  before_script:
+    - apk add --no-cache bash git
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+  script:
+    - echo "Generating unreleased changelog..."
+    - bash scripts/changelog-pregen.sh
+  artifacts:
+    name: "changelog-pregen-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - CHANGELOG.pregen.md
+    expire_in: 30 days
+
 zip-koplugin-release:
   stage: publish
   image: registry.gitlab.com/gitlab-org/cli:latest

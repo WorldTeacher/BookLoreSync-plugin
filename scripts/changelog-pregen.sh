@@ -116,7 +116,7 @@ update_docs_changelog() {
             printf '# Changelog\n\n'
             printf 'All notable changes to the BookLore Sync plugin are documented here.\n\n'
             printf '%s\n\n' '---'
-            printf '## Unreleased (upcoming)\n\n'
+            printf '## Unreleased (unknown)\n\n'
             while IFS= read -r -d $'\x1e' entry; do
                 [ -z "$entry" ] && continue
                 entry="${entry#$'\n'}"
@@ -296,7 +296,7 @@ update_docs_changelog() {
             fi
 
             if [ "$IS_UNRELEASED" -eq 1 ]; then
-                printf '## Unreleased (upcoming)\n\n'
+                printf '## Unreleased (unknown)\n\n'
             else
                 printf '## %s (%s)\n\n' "$next_upcoming_version" "$upcoming_date"
             fi
@@ -683,7 +683,7 @@ fi
 
 {
     if [ "$IS_UNRELEASED" -eq 1 ]; then
-        printf '## Unreleased (upcoming)\n\n'
+        printf '## Unreleased (unknown)\n\n'
     elif [ -n "$latest_tag" ] && [ -n "$repo_url" ]; then
         printf '## [%s](%s/compare/%s...%s) (%s)\n\n' "$next_version" "$repo_url" "$latest_tag" "$next_version" "$release_date"
     elif [ -n "$latest_tag" ]; then

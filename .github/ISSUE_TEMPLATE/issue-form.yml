@@ -1,0 +1,30 @@
+name: Bug Report / Feature Request
+description: File an issue for the plugin
+labels: [triage]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe the issue or feature request in detail. Include steps to reproduce, expected vs actual behavior, and environment details (KOReader version, device, plugin version).
+      placeholder: |
+        Steps to reproduce:
+        1. Open an EPUB
+        2. ...
+        3. ...
+
+        Expected: ...
+        Actual: ...
+
+        Environment:
+        - KOReader version:
+        - Device:
+        - Plugin version:
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        @WorldTeacher

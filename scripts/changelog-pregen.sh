@@ -54,6 +54,16 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     exit 1
 fi
 
+# Detect if this is a develop / unreleased build.
+# On the develop branch, the changelog header uses "Unreleased" instead of a
+# predicted version number.
+IS_UNRELEASED=0
+if [ -n "${CI_COMMIT_BRANCH:-}" ] && [ "$CI_COMMIT_BRANCH" = "develop" ]; then
+    IS_UNRELEASED=1
+elif [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "develop" ]; then
+    IS_UNRELEASED=1
+fi
+
 update_docs_changelog() {
     local -a tag_names=()
     local -a tag_versions=()
@@ -615,7 +625,9 @@ if [ "$has_release_commit" -eq 0 ]; then
 fi
 
 {
-    if [ -n "$latest_tag" ] && [ -n "$repo_url" ]; then
+    if [ "$IS_UNRELEASED" -eq 1 ]; then
+        printf '## Unreleased\n\n'
+    elif [ -n "$latest_tag" ] && [ -n "$repo_url" ]; then
         printf '## [%s](%s/compare/%s...%s) (%s)\n\n' "$next_version" "$repo_url" "$latest_tag" "$next_version" "$release_date"
     elif [ -n "$latest_tag" ]; then
         printf '## %s (%s)\n\n' "$next_version" "$release_date"
@@ -660,7 +672,9 @@ fi
 
 echo "Created $OUTPUT_FILE"
 
-if [ -n "$latest_tag" ]; then
+if [ "$IS_UNRELEASED" -eq 1 ]; then
+    echo "Unreleased changes (no version predicted)"
+elif [ -n "$latest_tag" ]; then
     echo "Based on commits in range: $latest_tag..HEAD"
 else
     echo "Based on all commits (no existing tag found)"

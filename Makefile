@@ -36,11 +36,11 @@ changelog-pregen: ## Pre-generate changelog (CHG_ARGS=--docs for docs changelog)
 	bash ./scripts/changelog-pregen.sh $(CHG_ARGS)
 
 plugin: ## Build plugin archive (strips comments, matches CI pipeline)
+	@echo "=== Generating version information ==="
+	@bash scripts/generate-version.sh
 	@echo "=== Copying plugin directory ==="
 	@rm -rf /tmp/bookloresync-build
 	@cp -a bookloresync.koplugin /tmp/bookloresync-build
-	@echo "=== Generating version information ==="
-	@bash scripts/generate-version.sh
 	@echo "=== Compiling gettext translations ==="
 	@find /tmp/bookloresync-build/locale -name "*.po" | while read po; do \
 		mo="$${po%.po}.mo"; \
@@ -48,7 +48,7 @@ plugin: ## Build plugin archive (strips comments, matches CI pipeline)
 		msgfmt "$$po" -o "$$mo" 2>/dev/null || true; \
 	done
 	@echo "=== Stripping comments from Lua sources ==="
-	@bash scripts/strip-lua-comments.sh --dir /tmp/bookloresync-build
+	@python3 scripts/luastripper.py --remove-empty-lines --in-place /tmp/bookloresync-build
 	@echo "=== Creating plugin archive ==="
 	@cd /tmp && zip -r "$(CURDIR)/bookloresync.koplugin.zip" bookloresync-build/ -x "*.git*" "*.zip" "bookloresync-build/logs/*" "bookloresync-build/hardcover.token" "*.po" "*.pot" "*.po~"
 	@echo "=== Cleaning up ==="

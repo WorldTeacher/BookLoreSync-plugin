@@ -176,7 +176,7 @@ build-koplugin-artifact:
     - cd "$CI_PROJECT_DIR"
 
     - echo "Stripping comments from Lua sources"
-    - bash scripts/strip-lua-comments.sh --dir bookloresync.koplugin
+    - python3 scripts/luastripper.py --remove-empty-lines --in-place bookloresync.koplugin
 
     - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip" "*.po" "*.pot" "*.po~"
 
@@ -233,7 +233,7 @@ zip-koplugin-release:
     - cd "$CI_PROJECT_DIR"
 
     - echo "Stripping comments from Lua sources"
-    - bash scripts/strip-lua-comments.sh --dir bookloresync.koplugin
+    - python3 scripts/luastripper.py --remove-empty-lines --in-place bookloresync.koplugin
 
     - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip" "*.po" "*.pot" "*.po~"
 

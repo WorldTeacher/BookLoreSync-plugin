@@ -99,14 +99,50 @@ update_docs_changelog() {
         tag_names+=("$tag")
         tag_versions+=("$normalized_version")
     done < <(
-        git for-each-ref --format='%(refname:short)' refs/tags \
-            | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $0, v }' \
-            | sort -t $'\t' -k2,2Vr
+        git tag --sort=-version:refname \
+            | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $0, v }'
     )
 
     if [ "${#tag_names[@]}" -eq 0 ]; then
-        echo "ERROR: no semantic version tags found" >&2
-        exit 1
+        # No semantic version tags found — on develop before first release
+        # or on a repo without tags.  Generate an Unreleased-only changelog.
+        {
+            printf '+++\n'
+            printf 'title = "Changelog"\n'
+            printf 'description = "Full version history for the BookLore Sync plugin."\n'
+            printf 'weight = 4\n'
+            printf '+++\n\n'
+            printf '# Changelog\n\n'
+            printf 'All notable changes to the BookLore Sync plugin are documented here.\n\n'
+            printf '%s\n\n' '---'
+            printf '## Unreleased\n\n'
+            while IFS= read -r -d $'\x1e' entry; do
+                [ -z "$entry" ] && continue
+                entry="${entry#$'\n'}"
+                local subject="${entry%%$'\x1f'*}"
+                local body="${entry#*$'\x1f'}"
+                local subject_text="$subject"
+                if [[ "$subject" =~ ^([a-zA-Z]+)(\(([[:alnum:]_./-]+)\))?(!)?:[[:space:]](.+)$ ]]; then
+                    local commit_type="${BASH_REMATCH[1],,}"
+                    local scope="${BASH_REMATCH[3]:-}"
+                    local description="${BASH_REMATCH[5]}"
+                    if [ -n "$scope" ]; then
+                        subject_text="**${scope}:** ${description}"
+                    else
+                        subject_text="$description"
+                    fi
+                    case "$commit_type" in
+                        feat)   printf '* %s\n' "$subject_text" ;;
+                        fix)    printf '* %s\n' "$subject_text" ;;
+                        perf)   printf '* %s\n' "$subject_text" ;;
+                        *)      ;;
+                    esac
+                fi
+            done < <(git log --no-merges --reverse --pretty=tformat:'%s%x1f%b%x1e' HEAD)
+            printf '\n'
+        } > "$DOCS_CHANGELOG_FILE"
+        echo "Updated $DOCS_CHANGELOG_FILE (Unreleased only, no tags found)"
+        return
     fi
 
     {
@@ -438,9 +474,8 @@ if [ "$DOCS_MODE" -eq 1 ]; then
 fi
 
 get_latest_semver_tag() {
-    git for-each-ref --format='%(refname:short)' refs/tags \
+    git tag --sort=-version:refname \
         | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $0, v }' \
-        | sort -t $'\t' -k2,2Vr \
         | head -n1 \
         | cut -f1
 }

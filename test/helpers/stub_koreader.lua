@@ -22,6 +22,7 @@ local STUB_KEYS = {
   "booklore_updater",
   "booklore_file_logger",
   "booklore_metadata_extractor",
+  "booklore_util",
   "booklore_progress_sync",
   "booklore_pending_sync",
   "booklore_shelf_sync",

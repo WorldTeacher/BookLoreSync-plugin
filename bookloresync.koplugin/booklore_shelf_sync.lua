@@ -9,19 +9,12 @@ function M.new(deps)
     local json = deps.json
     local ffiutil = deps.ffiutil
     local strbuf = deps.strbuf
+    local util = require("booklore_util")
 
     local module = {}
 
     local function joinDownloadPath(dir, name)
-        local base = tostring(dir or "")
-        if base == "/" then
-            return "/" .. name
-        end
-        base = base:gsub("/+$", "")
-        if base == "" then
-            return "/" .. name
-        end
-        return base .. "/" .. name
+        return util.joinDownloadPath(dir, name)
     end
 
     function module.detectDefaultDownloadDir(_self)
@@ -51,91 +44,12 @@ function M.new(deps)
     end
 
     function module.generateFilename(_self, book)
-        local extension = (book.extension or "epub"):lower()
-        local ext_suffix = "." .. extension
-        local id_tag = "_" .. tostring(book.id)
-        local title = book.title
-        if title and title ~= "" then
-            local safe = title
-                :gsub('[/\\\\:*?"<>|]', "")
-                :gsub("%s+", " ")
-                :gsub("^%s+", "")
-                :gsub("%s+$", "")
-            if safe ~= "" then
-                local max_stem = 150 - #id_tag - #ext_suffix
-                if #safe > max_stem then
-                    safe = safe:sub(1, max_stem):gsub("%s+$", "")
-                end
-                return safe .. id_tag .. ext_suffix
-            end
-        end
-        return "BookID_" .. tostring(book.id) .. ext_suffix
+        return util.generateFilename(book)
     end
 
     -- Hash a file the same way BookloreSync:calculateBookHash does.
-    local function calcHash(file_path)
-        local file = io.open(file_path, "rb")
-        if not file then return nil end
-        local md5        = require("ffi/sha2").md5
-        local base       = 1024
-        local block_size = 1024
-        local buffer     = {}
-        local file_size  = file:seek("end")
-        file:seek("set", 0)
-        for i = -1, 10 do
-            local position = bit.lshift(base, 2 * i)
-            if position >= file_size then break end
-            file:seek("set", position)
-            local chunk = file:read(block_size)
-            if chunk then table.insert(buffer, chunk) end
-        end
-        file:close()
-        return md5(table.concat(buffer))
-    end
-
     -- Filename generation — same logic as module.generateFilename but inline
     -- to avoid self-dependency (used inside the download loop).
-    local function genFilename(book, use_original_filename)
-        local extension = book.extension:lower()
-        local ext_suffix = "." .. extension
-        local id_tag     = "_" .. tostring(book.id)
-
-        if use_original_filename and book.original_filename and book.original_filename ~= "" then
-            local orig_stem = book.original_filename:match("^(.+)%.[^.]+$")
-                           or book.original_filename
-            local safe = orig_stem
-                :gsub('[/\\\\:*?"<>|]', "")
-                :gsub("%s+", " ")
-                :gsub("^%s+", "")
-                :gsub("%s+$", "")
-            if safe ~= "" then
-                local max_stem = 150 - #id_tag - #ext_suffix
-                if #safe > max_stem then
-                    safe = safe:sub(1, max_stem):gsub("%s+$", "")
-                end
-                return safe .. id_tag .. ext_suffix
-            end
-        end
-
-        local title = book.title
-        if title and title ~= "" then
-            local safe = title
-                :gsub('[/\\\\:*?"<>|]', "")
-                :gsub("%s+", " ")
-                :gsub("^%s+", "")
-                :gsub("%s+$", "")
-            if safe ~= "" then
-                local max_stem = 150 - #id_tag - #ext_suffix
-                if #safe > max_stem then
-                    safe = safe:sub(1, max_stem):gsub("%s+$", "")
-                end
-                return safe .. id_tag .. ext_suffix
-            end
-        end
-        return "BookID_" .. tostring(book.id) .. ext_suffix
-    end
-
-
     function module.syncFromBookloreShelf(self, silent, on_complete)
     if silent == nil then silent = (self.ui and self.ui.document and true or false) end
 
@@ -578,7 +492,7 @@ function M.new(deps)
                 result.failed = result.failed + 1
                 -- skip
             else
-                local filename = genFilename(book, use_original_filename)
+                local filename = util.generateFilename(book, use_original_filename)
                 local filepath = joinDownloadPath(download_dir, filename)
 
                 -- Check existing file on disk
@@ -593,7 +507,7 @@ function M.new(deps)
                         self:logInfo("BookloreSync: skip (already cached):", filepath)
                     else
                         -- File exists but not cached — compute hash
-                        local hash = calcHash(filepath)
+                        local hash = util.calculateBookHash(filepath)
                         self.db:saveBookCache(filepath, hash, book_id, book.title, book.author)
                         result.skipped = result.skipped + 1
                         self:logInfo("BookloreSync: cached existing file:", filepath)
@@ -621,7 +535,7 @@ function M.new(deps)
                             if cached then
                                 result.skipped = result.skipped + 1
                             else
-                                local hash = calcHash(filepath)
+                                local hash = util.calculateBookHash(filepath)
                                 self.db:saveBookCache(filepath, hash, book_id, book.title, book.author)
                                 result.skipped = result.skipped + 1
                             end
@@ -947,7 +861,7 @@ function M.new(deps)
                 end
 
                 if dl_ok then
-                    local hash = calcHash(cap_filepath) or ""
+                    local hash = util.calculateBookHash(cap_filepath) or ""
                     local book = cap_book or {}
                     local metadata = type(book.metadata) == "table" and book.metadata or {}
                     local isbn10 = book.isbn10 or metadata.isbn10 or nil

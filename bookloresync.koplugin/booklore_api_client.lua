@@ -14,6 +14,7 @@ local https = require("ssl.https")
 local ltn12 = require("ltn12")
 local json = require("json")
 local md5 = require("ffi/sha2").md5
+local util = require("booklore_util")
 
 local APIClient = {
     server_url = nil,
@@ -49,38 +50,22 @@ end
 
 ---APIClient:logInfo.
 function APIClient:logInfo(...)
-    if self.plugin then
-        self.plugin:logInfo(...)
-    else
-        logger.info(...)
-    end
+    util.logInfo(self.plugin, ...)
 end
 
 ---APIClient:logWarn.
 function APIClient:logWarn(...)
-    if self.plugin then
-        self.plugin:logWarn(...)
-        return
-    end
-    logger.warn(...)
+    util.logWarn(self.plugin, ...)
 end
 
 ---APIClient:logErr.
 function APIClient:logErr(...)
-    if self.plugin then
-        self.plugin:logErr(...)
-        return
-    end
-    logger.err(...)
+    util.logErr(self.plugin, ...)
 end
 
 ---APIClient:logDbg.
 function APIClient:logDbg(...)
-    if self.plugin then
-        self.plugin:logDbg(...)
-    else
-        logger.dbg(...)
-    end
+    util.logDbg(self.plugin, ...)
 end
 
 --[[--

@@ -174,7 +174,11 @@ build-koplugin-artifact:
 
     - echo "Creating koplugin archive"
     - cd "$CI_PROJECT_DIR"
-    - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip"
+
+    - echo "Stripping comments from Lua sources"
+    - bash scripts/strip-lua-comments.sh --dir bookloresync.koplugin
+
+    - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip" "*.po" "*.pot" "*.po~"
 
     - ls -lah "$CI_PROJECT_DIR/bookloresync.koplugin.zip"
 
@@ -227,7 +231,11 @@ zip-koplugin-release:
 
     - echo "Creating koplugin release archive"
     - cd "$CI_PROJECT_DIR"
-    - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip"
+
+    - echo "Stripping comments from Lua sources"
+    - bash scripts/strip-lua-comments.sh --dir bookloresync.koplugin
+
+    - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip" "*.po" "*.pot" "*.po~"
 
     - ls -lah "$CI_PROJECT_DIR/bookloresync.koplugin.zip"
 

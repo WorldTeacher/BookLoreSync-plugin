@@ -7,10 +7,10 @@ authentication, book search, and rating submission.
 @module koplugin.BookloreSync.hardcover_api_client
 --]]--
 
-local logger = require("logger")
 local https  = require("ssl.https")
 local ltn12  = require("ltn12")
 local json   = require("json")
+local util   = require("booklore_util")
 
 local HARDCOVER_API_URL = "https://api.hardcover.app/v1/graphql"
 
@@ -30,20 +30,12 @@ end
 -- Minimal log helpers so callers don't need to pass a logger in.
 ---HardcoverClient:logInfo.
 function HardcoverClient:logInfo(...)
-    if self.plugin then
-        self.plugin:logInfo(...)
-    else
-        logger.info(...)
-    end
+    util.logInfo(self.plugin, ...)
 end
 
 ---HardcoverClient:logWarn.
 function HardcoverClient:logWarn(...)
-    if self.plugin then
-        self.plugin:logWarn(...)
-    else
-        logger.warn(...)
-    end
+    util.logWarn(self.plugin, ...)
 end
 
 --[[--

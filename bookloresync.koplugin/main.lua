@@ -1961,61 +1961,18 @@ end
 
 -- ── Highlights & Notes Sync ────────────────────────────────────────────────
 
--- Map KOReader color names → Booklore's 5 supported highlight hex colors.
--- Booklore supports: yellow (#FFC107), green (#4ADE80), cyan (#38BDF8),
---                    pink (#F472B6), orange (#FB923C).
--- Unsupported KOReader colors are mapped to the nearest hue:
---   red → orange (warm), purple → pink (violet/magenta), blue → cyan (cool),
---   gray → yellow (neutral fallback), white → yellow (neutral fallback)
-local KOREADER_COLOR_MAP = {
-    yellow  = "#FFC107",
-    green   = "#4ADE80",
-    cyan    = "#38BDF8",
-    pink    = "#F472B6",
-    orange  = "#FB923C",
-    red     = "#FB923C",   -- → orange (nearest warm hue)
-    purple  = "#F472B6",   -- → pink (nearest violet/magenta hue)
-    blue    = "#38BDF8",   -- → cyan (nearest cool hue)
-    gray    = "#FFC107",   -- → yellow (neutral fallback)
-    white   = "#FFC107",   -- → yellow (neutral fallback)
-}
-
--- Map KOReader drawer names → Booklore style strings
-local KOREADER_STYLE_MAP = {
-    lighten    = "highlight",
-    underscore = "underline",
-    strikeout  = "strikethrough",
-    invert     = "highlight",     -- closest available
-}
-
---[[--
-Convert a KOReader color name to a hex string.
-Falls back to yellow (#FFC107) for unknown names.
-
-@param color_name string  KOReader color name (e.g. "yellow")
-@return string hex color (e.g. "#FFC107")
---]]
 ---BookloreSync:colorToHex.
 function BookloreSync:colorToHex(color_name)
-    if not color_name then return "#FFC107" end
-    return KOREADER_COLOR_MAP[color_name:lower()] or "#FFC107"
+    return require("booklore_util").colorToHex(color_name)
 end
 
---[[--
-Convert a KOReader drawer name to a Booklore style string.
-Falls back to "highlight" for unknown names.
-
-@param drawer string  KOReader drawer name (e.g. "lighten")
-@return string Booklore style
---]]
 ---BookloreSync:drawerToStyle.
 function BookloreSync:drawerToStyle(drawer)
-    if not drawer then return "highlight" end
-    return KOREADER_STYLE_MAP[drawer:lower()] or "highlight"
+    return require("booklore_util").drawerToStyle(drawer)
 end
 
 function BookloreSync:getTimingNowMs()
-    return nowMs()
+    return require("booklore_util").getTimingNowMs()
 end
 
 function BookloreSync:getDocumentFingerprint(_document, file_path)
@@ -2261,22 +2218,9 @@ function BookloreSync:computeBookmarksFingerprint(bookmarks)
     return self:hashSyncTokens(tokens)
 end
 
-function BookloreSync:parseKoreaderDateTime(datetime_str)
-    if not datetime_str or datetime_str == "" then
-        return nil
-    end
-    local y, m, d, hh, mm, ss = tostring(datetime_str):match("^(%d%d%d%d)%-(%d%d)%-(%d%d) (%d%d):(%d%d):(%d%d)$")
-    if not y then
-        return nil
-    end
-    return os.time({
-        year = tonumber(y),
-        month = tonumber(m),
-        day = tonumber(d),
-        hour = tonumber(hh),
-        min = tonumber(mm),
-        sec = tonumber(ss),
-    })
+---BookloreSync:_parseISO8601.
+function BookloreSync:_parseISO8601(iso_string)
+    return require("booklore_util").parseISO8601(iso_string)
 end
 
 function BookloreSync:getEntryChangedAt(entry)
@@ -6200,23 +6144,11 @@ function BookloreSync:getCurrentProgress()
     return progress, location
 end
 
---[[--
-Round KOReader sync percentage ratio to 4 decimals.
-
-@param value number 0..1
-@return number rounded ratio
---]]
 ---BookloreSync:roundKoreaderSyncPercentage.
 function BookloreSync:roundKoreaderSyncPercentage(value)
     return ProgressSyncModule.roundKoreaderSyncPercentage(self, value)
 end
 
---[[--
-Round a numeric value to the nearest integer.
-
-@param value any
-@return number|nil
---]]
 ---BookloreSync:roundToInt.
 function BookloreSync:roundToInt(value)
     return ProgressSyncModule.roundToInt(self, value)
@@ -6355,55 +6287,21 @@ function BookloreSync:getServerPagecountForSession(session)
     return nil
 end
 
---[[--
-Get KOReader sync progress payload fields.
-
-Uses KOReader's own progress primitives (paging/rolling getLastProgress and
-getLastPercent) so `progress` is the canonical spline/xpointer for reflowable
-documents, while `percentage` is a 0..1 ratio rounded to four decimals.
-
-@return number percentage_ratio (0..1, rounded to 4 decimals)
-@return string progress_value (page/xpointer as expected by KOReader sync API)
-@return string location_value (legacy mirror kept for local DB compatibility)
---]]
 ---BookloreSync:getCurrentKoreaderSyncProgress.
 function BookloreSync:getCurrentKoreaderSyncProgress()
     return ProgressSyncModule.getCurrentKoreaderSyncProgress(self)
 end
 
---[[--
-Get the current document hash for KOReader progress sync.
-
-Uses current_session hash when available, then DB cache, then computes hash.
-
-@return string|nil
---]]
 ---BookloreSync:getCurrentDocumentHashForProgress.
 function BookloreSync:getCurrentDocumentHashForProgress()
     return ProgressSyncModule.getCurrentDocumentHashForProgress(self)
 end
 
---[[--
-Build a KOReader progress payload for the currently open document.
-
-@param timestamp number|nil unix timestamp; defaults to os.time()
-@return table|nil payload
-@return string|nil error_message
---]]
 ---BookloreSync:buildCurrentKoreaderProgressPayload.
 function BookloreSync:buildCurrentKoreaderProgressPayload(timestamp)
     return ProgressSyncModule.buildCurrentKoreaderProgressPayload(self, timestamp)
 end
 
---[[--
-Push KOReader progress directly to Booklore without queueing.
-
-On success, this also updates synced_koreader_progress locally.
-
-@param payload table
-@return boolean ok
-@return string|table|nil reason
---]]
 ---BookloreSync:pushCurrentKoreaderProgressDirect.
 function BookloreSync:pushCurrentKoreaderProgressDirect(payload)
     return ProgressSyncModule.pushCurrentKoreaderProgressDirect(self, payload)
@@ -7022,47 +6920,7 @@ Uses the same algorithm as Booklore's FileFingerprint:
 --]]
 ---BookloreSync:calculateBookHash.
 function BookloreSync:calculateBookHash(file_path)
-    self:logInfo("BookloreSync: Calculating MD5 hash for:", file_path)
-    
-    local file = io.open(file_path, "rb")
-    if not file then
-        self:logWarn("BookloreSync: Could not open file for hashing")
-        return nil
-    end
-    
-    local md5 = require("ffi/sha2").md5
-    local base = 1024
-    local block_size = 1024
-    local buffer = {}
-    
-    local file_size = file:seek("end")
-    file:seek("set", 0)
-    
-    self:logInfo("BookloreSync: File size:", file_size)
-    
-    -- Sample file at specific positions (matching Booklore's FileFingerprint algorithm)
-    for i = -1, 10 do
-        local position = bit.lshift(base, 2 * i)
-        
-        if position >= file_size then
-            break
-        end
-        
-        file:seek("set", position)
-        local chunk = file:read(block_size)
-        if chunk then
-            table.insert(buffer, chunk)
-        end
-    end
-    
-    file:close()
-    
-    -- Calculate MD5 of all sampled chunks
-    local combined_data = table.concat(buffer)
-    local hash = md5(combined_data)
-    
-    self:logInfo("BookloreSync: Hash calculated:", hash)
-    return hash
+    return require("booklore_util").calculateBookHash(file_path)
 end
 
 --[[--
@@ -9035,159 +8893,46 @@ function BookloreSync:_detectDefaultDownloadDir()
     return ShelfSyncModule.detectDefaultDownloadDir(self)
 end
 
---[[--
-Download all books from the configured Booklore shelf into `download_dir`.
-
-This is the "pull" side of two-way shelf sync.  On the "push" side, books
-deleted locally are removed from the shelf via notifyBookloreOnDeletion.
-
-New books on the shelf are downloaded; books already present locally are
-skipped (their cache entry is created/updated if missing).
-
-When `delete_removed_shelf_books` is true, local files in `download_dir`
-whose BookID is no longer on the shelf are deleted.
-
-@param silent boolean  Suppress UI messages (default: auto from context)
-@param on_complete function|nil  Optional callback(success, message)
---]]
 ---BookloreSync:syncFromBookloreShelf.
 function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     return ShelfSyncModule.syncFromBookloreShelf(self, silent, on_complete)
 end
 
---[[--
-Generate a filename for a shelf book download.
-
-Uses the book title as the filename, sanitized of filesystem-unsafe characters
-and truncated so the full filename (including extension) is at most 150 chars.
-Falls back to "BookID_{id}.{extension}" when no usable title is available.
-
-@param book table  Book object from Booklore API
-@return string
---]]
 ---BookloreSync:_generateFilename.
 function BookloreSync:_generateFilename(book)
     return ShelfSyncModule.generateFilename(self, book)
 end
 
---[[--
-Schedule the post-finish recommendations dialog for a book.
-
-Called from onCloseDocument when the book was finished. Non-blocking:
-fetches recommendations and shows the selection UI after a short delay so
-that any rating dialog opened by the close path appears first.
-
-@param book_id number  Booklore book ID of the just-finished book
-@return boolean        true when scheduled
---]]
 ---BookloreSync:scheduleRecommendationsAfterFinish.
 function BookloreSync:scheduleRecommendationsAfterFinish(book_id)
     return RecommendationsModule.scheduleAfterFinish(self, book_id)
 end
 
---[[--
-Show the recommendations dialog immediately for a book.
-
-Useful for manual testing or for surfacing recommendations on demand.
-
-@param book_id number  Booklore book ID
---]]
 ---BookloreSync:showRecommendationsForBook.
 function BookloreSync:showRecommendationsForBook(book_id)
     return RecommendationsModule.show(self, book_id, true)
 end
 
---[[--
-Called from the patched FileManager.deleteFile / deleteSelectedFiles so we can
-read the file contents (to compute the hash) while the file still exists.
-
-Supported formats: EPUB, PDF, CBZ, CBR.  Other formats are ignored.
-
-@param filepath string  Full path to the file about to be deleted
-@return hash string|nil, stem string|nil, book_id number|nil
---]]
 ---BookloreSync:preDeleteHook.
 function BookloreSync:preDeleteHook(filepath)
     return DeletionModule.preDeleteHook(self, filepath)
 end
 
---[[--
-Notify Booklore that a book has been deleted locally.
-
-Unassigns the book from the configured Booklore shelf via
-POST /api/v1/books/shelves with shelvesToUnassign=[shelf_id].
-The book record itself is NOT deleted from Booklore.
-
-If offline or the server is unreachable the operation is queued in
-pending_deletions and retried on the next syncPendingSessions() run.
-
-All errors are swallowed so a network failure never surfaces as a user-
-visible error during file deletion.
-
-@param hash           string      MD5 hash of the deleted file
-@param stem           string      Filename stem (used for title-based fallback search)
-@param cached_book_id number|nil  Booklore book ID if known
-@param from_queue     boolean     True when called from syncPendingDeletions (skip re-queue on failure)
---]]
 ---BookloreSync:notifyBookloreOnDeletion.
 function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_queue)
     return DeletionModule.notifyBookloreOnDeletion(self, hash, stem, cached_book_id, from_queue)
 end
 
---[[--
-Retry all pending shelf-unassignments from the pending_deletions queue.
-
-Called automatically during syncPendingSessions() as Phase 2c.
-Each entry unassigns the book from the configured shelf via
-POST /api/v1/books/shelves.  The book record itself is NOT deleted.
-Entries retried more than 10 times are dropped.
-
-@param silent boolean  Suppress UI feedback (default false)
-@return integer synced_count, integer failed_count
---]]
 ---BookloreSync:syncPendingDeletions.
 function BookloreSync:syncPendingDeletions(silent)
     return PendingSyncModule.syncPendingDeletions(self, silent)
 end
 
---[[--
-Retry all ratings that are sitting in the pending_ratings queue, and
-process any deferred rating prompts whose book_id has now been resolved.
-
-Called automatically at the start of every syncPendingSessions() run so
-that a failed or deferred rating is uploaded on the very next successful
-connection, regardless of whether the trigger was a session, a note, or
-an explicit sync.
-
-@param silent boolean  Suppress UI feedback (default false)
-@return integer synced_count, integer failed_count
---]]
 ---BookloreSync:syncPendingRatings.
 function BookloreSync:syncPendingRatings(silent)
     return PendingSyncModule.syncPendingRatings(self, silent)
 end
 
---[[--
-Retry all annotations that previously failed to upload.
-
-Reads every row from `pending_annotations`, attempts to re-submit each one
-using the stored JSON payload, and removes successfully-uploaded rows.
-Rows that fail again have their retry_count incremented and remain queued.
-
-This is called automatically at the start of every syncPendingSessions() run
-and can also be triggered directly (e.g. from a manual sync button).
-
-Note: CFI-dependent annotations (highlights and in-book notes) require a
-CFI string in the payload.  If the stored payload contains pos0/pos1 fields
-but no pre-computed CFI, this path cannot rebuild the CFI because the EPUB
-document is no longer open.  Those rows will remain pending until the book is
-opened again and syncHighlightsAndNotes() succeeds.
-
-@param silent         boolean   If true, do not show UI messages
-@param book_cache_id  integer|nil  If set, only process rows for this book_cache_id
-@return integer synced_count
-@return integer failed_count
---]]
 ---BookloreSync:syncPendingAnnotations.
 function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
     return PendingSyncModule.syncPendingAnnotations(self, silent, book_cache_id)
@@ -10090,10 +9835,7 @@ end
 
 ---BookloreSync:_unixToISO8601.
 function BookloreSync:_unixToISO8601(timestamp)
-    local date_table = os.date("!*t", timestamp)
-    return string.format("%04d-%02d-%02dT%02d:%02d:%02dZ",
-        date_table.year, date_table.month, date_table.day,
-        date_table.hour, date_table.min, date_table.sec)
+    return require("booklore_util").unixToISO8601(timestamp)
 end
 
 ---BookloreSync:_parseISO8601.

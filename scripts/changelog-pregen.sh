@@ -100,8 +100,9 @@ update_docs_changelog() {
         tag_versions+=("$normalized_version")
     done < <(
         git tag \
-            | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $0, v }' \
-            | sort -t$'\t' -k2,2Vr
+            | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) { split(v, a, "."); printf "%010d%010d%010d\t%s\t%s\n", a[1], a[2], a[3], $0, v } }' \
+            | sort -k1,1rn \
+            | cut -f2,3
     )
 
     if [ "${#tag_names[@]}" -eq 0 ]; then
@@ -496,10 +497,10 @@ fi
 
 get_latest_semver_tag() {
     git tag --merged HEAD \
-        | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $0, v }' \
-        | sort -t$'\t' -k2,2Vr \
+        | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) { split(v, a, "."); printf "%010d%010d%010d\t%s\n", a[1], a[2], a[3], $0 } }' \
+        | sort -k1,1rn \
         | head -n1 \
-        | cut -f1
+        | cut -f2
 }
 
 latest_tag="$(get_latest_semver_tag || true)"

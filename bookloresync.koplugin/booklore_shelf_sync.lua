@@ -44,7 +44,8 @@ function M.new(deps)
     end
 
     function module.generateFilename(_self, book)
-        return util.generateFilename(book)
+        local use_original = _self and _self.shelf_use_original_filename
+        return util.generateFilename(book, use_original)
     end
 
     -- Hash a file the same way BookloreSync:calculateBookHash does.
@@ -822,7 +823,7 @@ function M.new(deps)
             result.failed = result.failed + 1
             local err_msg = "Failed to fork subprocess for bookId=" .. tostring(cap_book_id)
             result.errors[#result.errors + 1] = err_msg
-            self:logWarn("BookloreSync:", err_msg)
+            self:logErr("BookloreSync: failed to fork subprocess for bookId=", tostring(cap_book_id))
             UIManager:scheduleIn(0.5, startNextDownload)
             return
         end
@@ -861,36 +862,47 @@ function M.new(deps)
                 end
 
                 if dl_ok then
-                    local hash = util.calculateBookHash(cap_filepath) or ""
-                    local book = cap_book or {}
-                    local metadata = type(book.metadata) == "table" and book.metadata or {}
-                    local isbn10 = book.isbn10 or metadata.isbn10 or nil
-                    local isbn13 = book.isbn13 or metadata.isbn13 or nil
-                    local hardcover_id = tonumber(book.hardcover_id)
-                        or tonumber(book.hardcoverId)
-                        or tonumber(metadata.hardcoverBookId)
-                        or tonumber(metadata.hardcoverId)
-                        or tonumber(metadata.hardcover_id)
-                    local pagecount = tonumber(book.pagecount)
-                        or tonumber(book.server_pagecount)
-                        or tonumber(metadata.pagecount)
-                        or tonumber(metadata.pageCount)
+                    -- If cancelled, don't count or persist this download.
+                    if self._shelf_sync_cancelled then
+                        self:logInfo("BookloreSync: downloaded bookId=" .. tostring(cap_book_id) .. " but sync was cancelled")
+                    else
+                        local hash_raw = util.calculateBookHash(cap_filepath)
+                        local hash = hash_raw or ""
+                        if not hash_raw then
+                            self:logWarn("BookloreSync: could not compute hash for", cap_filepath)
+                        end
+                        local book = cap_book or {}
+                        local metadata = type(book.metadata) == "table" and book.metadata or {}
+                        local isbn10 = book.isbn10 or metadata.isbn10 or nil
+                        local isbn13 = book.isbn13 or metadata.isbn13 or nil
+                        local hardcover_id = tonumber(book.hardcover_id)
+                            or tonumber(book.hardcoverId)
+                            or tonumber(metadata.hardcoverBookId)
+                            or tonumber(metadata.hardcoverId)
+                            or tonumber(metadata.hardcover_id)
+                        local pagecount = tonumber(book.pagecount)
+                            or tonumber(book.server_pagecount)
+                            or tonumber(metadata.pagecount)
+                            or tonumber(metadata.pageCount)
 
-                    table.insert(new_books, {
-                        filepath = cap_filepath,
-                        hash     = hash,
-                        book_id  = cap_book_id,
-                        title    = book.title,
-                        author   = book.author or book.authors,
-                        isbn10   = isbn10,
-                        isbn13   = isbn13,
-                        hardcover_id = hardcover_id,
-                        server_pagecount = pagecount,
-                    })
-                    result.synced = result.synced + 1
-                    self:logInfo("BookloreSync: downloaded bookId=" .. tostring(cap_book_id) .. " to " .. cap_filepath)
+                        table.insert(new_books, {
+                            filepath = cap_filepath,
+                            hash     = hash,
+                            book_id  = cap_book_id,
+                            title    = book.title,
+                            author   = book.author or book.authors,
+                            isbn10   = isbn10,
+                            isbn13   = isbn13,
+                            hardcover_id = hardcover_id,
+                            server_pagecount = pagecount,
+                        })
+                        result.synced = result.synced + 1
+                        self:logInfo("BookloreSync: downloaded bookId=" .. tostring(cap_book_id) .. " to " .. cap_filepath)
+                    end
                 else
-                    result.failed = result.failed + 1
+                    if not self._shelf_sync_cancelled then
+                        result.failed = result.failed + 1
+                    end
                     local err_msg = "Failed to download bookId=" .. tostring(cap_book_id) .. ": " .. tostring(dl_err)
                     result.errors[#result.errors + 1] = err_msg
                     self:logWarn("BookloreSync:", err_msg)

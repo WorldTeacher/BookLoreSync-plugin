@@ -30,6 +30,9 @@ function M.new(deps)
     local ConfirmBox = deps.ConfirmBox
     local ButtonDialog = deps.ButtonDialog
     local Menu = deps.Menu
+    local ffiutil = deps.ffiutil
+    local strbuf  = deps.strbuf
+    local util = require("booklore_util")
 
     local module = {}
 
@@ -192,7 +195,10 @@ function M.new(deps)
     -- Called from main.lua's onCloseDocument when conditions match.
     function module.scheduleAfterFinish(self, book_id, delay_seconds)
         if not book_id then return false end
-        if not self.show_post_rating_recommendations then return false end
+        if not self.show_post_rating_recommendations then
+            self:logInfo("BookloreSync: Recommendations not scheduled — post-finish recommendations toggle is disabled")
+            return false
+        end
 
         local delay = tonumber(delay_seconds) or DEFAULT_DELAY_S
         if delay < 0 then delay = 0 end
@@ -335,7 +341,8 @@ function M.new(deps)
         UIManager:show(details_dialog)
     end
 
-    -- Download a recommended book, save metadata, then prompt to read it.
+    -- Download a recommended book in a subprocess so the UI thread stays
+    -- responsive on e-ink, with cancel support.
     function module.fetchBook(self, source_book_id, results, book)
         if not book or not book.id then
             UIManager:show(InfoMessage:new{
@@ -390,23 +397,28 @@ function M.new(deps)
             end
         end
 
-        local function joinDownloadPath(dir, name)
-            local base = tostring(dir or "")
-            if base == "/" then
-                return "/" .. name
+        local filename = self:_generateFilename(book)
+        local filepath = util.joinDownloadPath(download_dir, filename)
+
+        -- Check if the book is already cached in the database (downloaded
+        -- via a previous shelf sync under a different filename, for example).
+        if self.db then
+            local cached = self.db:getBookByBookId(tonumber(book.id))
+            if cached and cached.file_path then
+                local cached_mode = lfs.attributes(cached.file_path, "mode")
+                if cached_mode == "file" then
+                    local exists_here = lfs.attributes(filepath, "mode") == "file"
+                    if not exists_here then
+                        self:logInfo("BookloreSync: Recommendation already in cache at:", cached.file_path)
+                        module.promptOpen(self, cached.file_path, book)
+                        return
+                    end
+                end
             end
-            base = base:gsub("/+$", "")
-            if base == "" then
-                return "/" .. name
-            end
-            return base .. "/" .. name
         end
 
-        local filename = self:_generateFilename(book)
-        local filepath = joinDownloadPath(download_dir, filename)
-
-        -- If the file already exists, skip the download and go straight to
-        -- the open prompt.
+        -- If the file already exists at the computed path, skip the download
+        -- and go straight to the open prompt.
         if lfs.attributes(filepath, "mode") == "file" then
             self:logInfo("BookloreSync: Recommendation already on disk:", filepath)
             module.persistMetadata(self, filepath, book)
@@ -415,26 +427,107 @@ function M.new(deps)
         end
 
         self:refreshEffectiveServerUrl()
-        self.api:init(self.server_url, self.username, self.password, self.db)
 
-        local downloading = InfoMessage:new{
-            text = T(_("Downloading: %1"), book.title or tostring(book.id)),
+        -- Capture plain-value closures for the subprocess fork.
+        local cap_book_id   = tonumber(book.id)
+        local cap_filepath  = filepath
+        local cap_username  = self.booklore_username
+        local cap_password  = self.booklore_password
+        local cap_server    = self.server_url
+        local cap_db_name   = self.db and self.db.db_path:match("([^/]+)$") or "booklore-sync.sqlite"
+
+        -- Show a progress dialog with a Cancel button.
+        local cancelled = false
+        local progress_dialog
+        progress_dialog = ButtonDialog:new{
+            dismissable = false,
+            title = T(_("Downloading recommendation…\n\n%1"), book.title or tostring(book.id)),
+            buttons = {{ {
+                text = _("Cancel"),
+                callback = function()
+                    cancelled = true
+                    pcall(UIManager.close, UIManager, progress_dialog)
+                    progress_dialog = nil
+                end,
+            } }},
         }
-        UIManager:show(downloading)
+        UIManager:show(progress_dialog)
 
-        -- Yield to the UI loop so the message paints before the blocking
-        -- HTTP call below runs.
-        UIManager:scheduleIn(0.1, function()
-            local ok, err = self.api:downloadBook(
-                tonumber(book.id), filepath,
-                self.booklore_username, self.booklore_password
-            )
-            UIManager:close(downloading)
+        -- Launch the subprocess: it creates its own DB/API instances and
+        -- downloads the book, then writes the result (ok, err) via FD.
+        local pid, read_fd = ffiutil.runInSubProcess(function(_, write_fd)
+            local ChildDB  = require("booklore_database")
+            local ChildAPI = require("booklore_api_client")
+            local child_logger = {
+                logInfo = function() end, logWarn = function() end,
+                logErr  = function() end, logDbg  = function() end,
+            }
+            local child_db = ChildDB:new(child_logger)
+            child_db:init(cap_db_name)
+            local child_api = ChildAPI:new(child_logger)
+            child_api:init(cap_server, cap_username, cap_password, child_db)
+            local ok, err = child_api:downloadBook(cap_book_id, cap_filepath, cap_username, cap_password)
+            child_db:close()
+            local results = strbuf.encode({ ok = ok, err = err })
+            ffiutil.writeToFD(write_fd, results, true)
+        end, true)
 
-            if not ok then
-                self:logWarn("BookloreSync: Recommendation download failed:", tostring(err))
+        if not pid then
+            -- Fork failed — clean up the progress dialog and report the error.
+            if progress_dialog then
+                UIManager:close(progress_dialog)
+                progress_dialog = nil
+            end
+            self:logErr("BookloreSync: Failed to fork download subprocess for recommendation")
+            UIManager:show(InfoMessage:new{
+                text = _("Could not start the download process"),
+                timeout = 3,
+            })
+            return
+        end
+
+        -- Poll subprocess completion.  Between polls the event loop runs so
+        -- e-ink rendering (button presses, Cancel callback) stays alive.
+        local function pollSubprocess()
+            if cancelled then
+                -- User cancelled — check if the subprocess is done yet.
+                if not ffiutil.isSubProcessDone(pid) then
+                    -- Poll again; the dialog is already closed.
+                    UIManager:scheduleIn(0.3, pollSubprocess)
+                    return
+                end
+                -- Subprocess finished after cancel — discard the result.
+                ffiutil.readAllFromFD(read_fd)
+                os.remove(cap_filepath)
+                self:logInfo("BookloreSync: Recommendation download cancelled for", cap_book_id)
+                return
+            end
+
+            if not ffiutil.isSubProcessDone(pid) then
+                -- Still downloading — poll again.
+                UIManager:scheduleIn(0.3, pollSubprocess)
+                return
+            end
+
+            -- Subprocess finished — read result.
+            if progress_dialog then
+                UIManager:close(progress_dialog)
+                progress_dialog = nil
+            end
+
+            local result_str = ffiutil.readAllFromFD(read_fd)
+            local ok_dec, decoded = pcall(strbuf.decode, result_str)
+            local dl_ok = false
+            local dl_err = nil
+            if ok_dec and type(decoded) == "table" then
+                dl_ok = decoded.ok
+                dl_err = decoded.err
+            end
+
+            if not dl_ok then
+                self:logWarn("BookloreSync: Recommendation download failed:", tostring(dl_err))
                 UIManager:show(ConfirmBox:new{
-                    text = T(_("Download failed: %1\n\nReturn to recommendations?"), tostring(err or _("Unknown error"))),
+                    text = T(_("Download failed: %1\n\nReturn to recommendations?"), tostring(dl_err or _("Unknown error"))),
                     ok_text = _("Yes"),
                     cancel_text = _("Close"),
                     ok_callback = function()
@@ -446,7 +539,11 @@ function M.new(deps)
 
             module.persistMetadata(self, filepath, book)
             module.promptOpen(self, filepath, book)
-        end)
+        end
+
+        -- Start polling after a short delay so the progress dialog renders
+        -- before the first poll fires.
+        UIManager:scheduleIn(0.3, pollSubprocess)
     end
 
     -- Compute the file hash and persist book_cache + metadata for the new file.

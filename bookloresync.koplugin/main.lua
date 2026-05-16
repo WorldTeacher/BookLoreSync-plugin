@@ -232,6 +232,8 @@ local RecommendationsModule = RecommendationsModuleFactory.new({
     ConfirmBox = ConfirmBox,
     ButtonDialog = ButtonDialog,
     Menu = Menu,
+    ffiutil = ffiutil,
+    strbuf = strbuf,
 })
 
 --[[--

@@ -15,15 +15,19 @@ local Util = {}
 -- ═══════════════════════════════════════════════════════════════════════════
 
 --[[--
-Redact URLs from a log message for secure logging.
+Redact URLs from log messages for secure logging.
 
-@param message The log message that may contain URLs
-@return string Message with URLs replaced by [REDACTED_URL]
+All arguments are joined with spaces before redaction.
+
+@param ... Values to log (each is tostring'd and joined)
+@return string Joined message with URLs replaced by [REDACTED_URL]
 --]]
-function Util.redactUrls(message)
-    if type(message) ~= "string" then
-        message = tostring(message)
+function Util.redactUrls(...)
+    local parts = {}
+    for i = 1, select("#", ...) do
+        parts[i] = tostring(select(i, ...))
     end
+    local message = table.concat(parts, " ")
     return message:gsub("https?://[^%s]+", "[REDACTED_URL]")
 end
 

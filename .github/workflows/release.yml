@@ -33,6 +33,10 @@ jobs:
             msgfmt "$po" -o "$mo"
           done
 
+      - name: Strip comments from Lua sources
+        run: |
+          python3 scripts/luastripper.py --remove-empty-lines --in-place bookloresync.koplugin
+
       - name: Create plugin archive
         run: |
           zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip"

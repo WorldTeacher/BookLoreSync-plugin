@@ -2229,11 +2229,11 @@ function BookloreSync:getEntryChangedAt(entry)
     if not entry then
         return nil
     end
-    local updated_at = self:parseKoreaderDateTime(entry.datetime_updated)
+    local updated_at = self:_parseISO8601(entry.datetime_updated)
     if updated_at then
         return updated_at
     end
-    return self:parseKoreaderDateTime(entry.datetime)
+    return self:_parseISO8601(entry.datetime)
 end
 
 function BookloreSync:filterEntriesBySessionStart(entries, session_start_time)
@@ -6215,10 +6215,23 @@ function BookloreSync:normalizeSessionLocationWithFallback(location, koreader_pa
 end
 
 --[[--
-Resolve server pagecount for a pending session.
+Resolve the server page count for a pending session.
 
-@param session table
-@return number|nil
+Resolution order (first non-nil wins):
+
+1. **Session field** — checks `session.server_pagecount` / `session.serverPagecount`
+   directly. Returns immediately without DB or API calls.
+2. **In-memory cache** — checks the per-session LRU cache
+   (`self._server_pagecount_session_cache`) keyed by hash or book ID.
+3. **Database** — looks up the book in `book_cache` by hash then by book_id,
+   returning the stored `server_pagecount`.
+4. **API refresh** — calls `self:getBookIdByHash()` which fetches fresh metadata
+   from the server. Only attempted when step 3 returns nothing useful.
+5. **Negative cache** — stores `false` in the session cache so repeated calls
+   for the same book skip steps 2-4 on subsequent lookups.
+
+@param session table  Pending-session row with bookHash / bookId fields
+@return number|nil    Server page count, or nil if unresolvable
 --]]
 ---BookloreSync:getServerPagecountForSession.
 function BookloreSync:getServerPagecountForSession(session)
@@ -9838,27 +9851,6 @@ end
 ---BookloreSync:_unixToISO8601.
 function BookloreSync:_unixToISO8601(timestamp)
     return require("booklore_util").unixToISO8601(timestamp)
-end
-
----BookloreSync:_parseISO8601.
-function BookloreSync:_parseISO8601(iso_string)
-    if not iso_string then return nil end
-    
-    local year, month, day, hour, min, sec = iso_string:match(
-        "(%d+)-(%d+)-(%d+)%a(%d+):(%d+):(%d+)"
-    )
-    
-    if not year then return nil end
-    
-    return os.time({
-        year = tonumber(year),
-        month = tonumber(month),
-        day = tonumber(day),
-        hour = tonumber(hour),
-        min = tonumber(min),
-        sec = tonumber(sec),
-        isdst = false,
-    })
 end
 
 ---BookloreSync:_detectBookType.

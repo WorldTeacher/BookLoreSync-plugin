@@ -48,9 +48,8 @@ function M.new(deps)
         return util.generateFilename(book, use_original)
     end
 
-    -- Hash a file the same way BookloreSync:calculateBookHash does.
-    -- Filename generation — same logic as module.generateFilename but inline
-    -- to avoid self-dependency (used inside the download loop).
+    -- generateFilename delegates to util.generateFilename (shared logic).
+    -- File hashing uses util.calculateBookHash inside the download loop.
     function module.syncFromBookloreShelf(self, silent, on_complete)
     if silent == nil then silent = (self.ui and self.ui.document and true or false) end
 
@@ -136,6 +135,8 @@ function M.new(deps)
             local filled = math.floor(pct / 100 * bar_w)
             if filled > bar_w then filled = bar_w end
             lines[#lines + 1] = ""
+            -- Block characters: █ (U+2588) = filled, ░ (U+2591) = empty.
+            -- Rendered as UTF-8 byte sequences for KOReader's e-ink font stack.
             local bar = string.rep("\226\150\136", filled) .. string.rep("\226\150\145", bar_w - filled)
             lines[#lines + 1] = bar
             lines[#lines + 1] = ""

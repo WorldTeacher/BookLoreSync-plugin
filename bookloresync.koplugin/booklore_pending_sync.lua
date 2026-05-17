@@ -199,6 +199,18 @@ function module.syncPendingDeletions(self, silent)
         return 0, 0
     end
 
+    local function scheduleDeferredRecommendations(book_id)
+        if not book_id or not self.show_post_rating_recommendations then
+            return
+        end
+        local ok_rec, rec_err = pcall(function()
+            self:scheduleRecommendationsAfterFinish(book_id)
+        end)
+        if not ok_rec then
+            self:logWarn("BookloreSync: Failed to schedule deferred recommendations:", tostring(rec_err))
+        end
+    end
+
     -- ── Phase 1: deferred rating prompts ─────────────────────────────────
     -- These are books that were completed while the book_id was unknown.
     -- Now that the cache may have been updated, check if a book_id exists.
@@ -221,6 +233,7 @@ function module.syncPendingDeletions(self, silent)
                     -- Flag cleared below: rating was either sent or queued for retry
                     -- in pending_ratings, so the deferred-prompt entry is no longer needed.
                     self.db:setPendingRatingPrompt(row.book_cache_id, false)
+                    scheduleDeferredRecommendations(row.book_id)
                 else
                     self:logWarn("BookloreSync: Deferred rating skipped - Booklore credentials not configured")
                     -- Leave flag set; will retry on the next sync once credentials are added.
@@ -236,6 +249,7 @@ function module.syncPendingDeletions(self, silent)
                     -- onto the pending_ratings row and clear the deferred flag.
                     self.db:addPendingRating(row.book_cache_id, row.book_id, meta.rating)
                     self.db:setPendingRatingPrompt(row.book_cache_id, false)
+                    scheduleDeferredRecommendations(row.book_id)
                     self:logInfo("BookloreSync: Stamped book_id", row.book_id,
                                  "onto pending rating for book_cache_id:", row.book_cache_id)
                 else
@@ -245,6 +259,7 @@ function module.syncPendingDeletions(self, silent)
                     local file_path = row.file_path
                     local book_id   = row.book_id
                     self.db:setPendingRatingPrompt(row.book_cache_id, false)
+                    scheduleDeferredRecommendations(book_id)
                     UIManager:scheduleIn(2, function()
                         self:showRatingDialog(file_path, book_id)
                     end)

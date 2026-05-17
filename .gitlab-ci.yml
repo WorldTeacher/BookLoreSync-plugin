@@ -3,7 +3,7 @@ stages:
   - test
   - publish
   - production
-
+  - github-mirror
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -22,22 +22,53 @@ include:
       - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
         when: always
       - when: never
-  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola@1.1"
-    inputs:
-      lint-disabled: true
-      lychee-enabled: false
-      workspace-dir: "docs"
-    rules:
-      - changes:
-          - docs/**/*
-  # Zola template (GitLab Pages variant)
-  - component: "$CI_SERVER_FQDN/to-be-continuous/zola/gitlab-ci-zola-pages@1.1"
-    rules:
-      - changes:
-          - docs/**/*
   - component: "$CI_SERVER_FQDN/to-be-continuous/gitlab-butler/gitlab-ci-butler@1.4"
     inputs:
       pipelines-delete-older-than: "30"
+
+# Build and publish versioned documentation to GitLab Pages
+# Replaces the to-be-continuous zola-pages component with a custom job
+# that builds all documentation versions (main->latest, develop->dev, tags)
+pages:
+  stage: publish
+  image: alpine:latest
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
+      changes:
+        [
+          "docs/**",
+          "scripts/build-versioned-docs.sh",
+          "scripts/changelog-pregen.sh",
+          ".gitlab-ci.yml",
+        ]
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"'
+      changes:
+        [
+          "docs/**",
+          "scripts/build-versioned-docs.sh",
+          "scripts/changelog-pregen.sh",
+          ".gitlab-ci.yml",
+        ]
+    - if: "$CI_COMMIT_TAG"
+  before_script:
+    - apk add --no-cache bash curl git
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+    # Install Zola static site generator (download to file to avoid
+    # pipe truncation with busybox curl | tar on Alpine)
+    - ZOLA_VERSION="0.22.1"
+    - echo "Installing Zola v${ZOLA_VERSION}..."
+    - curl -sL -o /tmp/zola.tar.gz "https://github.com/getzola/zola/releases/download/v${ZOLA_VERSION}/zola-v${ZOLA_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+    - tar xzf /tmp/zola.tar.gz -C /usr/local/bin
+    - rm /tmp/zola.tar.gz
+    - zola --version
+  script:
+    - git submodule update --init --recursive
+    - mkdir -p public
+    - bash scripts/build-versioned-docs.sh
+  artifacts:
+    paths:
+      - public
+  publish: public
 
 # The Butler image ships with a binary entrypoint. Clear it so GitLab Runner
 # can execute the generated shell wrapper instead of appending it as CLI args
@@ -126,8 +157,15 @@ build-koplugin-artifact:
   rules:
     # Build plugin artifacts only for the develop branch
     - if: '$CI_COMMIT_BRANCH == "develop"'
+      changes:
+        [
+          "bookloresync.koplugin/**",
+          "scripts/generate-version.sh",
+          "scripts/luastripper.py",
+          ".gitlab-ci.yml",
+        ]
   before_script:
-    - apk add --no-cache zip bash git gettext curl
+    - apk add --no-cache zip bash git gettext curl python3
   script:
     - echo "Generating version information"
     - export PLUGIN_VERSION="dev-build-$(date -u +%Y%m%d%H%M%S)"
@@ -143,7 +181,11 @@ build-koplugin-artifact:
 
     - echo "Creating koplugin archive"
     - cd "$CI_PROJECT_DIR"
-    - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip"
+
+    - echo "Stripping comments from Lua sources"
+    - python3 scripts/luastripper.py --remove-empty-lines --in-place bookloresync.koplugin
+
+    - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip" "*.po" "*.pot" "*.po~"
 
     - ls -lah "$CI_PROJECT_DIR/bookloresync.koplugin.zip"
 
@@ -175,7 +217,7 @@ zip-koplugin-release:
   rules:
     - if: "$CI_COMMIT_TAG"
   before_script:
-    - apk add --no-cache zip bash git gettext
+    - apk add --no-cache zip bash git gettext python3
     # Authenticate glab against your self-hosted instance
     - glab auth login
       --hostname "$CI_SERVER_HOST"
@@ -196,7 +238,11 @@ zip-koplugin-release:
 
     - echo "Creating koplugin release archive"
     - cd "$CI_PROJECT_DIR"
-    - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip"
+
+    - echo "Stripping comments from Lua sources"
+    - python3 scripts/luastripper.py --remove-empty-lines --in-place bookloresync.koplugin
+
+    - zip -r bookloresync.koplugin.zip bookloresync.koplugin/ -x "*.git*" "*.zip" "*.po" "*.pot" "*.po~"
 
     - ls -lah "$CI_PROJECT_DIR/bookloresync.koplugin.zip"
 
@@ -221,3 +267,22 @@ zip-koplugin-release:
     paths:
       - bookloresync.koplugin.zip
       - CHANGELOG.md
+# Push the tag created by semantic-release to GitHub.
+# Manual step so you can verify before mirroring.
+# Requires GITHUB_TOKEN set as a GitLab CI/CD variable
+# (GitHub classic PAT with `repo` scope, or fine-grained token with push access).
+push-tag-to-github:
+  stage: github-mirror
+  image: alpine:latest
+  rules:
+    - if: "$CI_COMMIT_TAG"
+      when: manual
+      allow_failure: true
+    - when: never
+  before_script:
+    - apk add --no-cache git
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+  script:
+    - echo "Pushing tag $CI_COMMIT_TAG to GitHub..."
+    - git push "https://x-access-token:${GITHUB_TOKEN}@github.com/WorldTeacher/BookLoreSync-plugin.git" "$CI_COMMIT_TAG"
+    - echo "Tag $CI_COMMIT_TAG pushed to GitHub successfully."

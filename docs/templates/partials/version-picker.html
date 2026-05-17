@@ -1,0 +1,38 @@
+{# Version Picker Dropdown (docs mode only) — project override removes hardcoded "v" prefix #}
+{% if config.extra.versions %}
+{% set current_version = config.extra.versions.current | default(value="latest") %}
+
+<div class="version-picker">
+    <button class="version-picker__button" aria-haspopup="listbox" aria-expanded="false">
+        <span>{{ current_version }}</span>
+        {% for v in config.extra.versions.list %}
+        {% if v.version == current_version and v.label is defined %}
+        <span class="version-picker__badge">{{ v.label }}</span>
+        {% endif %}
+        {% endfor %}
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m6 9 6 6 6-6"/>
+        </svg>
+    </button>
+
+    <div class="version-picker__dropdown" role="listbox">
+        {% for v in config.extra.versions.list %}
+        <a href="{{ v.url | safe }}" class="version-picker__item {% if v.version == current_version %}active{% endif %}" role="option">
+            {{ v.version }}
+            {% if v.label is defined and v.label %}
+            <span class="version-picker__badge">{{ v.label }}</span>
+            {% endif %}
+        </a>
+        {% endfor %}
+        <hr class="version-picker__divider">
+        <a href="{{ get_url(path='appendix/versioning/') | safe }}" class="version-picker__item version-picker__item--link">
+            All versions
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                <polyline points="15 3 21 3 21 9"/>
+                <line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+        </a>
+    </div>
+</div>
+{% endif %}

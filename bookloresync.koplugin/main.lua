@@ -36,6 +36,7 @@ local PendingSyncModuleFactory = require("booklore_pending_sync")
 local MatchingModuleFactory = require("booklore_matching_module")
 local DeletionModuleFactory = require("booklore_deletion_module")
 local MenuActionsModuleFactory = require("booklore_menu_actions")
+local RecommendationsModuleFactory = require("booklore_recommendations")
 local ok_branding, Branding = pcall(require, "booklore_branding")
 if not ok_branding or type(Branding) ~= "table" then
     Branding = {
@@ -175,7 +176,6 @@ local ShelfSyncModule = ShelfSyncModuleFactory.new({
     InfoMessage = InfoMessage,
     ButtonDialog = ButtonDialog,
     json = json,
-    Trapper = Trapper,
     ffiutil = ffiutil,
     strbuf = strbuf,
 })
@@ -222,6 +222,18 @@ local MenuActionsModule = MenuActionsModuleFactory.new({
     _ = _,
     FileManager = FileManager,
     UIManager = UIManager,
+})
+
+local RecommendationsModule = RecommendationsModuleFactory.new({
+    _ = _,
+    T = T,
+    UIManager = UIManager,
+    InfoMessage = InfoMessage,
+    ConfirmBox = ConfirmBox,
+    ButtonDialog = ButtonDialog,
+    Menu = Menu,
+    ffiutil = ffiutil,
+    strbuf = strbuf,
 })
 
 --[[--
@@ -837,6 +849,14 @@ function BookloreSync:init()
     if self.min_free_space_mb == nil then
         self.min_free_space_mb = 500  -- Default: 500MB minimum free space
     end
+    self.progress_bar_width = self.settings:readSetting("progress_bar_width")
+    if self.progress_bar_width == nil then
+        self.progress_bar_width = 20  -- Default: 20 characters wide
+    end
+    self.short_title_length = self.settings:readSetting("short_title_length")
+    if self.short_title_length == nil then
+        self.short_title_length = 30  -- Default: 30 characters before truncation
+    end
 
     -- Resume/wake-sync state (not persisted - reset each session)
     self.last_auto_sync_time  = 0     -- unix timestamp of last auto-sync (cooldown guard)
@@ -890,6 +910,14 @@ function BookloreSync:init()
     self.enable_spine_context_cache = self.settings:readSetting("enable_spine_context_cache")
     if self.enable_spine_context_cache == nil then
         self.enable_spine_context_cache = true
+    end
+
+    -- Post-finish recommendations: when enabled, after the user finishes a
+    -- book and returns to the file browser, fetch and display a small dialog
+    -- of recommended books retrieved from /api/v1/books/{id}/recommendations.
+    self.show_post_rating_recommendations = self.settings:readSetting("show_post_rating_recommendations")
+    if self.show_post_rating_recommendations == nil then
+        self.show_post_rating_recommendations = false
     end
 
     self.epub_context_cache = nil
@@ -1935,61 +1963,18 @@ end
 
 -- ── Highlights & Notes Sync ────────────────────────────────────────────────
 
--- Map KOReader color names → Booklore's 5 supported highlight hex colors.
--- Booklore supports: yellow (#FFC107), green (#4ADE80), cyan (#38BDF8),
---                    pink (#F472B6), orange (#FB923C).
--- Unsupported KOReader colors are mapped to the nearest hue:
---   red → orange (warm), purple → pink (violet/magenta), blue → cyan (cool),
---   gray → yellow (neutral fallback), white → yellow (neutral fallback)
-local KOREADER_COLOR_MAP = {
-    yellow  = "#FFC107",
-    green   = "#4ADE80",
-    cyan    = "#38BDF8",
-    pink    = "#F472B6",
-    orange  = "#FB923C",
-    red     = "#FB923C",   -- → orange (nearest warm hue)
-    purple  = "#F472B6",   -- → pink (nearest violet/magenta hue)
-    blue    = "#38BDF8",   -- → cyan (nearest cool hue)
-    gray    = "#FFC107",   -- → yellow (neutral fallback)
-    white   = "#FFC107",   -- → yellow (neutral fallback)
-}
-
--- Map KOReader drawer names → Booklore style strings
-local KOREADER_STYLE_MAP = {
-    lighten    = "highlight",
-    underscore = "underline",
-    strikeout  = "strikethrough",
-    invert     = "highlight",     -- closest available
-}
-
---[[--
-Convert a KOReader color name to a hex string.
-Falls back to yellow (#FFC107) for unknown names.
-
-@param color_name string  KOReader color name (e.g. "yellow")
-@return string hex color (e.g. "#FFC107")
---]]
 ---BookloreSync:colorToHex.
 function BookloreSync:colorToHex(color_name)
-    if not color_name then return "#FFC107" end
-    return KOREADER_COLOR_MAP[color_name:lower()] or "#FFC107"
+    return require("booklore_util").colorToHex(color_name)
 end
 
---[[--
-Convert a KOReader drawer name to a Booklore style string.
-Falls back to "highlight" for unknown names.
-
-@param drawer string  KOReader drawer name (e.g. "lighten")
-@return string Booklore style
---]]
 ---BookloreSync:drawerToStyle.
 function BookloreSync:drawerToStyle(drawer)
-    if not drawer then return "highlight" end
-    return KOREADER_STYLE_MAP[drawer:lower()] or "highlight"
+    return require("booklore_util").drawerToStyle(drawer)
 end
 
 function BookloreSync:getTimingNowMs()
-    return nowMs()
+    return require("booklore_util").getTimingNowMs()
 end
 
 function BookloreSync:getDocumentFingerprint(_document, file_path)
@@ -2235,33 +2220,20 @@ function BookloreSync:computeBookmarksFingerprint(bookmarks)
     return self:hashSyncTokens(tokens)
 end
 
-function BookloreSync:parseKoreaderDateTime(datetime_str)
-    if not datetime_str or datetime_str == "" then
-        return nil
-    end
-    local y, m, d, hh, mm, ss = tostring(datetime_str):match("^(%d%d%d%d)%-(%d%d)%-(%d%d) (%d%d):(%d%d):(%d%d)$")
-    if not y then
-        return nil
-    end
-    return os.time({
-        year = tonumber(y),
-        month = tonumber(m),
-        day = tonumber(d),
-        hour = tonumber(hh),
-        min = tonumber(mm),
-        sec = tonumber(ss),
-    })
+---BookloreSync:_parseISO8601.
+function BookloreSync:_parseISO8601(iso_string)
+    return require("booklore_util").parseISO8601(iso_string)
 end
 
 function BookloreSync:getEntryChangedAt(entry)
     if not entry then
         return nil
     end
-    local updated_at = self:parseKoreaderDateTime(entry.datetime_updated)
+    local updated_at = self:_parseISO8601(entry.datetime_updated)
     if updated_at then
         return updated_at
     end
-    return self:parseKoreaderDateTime(entry.datetime)
+    return self:_parseISO8601(entry.datetime)
 end
 
 function BookloreSync:filterEntriesBySessionStart(entries, session_start_time)
@@ -4055,6 +4027,43 @@ function BookloreSync:_fileDialogApplyReadingStatus(file_path, status, label)
 end
 
 --[[--
+File manager long-press: fetch and show recommendations for a matched book.
+
+@param file_path string  Absolute path to the book file
+--]]
+---BookloreSync:fileDialogGetRecommendations.
+function BookloreSync:fileDialogGetRecommendations(file_path)
+    if not self.db then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: database not initialised") })
+        return
+    end
+
+    local username, password = self:_refreshCredentials()
+    if username == "" or password == "" then
+        UIManager:show(InfoMessage:new{ text = _("Booklore: credentials not configured") })
+        return
+    end
+
+    local book = self.db:getBookByFilePath(file_path)
+    if not book then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book not found in local database.\nOpen the book first to register it."),
+        })
+        return
+    end
+
+    local book_id = tonumber(book.book_id)
+    if not book_id then
+        UIManager:show(InfoMessage:new{
+            text = _("Booklore: book is not yet matched to Booklore.\nUse \"Match Book\" first."),
+        })
+        return
+    end
+
+    self:showRecommendationsForBook(book_id)
+end
+
+--[[--
 Toggle tracking for a book from the file manager long-press menu.
 
 When tracking is disabled the book's cache row is updated immediately
@@ -4942,6 +4951,32 @@ function BookloreSync:addToMainMenu(menu_items)
         end,
     }
 
+    local recommendations_menu = {
+        text = _("Recommendations"),
+        help_text = _("Show recommended books after you finish reading. When enabled, finishing a book opens a dialog of similar titles fetched from Booklore so you can preview details and download a new book."),
+        sub_item_table = {
+            {
+                text = _("Show recommendations after finishing a book"),
+                help_text = _("After you finish a book and return to the file browser, fetch up to 10 recommendations for that book and show a selection dialog. Tap a book to view details, then choose Fetch to download it. Rating is optional."),
+                checked_func = function()
+                    return self.show_post_rating_recommendations
+                end,
+                callback = function()
+                    self.show_post_rating_recommendations = not self.show_post_rating_recommendations
+                    self.settings:saveSetting("show_post_rating_recommendations", self.show_post_rating_recommendations)
+                    self.settings:flush()
+                    UIManager:show(InfoMessage:new{
+                        text = self.show_post_rating_recommendations
+                            and _("Post-finish recommendations enabled")
+                            or _("Post-finish recommendations disabled"),
+                        timeout = 2,
+                    })
+                end,
+                keep_menu_open = true,
+            },
+        },
+    }
+
     local what_to_sync_menu = {
         text = _("What to Sync"),
         sub_item_table = {
@@ -4949,6 +4984,7 @@ function BookloreSync:addToMainMenu(menu_items)
             progress_sync_menu,
             Settings:buildRatingMenu(self),
             annotations_and_bookmarks_menu,
+            recommendations_menu,
             {
                 text = "────────────────",
                 enabled = false,
@@ -4984,79 +5020,85 @@ function BookloreSync:addToMainMenu(menu_items)
                 end,
             },
             {
-                text = _("Auto-sync shelf on wake"),
-                help_text = _("Automatically pull the Booklore shelf 15 seconds after the device wakes from suspend, once WiFi is connected."),
-                checked_func = function()
-                    return self.auto_sync_shelf_on_resume
-                end,
-                callback = function()
-                    self.auto_sync_shelf_on_resume = not self.auto_sync_shelf_on_resume
-                    self.settings:saveSetting("auto_sync_shelf_on_resume", self.auto_sync_shelf_on_resume)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.auto_sync_shelf_on_resume
-                            and _("Auto-sync shelf on wake enabled")
-                            or  _("Auto-sync shelf on wake disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("Delete removed shelf books"),
-                help_text = _("When syncing, delete local files (in the download directory) whose BookID is no longer on the Booklore shelf. Disabled by default for safety."),
-                checked_func = function()
-                    return self.delete_removed_shelf_books
-                end,
-                callback = function()
-                    self.delete_removed_shelf_books = not self.delete_removed_shelf_books
-                    self.settings:saveSetting("delete_removed_shelf_books", self.delete_removed_shelf_books)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.delete_removed_shelf_books
-                            and _("Delete removed shelf books enabled - local files not on shelf will be removed during sync")
-                            or  _("Delete removed shelf books disabled"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("Use original server filename"),
-                help_text = _("Save downloaded books using the original filename from the Booklore server instead of deriving the name from the book title."),
-                checked_func = function()
-                    return self.shelf_use_original_filename
-                end,
-                callback = function()
-                    self.shelf_use_original_filename = not self.shelf_use_original_filename
-                    self.settings:saveSetting("shelf_use_original_filename", self.shelf_use_original_filename)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.shelf_use_original_filename
-                            and _("Will use original server filename when downloading")
-                            or  _("Will use book title as filename when downloading"),
-                        timeout = 2,
-                    })
-                end,
-            },
-            {
-                text = _("Also delete sidecar (.sdr) on removal"),
-                help_text = _("When a shelf book is deleted during sync, also delete its KOReader sidecar directory (.sdr folder containing reading progress, highlights, etc.). Only applies when 'Delete removed shelf books' is also enabled. Disabled by default."),
-                enabled_func = function()
-                    return self.delete_removed_shelf_books
-                end,
-                checked_func = function()
-                    return self.delete_sdr_on_book_delete
-                end,
-                callback = function()
-                    self.delete_sdr_on_book_delete = not self.delete_sdr_on_book_delete
-                    self.settings:saveSetting("delete_sdr_on_book_delete", self.delete_sdr_on_book_delete)
-                    self.settings:flush()
-                    UIManager:show(InfoMessage:new{
-                        text = self.delete_sdr_on_book_delete
-                            and _("Sidecar (.sdr) deletion enabled")
-                            or  _("Sidecar (.sdr) deletion disabled"),
-                        timeout = 2,
-                    })
-                end,
+                text = _("Sync Behavior"),
+                help_text = _("Configure auto-sync, file deletion, and naming behavior for shelf sync."),
+                sub_item_table = {
+                    {
+                        text = _("Auto-sync shelf on wake"),
+                        help_text = _("Automatically pull the Booklore shelf 15 seconds after the device wakes from suspend, once WiFi is connected."),
+                        checked_func = function()
+                            return self.auto_sync_shelf_on_resume
+                        end,
+                        callback = function()
+                            self.auto_sync_shelf_on_resume = not self.auto_sync_shelf_on_resume
+                            self.settings:saveSetting("auto_sync_shelf_on_resume", self.auto_sync_shelf_on_resume)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.auto_sync_shelf_on_resume
+                                    and _("Auto-sync shelf on wake enabled")
+                                    or  _("Auto-sync shelf on wake disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                    {
+                        text = _("Delete removed shelf books"),
+                        help_text = _("When syncing, delete local files (in the download directory) whose BookID is no longer on the Booklore shelf. Disabled by default for safety."),
+                        checked_func = function()
+                            return self.delete_removed_shelf_books
+                        end,
+                        callback = function()
+                            self.delete_removed_shelf_books = not self.delete_removed_shelf_books
+                            self.settings:saveSetting("delete_removed_shelf_books", self.delete_removed_shelf_books)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.delete_removed_shelf_books
+                                    and _("Delete removed shelf books enabled - local files not on shelf will be removed during sync")
+                                    or  _("Delete removed shelf books disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                    {
+                        text = _("Use original server filename"),
+                        help_text = _("Save downloaded books using the original filename from the Booklore server instead of deriving the name from the book title."),
+                        checked_func = function()
+                            return self.shelf_use_original_filename
+                        end,
+                        callback = function()
+                            self.shelf_use_original_filename = not self.shelf_use_original_filename
+                            self.settings:saveSetting("shelf_use_original_filename", self.shelf_use_original_filename)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.shelf_use_original_filename
+                                    and _("Will use original server filename when downloading")
+                                    or  _("Will use book title as filename when downloading"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                    {
+                        text = _("Also delete sidecar (.sdr) on removal"),
+                        help_text = _("When a shelf book is deleted during sync, also delete its KOReader sidecar directory (.sdr folder containing reading progress, highlights, etc.). Only applies when 'Delete removed shelf books' is also enabled. Disabled by default."),
+                        enabled_func = function()
+                            return self.delete_removed_shelf_books
+                        end,
+                        checked_func = function()
+                            return self.delete_sdr_on_book_delete
+                        end,
+                        callback = function()
+                            self.delete_sdr_on_book_delete = not self.delete_sdr_on_book_delete
+                            self.settings:saveSetting("delete_sdr_on_book_delete", self.delete_sdr_on_book_delete)
+                            self.settings:flush()
+                            UIManager:show(InfoMessage:new{
+                                text = self.delete_sdr_on_book_delete
+                                    and _("Sidecar (.sdr) deletion enabled")
+                                    or  _("Sidecar (.sdr) deletion disabled"),
+                                timeout = 2,
+                            })
+                        end,
+                    },
+                },
             },
             {
                 text = _("Select Shelf"),
@@ -5166,92 +5208,166 @@ function BookloreSync:addToMainMenu(menu_items)
                 },
             },
             {
-                text_func = function()
-                    return T(_("Download dir: %1"), self.download_dir)
-                end,
-                help_text = _("Local directory where shelf books are downloaded. Detected automatically from device type; override here if needed."),
-                keep_menu_open = true,
-                callback = function()
-                    local dialog
-                    dialog = InputDialog:new{
-                        title   = _("Download directory"),
-                        input   = self.download_dir,
-                        buttons = {{
-                            {
-                                text     = _("Cancel"),
-                                callback = function() UIManager:close(dialog) end,
-                            },
-                            {
-                                text     = _("Reset"),
-                                callback = function()
-                                    self.download_dir = self:_detectDefaultDownloadDir()
-                                    self.settings:saveSetting("download_dir", self.download_dir)
+                text = _("Display & Storage"),
+                help_text = _("Configure storage paths, disk-space limits, and progress-display appearance."),
+                sub_item_table = {
+                    {
+                        text_func = function()
+                            return T(_("Download dir: %1"), self.download_dir)
+                        end,
+                        help_text = _("Local directory where shelf books are downloaded. Detected automatically from device type; override here if needed."),
+                        keep_menu_open = true,
+                        callback = function()
+                            local dialog
+                            dialog = InputDialog:new{
+                                title   = _("Download directory"),
+                                input   = self.download_dir,
+                                buttons = {{
+                                    {
+                                        text     = _("Cancel"),
+                                        callback = function() UIManager:close(dialog) end,
+                                    },
+                                    {
+                                        text     = _("Reset"),
+                                        callback = function()
+                                            self.download_dir = self:_detectDefaultDownloadDir()
+                                            self.settings:saveSetting("download_dir", self.download_dir)
+                                            self.settings:flush()
+                                            UIManager:close(dialog)
+                                            UIManager:show(InfoMessage:new{
+                                                text = T(_("Reset to: %1"), self.download_dir),
+                                                timeout = 2,
+                                            })
+                                        end,
+                                    },
+                                    {
+                                        text     = _("Save"),
+                                        is_enter_default = true,
+                                        callback = function()
+                                            local val = dialog:getInputText()
+                                            if val and val ~= "" then
+                                                self.download_dir = val
+                                                self.settings:saveSetting("download_dir", val)
+                                                self.settings:flush()
+                                            end
+                                            UIManager:close(dialog)
+                                        end,
+                                    },
+                                }},
+                            }
+                            UIManager:show(dialog)
+                            dialog:onShowKeyboard()
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Minimum free space: %1 MB"), self.min_free_space_mb)
+                        end,
+                        help_text = _("Minimum free disk space (in MB) required before downloading books. Sync will stop if available space drops below this threshold. Default: 500 MB"),
+                        keep_menu_open = true,
+                        callback = function()
+                            local dialog
+                            dialog = InputDialog:new{
+                                title   = _("Minimum free space (MB)"),
+                                input   = tostring(self.min_free_space_mb),
+                                input_type = "number",
+                                buttons = {{
+                                    {
+                                        text     = _("Cancel"),
+                                        callback = function() UIManager:close(dialog) end,
+                                    },
+                                    {
+                                        text     = _("Save"),
+                                        is_enter_default = true,
+                                        callback = function()
+                                            local val = tonumber(dialog:getInputText())
+                                            if val and val >= 0 then
+                                                self.min_free_space_mb = val
+                                                self.settings:saveSetting("min_free_space_mb", val)
+                                                self.settings:flush()
+                                                UIManager:show(InfoMessage:new{
+                                                    text = T(_("Minimum free space set to %1 MB"), val),
+                                                    timeout = 2,
+                                                })
+                                            end
+                                            UIManager:close(dialog)
+                                        end,
+                                    },
+                                }},
+                            }
+                            UIManager:show(dialog)
+                            dialog:onShowKeyboard()
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Progress bar width: %1"), self.progress_bar_width)
+                        end,
+                        help_text = _("Width of the progress bar shown during shelf sync downloads (in characters). Wider is more detailed on larger screens. Default: 20"),
+                        keep_menu_open = true,
+                        callback = function()
+                            local SpinWidget = require("ui/widget/spinwidget")
+                            local widget = SpinWidget:new{
+                                text = _("Width of the download progress bar (in characters)."),
+                                value = self.progress_bar_width or 20,
+                                value_min = 5,
+                                value_max = 60,
+                                value_step = 1,
+                                value_hold_step = 5,
+                                ok_text = _("Set"),
+                                title_text = _("Progress bar width (chars)"),
+                                default_value = 20,
+                                callback = function(spin)
+                                    local n = math.floor(tonumber(spin.value) or 20)
+                                    if n < 5 then n = 5 end
+                                    if n > 60 then n = 60 end
+                                    self.progress_bar_width = n
+                                    self.settings:saveSetting("progress_bar_width", n)
                                     self.settings:flush()
-                                    UIManager:close(dialog)
                                     UIManager:show(InfoMessage:new{
-                                        text = T(_("Reset to: %1"), self.download_dir),
+                                        text = T(_("Progress bar width set to %1"), tostring(n)),
                                         timeout = 2,
                                     })
                                 end,
-                            },
-                            {
-                                text     = _("Save"),
-                                is_enter_default = true,
-                                callback = function()
-                                    local val = dialog:getInputText()
-                                    if val and val ~= "" then
-                                        self.download_dir = val
-                                        self.settings:saveSetting("download_dir", val)
-                                        self.settings:flush()
-                                    end
-                                    UIManager:close(dialog)
+                            }
+                            UIManager:show(widget)
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return T(_("Short title length: %1"), self.short_title_length)
+                        end,
+                        help_text = _("Maximum title length (in characters) shown in the progress dialog before truncation. Shorter values keep the progress dialog compact. Default: 30"),
+                        keep_menu_open = true,
+                        callback = function()
+                            local SpinWidget = require("ui/widget/spinwidget")
+                            local widget = SpinWidget:new{
+                                text = _("Maximum book title length shown during download progress."),
+                                value = self.short_title_length or 30,
+                                value_min = 5,
+                                value_max = 120,
+                                value_step = 1,
+                                value_hold_step = 10,
+                                ok_text = _("Set"),
+                                title_text = _("Short title length (chars)"),
+                                default_value = 30,
+                                callback = function(spin)
+                                    local n = math.floor(tonumber(spin.value) or 30)
+                                    if n < 5 then n = 5 end
+                                    if n > 120 then n = 120 end
+                                    self.short_title_length = n
+                                    self.settings:saveSetting("short_title_length", n)
+                                    self.settings:flush()
+                                    UIManager:show(InfoMessage:new{
+                                        text = T(_("Short title length set to %1"), tostring(n)),
+                                        timeout = 2,
+                                    })
                                 end,
-                            },
-                        }},
-                    }
-                    UIManager:show(dialog)
-                    dialog:onShowKeyboard()
-                end,
-            },
-            {
-                text_func = function()
-                    return T(_("Minimum free space: %1 MB"), self.min_free_space_mb)
-                end,
-                help_text = _("Minimum free disk space (in MB) required before downloading books. Sync will stop if available space drops below this threshold. Default: 500 MB"),
-                keep_menu_open = true,
-                callback = function()
-                    local dialog
-                    dialog = InputDialog:new{
-                        title   = _("Minimum free space (MB)"),
-                        input   = tostring(self.min_free_space_mb),
-                        input_type = "number",
-                        buttons = {{
-                            {
-                                text     = _("Cancel"),
-                                callback = function() UIManager:close(dialog) end,
-                            },
-                            {
-                                text     = _("Save"),
-                                is_enter_default = true,
-                                callback = function()
-                                    local val = tonumber(dialog:getInputText())
-                                    if val and val >= 0 then
-                                        self.min_free_space_mb = val
-                                        self.settings:saveSetting("min_free_space_mb", val)
-                                        self.settings:flush()
-                                        UIManager:show(InfoMessage:new{
-                                            text = T(_("Minimum free space set to %1 MB"), val),
-                                            timeout = 2,
-                                        })
-                                    end
-                                    UIManager:close(dialog)
-                                end,
-                            },
-                        }},
-                    }
-                    UIManager:show(dialog)
-                    dialog:onShowKeyboard()
-                end,
+                            }
+                            UIManager:show(widget)
+                        end,
+                    },
+                },
             },
         },
         hold_callback = function()
@@ -6030,23 +6146,11 @@ function BookloreSync:getCurrentProgress()
     return progress, location
 end
 
---[[--
-Round KOReader sync percentage ratio to 4 decimals.
-
-@param value number 0..1
-@return number rounded ratio
---]]
 ---BookloreSync:roundKoreaderSyncPercentage.
 function BookloreSync:roundKoreaderSyncPercentage(value)
     return ProgressSyncModule.roundKoreaderSyncPercentage(self, value)
 end
 
---[[--
-Round a numeric value to the nearest integer.
-
-@param value any
-@return number|nil
---]]
 ---BookloreSync:roundToInt.
 function BookloreSync:roundToInt(value)
     return ProgressSyncModule.roundToInt(self, value)
@@ -6111,83 +6215,108 @@ function BookloreSync:normalizeSessionLocationWithFallback(location, koreader_pa
 end
 
 --[[--
-Resolve server pagecount for a pending session.
+Resolve the server page count for a pending session.
 
-@param session table
-@return number|nil
+Resolution order (first non-nil wins):
+
+1. **Session field** — checks `session.server_pagecount` / `session.serverPagecount`
+   directly. Returns immediately without DB or API calls.
+2. **In-memory cache** — checks the per-session LRU cache
+   (`self._server_pagecount_session_cache`) keyed by hash or book ID.
+3. **Database** — looks up the book in `book_cache` by hash then by book_id,
+   returning the stored `server_pagecount`.
+4. **API refresh** — calls `self:getBookIdByHash()` which fetches fresh metadata
+   from the server. Only attempted when step 3 returns nothing useful.
+5. **Negative cache** — stores `false` in the session cache so repeated calls
+   for the same book skip steps 2-4 on subsequent lookups.
+
+@param session table  Pending-session row with bookHash / bookId fields
+@return number|nil    Server page count, or nil if unresolvable
 --]]
 ---BookloreSync:getServerPagecountForSession.
 function BookloreSync:getServerPagecountForSession(session)
-    if not self.db or type(session) ~= "table" then
+    if type(session) ~= "table" then
         return nil
     end
 
-    local session_book = nil
-    local book_hash = session.bookHash or session.book_hash
-    if book_hash and book_hash ~= "" then
-        session_book = self.db:getBookByHash(book_hash)
+    local direct_pagecount = tonumber(session.server_pagecount or session.serverPagecount)
+    if direct_pagecount and direct_pagecount > 0 then
+        return math.floor(direct_pagecount + 0.5)
     end
+
+    local book_hash = session.bookHash or session.book_hash
     local book_id = session.bookId or session.book_id
-    if not session_book and book_id then
-        session_book = self.db:getBookByBookId(book_id)
+
+    local cache_key = nil
+    if book_hash and book_hash ~= "" then
+        cache_key = "hash:" .. tostring(book_hash)
+    elseif book_id then
+        cache_key = "id:" .. tostring(book_id)
+    end
+
+    if cache_key then
+        self._server_pagecount_session_cache = self._server_pagecount_session_cache or {}
+        local cached_pagecount = self._server_pagecount_session_cache[cache_key]
+        if cached_pagecount ~= nil then
+            return cached_pagecount or nil
+        end
+    end
+
+    local session_book = nil
+    if self.db then
+        if book_hash and book_hash ~= "" then
+            session_book = self.db:getBookByHash(book_hash)
+        end
+        if not session_book and book_id then
+            session_book = self.db:getBookByBookId(book_id)
+        end
     end
 
     local server_pagecount = session_book and tonumber(session_book.server_pagecount) or nil
     if server_pagecount and server_pagecount > 0 then
-        return math.floor(server_pagecount + 0.5)
+        local rounded = math.floor(server_pagecount + 0.5)
+        if cache_key then
+            self._server_pagecount_session_cache[cache_key] = rounded
+        end
+        return rounded
+    end
+
+    if (not server_pagecount or server_pagecount <= 0)
+        and book_hash and book_hash ~= ""
+        and type(self.getBookIdByHash) == "function"
+    then
+        local _, _, _, refreshed_pagecount = self:getBookIdByHash(book_hash)
+        local refreshed = tonumber(refreshed_pagecount)
+        if refreshed and refreshed > 0 then
+            local rounded = math.floor(refreshed + 0.5)
+            if cache_key then
+                self._server_pagecount_session_cache[cache_key] = rounded
+            end
+            return rounded
+        end
+    end
+
+    if cache_key then
+        self._server_pagecount_session_cache[cache_key] = false
     end
     return nil
 end
 
---[[--
-Get KOReader sync progress payload fields.
-
-Uses KOReader's own progress primitives (paging/rolling getLastProgress and
-getLastPercent) so `progress` is the canonical spline/xpointer for reflowable
-documents, while `percentage` is a 0..1 ratio rounded to four decimals.
-
-@return number percentage_ratio (0..1, rounded to 4 decimals)
-@return string progress_value (page/xpointer as expected by KOReader sync API)
-@return string location_value (legacy mirror kept for local DB compatibility)
---]]
 ---BookloreSync:getCurrentKoreaderSyncProgress.
 function BookloreSync:getCurrentKoreaderSyncProgress()
     return ProgressSyncModule.getCurrentKoreaderSyncProgress(self)
 end
 
---[[--
-Get the current document hash for KOReader progress sync.
-
-Uses current_session hash when available, then DB cache, then computes hash.
-
-@return string|nil
---]]
 ---BookloreSync:getCurrentDocumentHashForProgress.
 function BookloreSync:getCurrentDocumentHashForProgress()
     return ProgressSyncModule.getCurrentDocumentHashForProgress(self)
 end
 
---[[--
-Build a KOReader progress payload for the currently open document.
-
-@param timestamp number|nil unix timestamp; defaults to os.time()
-@return table|nil payload
-@return string|nil error_message
---]]
 ---BookloreSync:buildCurrentKoreaderProgressPayload.
 function BookloreSync:buildCurrentKoreaderProgressPayload(timestamp)
     return ProgressSyncModule.buildCurrentKoreaderProgressPayload(self, timestamp)
 end
 
---[[--
-Push KOReader progress directly to Booklore without queueing.
-
-On success, this also updates synced_koreader_progress locally.
-
-@param payload table
-@return boolean ok
-@return string|table|nil reason
---]]
 ---BookloreSync:pushCurrentKoreaderProgressDirect.
 function BookloreSync:pushCurrentKoreaderProgressDirect(payload)
     return ProgressSyncModule.pushCurrentKoreaderProgressDirect(self, payload)
@@ -6806,47 +6935,7 @@ Uses the same algorithm as Booklore's FileFingerprint:
 --]]
 ---BookloreSync:calculateBookHash.
 function BookloreSync:calculateBookHash(file_path)
-    self:logInfo("BookloreSync: Calculating MD5 hash for:", file_path)
-    
-    local file = io.open(file_path, "rb")
-    if not file then
-        self:logWarn("BookloreSync: Could not open file for hashing")
-        return nil
-    end
-    
-    local md5 = require("ffi/sha2").md5
-    local base = 1024
-    local block_size = 1024
-    local buffer = {}
-    
-    local file_size = file:seek("end")
-    file:seek("set", 0)
-    
-    self:logInfo("BookloreSync: File size:", file_size)
-    
-    -- Sample file at specific positions (matching Booklore's FileFingerprint algorithm)
-    for i = -1, 10 do
-        local position = bit.lshift(base, 2 * i)
-        
-        if position >= file_size then
-            break
-        end
-        
-        file:seek("set", position)
-        local chunk = file:read(block_size)
-        if chunk then
-            table.insert(buffer, chunk)
-        end
-    end
-    
-    file:close()
-    
-    -- Calculate MD5 of all sampled chunks
-    local combined_data = table.concat(buffer)
-    local hash = md5(combined_data)
-    
-    self:logInfo("BookloreSync: Hash calculated:", hash)
-    return hash
+    return require("booklore_util").calculateBookHash(file_path)
 end
 
 --[[--
@@ -7775,6 +7864,23 @@ function BookloreSync:onCloseDocument()
 
     self:releaseCloseSyncContext(close_ctx, "onCloseDocument_complete")
     self:applyAirplaneModeSyncModeIntegration()
+
+    -- ── Step 6: Post-finish recommendations ───────────────────────────────
+    -- When the user finishes a book and returns to the file browser, fetch
+    -- and show recommendations. Triggered only when the toggle is enabled,
+    -- the book is finished (>=99%), and we have a resolved book_id. Runs
+    -- non-blocking via UIManager:scheduleIn so it doesn't delay close and
+    -- gives any rating dialog time to surface first.
+    if self.show_post_rating_recommendations
+       and pre_book_id
+       and pre_end_progress and pre_end_progress >= 99 then
+        local ok_rec, rec_err = pcall(function()
+            self:scheduleRecommendationsAfterFinish(pre_book_id)
+        end)
+        if not ok_rec then
+            self:logWarn("BookloreSync: Failed to schedule recommendations:", tostring(rec_err))
+        end
+    end
 
     return closeReturn(false)
 end
@@ -8802,132 +8908,46 @@ function BookloreSync:_detectDefaultDownloadDir()
     return ShelfSyncModule.detectDefaultDownloadDir(self)
 end
 
---[[--
-Download all books from the configured Booklore shelf into `download_dir`.
-
-This is the "pull" side of two-way shelf sync.  On the "push" side, books
-deleted locally are removed from the shelf via notifyBookloreOnDeletion.
-
-New books on the shelf are downloaded; books already present locally are
-skipped (their cache entry is created/updated if missing).
-
-When `delete_removed_shelf_books` is true, local files in `download_dir`
-whose BookID is no longer on the shelf are deleted.
-
-@param silent boolean  Suppress UI messages (default: auto from context)
-@param on_complete function|nil  Optional callback(success, message)
---]]
 ---BookloreSync:syncFromBookloreShelf.
 function BookloreSync:syncFromBookloreShelf(silent, on_complete)
     return ShelfSyncModule.syncFromBookloreShelf(self, silent, on_complete)
 end
 
---[[--
-Generate a filename for a shelf book download.
-
-Uses the book title as the filename, sanitized of filesystem-unsafe characters
-and truncated so the full filename (including extension) is at most 150 chars.
-Falls back to "BookID_{id}.{extension}" when no usable title is available.
-
-@param book table  Book object from Booklore API
-@return string
---]]
 ---BookloreSync:_generateFilename.
 function BookloreSync:_generateFilename(book)
     return ShelfSyncModule.generateFilename(self, book)
 end
 
---[[--
-Called from the patched FileManager.deleteFile / deleteSelectedFiles so we can
-read the file contents (to compute the hash) while the file still exists.
+---BookloreSync:scheduleRecommendationsAfterFinish.
+function BookloreSync:scheduleRecommendationsAfterFinish(book_id)
+    return RecommendationsModule.scheduleAfterFinish(self, book_id)
+end
 
-Supported formats: EPUB, PDF, CBZ, CBR.  Other formats are ignored.
+---BookloreSync:showRecommendationsForBook.
+function BookloreSync:showRecommendationsForBook(book_id)
+    return RecommendationsModule.show(self, book_id, true)
+end
 
-@param filepath string  Full path to the file about to be deleted
-@return hash string|nil, stem string|nil, book_id number|nil
---]]
 ---BookloreSync:preDeleteHook.
 function BookloreSync:preDeleteHook(filepath)
     return DeletionModule.preDeleteHook(self, filepath)
 end
 
---[[--
-Notify Booklore that a book has been deleted locally.
-
-Unassigns the book from the configured Booklore shelf via
-POST /api/v1/books/shelves with shelvesToUnassign=[shelf_id].
-The book record itself is NOT deleted from Booklore.
-
-If offline or the server is unreachable the operation is queued in
-pending_deletions and retried on the next syncPendingSessions() run.
-
-All errors are swallowed so a network failure never surfaces as a user-
-visible error during file deletion.
-
-@param hash           string      MD5 hash of the deleted file
-@param stem           string      Filename stem (used for title-based fallback search)
-@param cached_book_id number|nil  Booklore book ID if known
-@param from_queue     boolean     True when called from syncPendingDeletions (skip re-queue on failure)
---]]
 ---BookloreSync:notifyBookloreOnDeletion.
 function BookloreSync:notifyBookloreOnDeletion(hash, stem, cached_book_id, from_queue)
     return DeletionModule.notifyBookloreOnDeletion(self, hash, stem, cached_book_id, from_queue)
 end
 
---[[--
-Retry all pending shelf-unassignments from the pending_deletions queue.
-
-Called automatically during syncPendingSessions() as Phase 2c.
-Each entry unassigns the book from the configured shelf via
-POST /api/v1/books/shelves.  The book record itself is NOT deleted.
-Entries retried more than 10 times are dropped.
-
-@param silent boolean  Suppress UI feedback (default false)
-@return integer synced_count, integer failed_count
---]]
 ---BookloreSync:syncPendingDeletions.
 function BookloreSync:syncPendingDeletions(silent)
     return PendingSyncModule.syncPendingDeletions(self, silent)
 end
 
---[[--
-Retry all ratings that are sitting in the pending_ratings queue, and
-process any deferred rating prompts whose book_id has now been resolved.
-
-Called automatically at the start of every syncPendingSessions() run so
-that a failed or deferred rating is uploaded on the very next successful
-connection, regardless of whether the trigger was a session, a note, or
-an explicit sync.
-
-@param silent boolean  Suppress UI feedback (default false)
-@return integer synced_count, integer failed_count
---]]
 ---BookloreSync:syncPendingRatings.
 function BookloreSync:syncPendingRatings(silent)
     return PendingSyncModule.syncPendingRatings(self, silent)
 end
 
---[[--
-Retry all annotations that previously failed to upload.
-
-Reads every row from `pending_annotations`, attempts to re-submit each one
-using the stored JSON payload, and removes successfully-uploaded rows.
-Rows that fail again have their retry_count incremented and remain queued.
-
-This is called automatically at the start of every syncPendingSessions() run
-and can also be triggered directly (e.g. from a manual sync button).
-
-Note: CFI-dependent annotations (highlights and in-book notes) require a
-CFI string in the payload.  If the stored payload contains pos0/pos1 fields
-but no pre-computed CFI, this path cannot rebuild the CFI because the EPUB
-document is no longer open.  Those rows will remain pending until the book is
-opened again and syncHighlightsAndNotes() succeeds.
-
-@param silent         boolean   If true, do not show UI messages
-@param book_cache_id  integer|nil  If set, only process rows for this book_cache_id
-@return integer synced_count
-@return integer failed_count
---]]
 ---BookloreSync:syncPendingAnnotations.
 function BookloreSync:syncPendingAnnotations(silent, book_cache_id)
     return PendingSyncModule.syncPendingAnnotations(self, silent, book_cache_id)
@@ -9830,31 +9850,7 @@ end
 
 ---BookloreSync:_unixToISO8601.
 function BookloreSync:_unixToISO8601(timestamp)
-    local date_table = os.date("!*t", timestamp)
-    return string.format("%04d-%02d-%02dT%02d:%02d:%02dZ",
-        date_table.year, date_table.month, date_table.day,
-        date_table.hour, date_table.min, date_table.sec)
-end
-
----BookloreSync:_parseISO8601.
-function BookloreSync:_parseISO8601(iso_string)
-    if not iso_string then return nil end
-    
-    local year, month, day, hour, min, sec = iso_string:match(
-        "(%d+)-(%d+)-(%d+)%a(%d+):(%d+):(%d+)"
-    )
-    
-    if not year then return nil end
-    
-    return os.time({
-        year = tonumber(year),
-        month = tonumber(month),
-        day = tonumber(day),
-        hour = tonumber(hour),
-        min = tonumber(min),
-        sec = tonumber(sec),
-        isdst = false,
-    })
+    return require("booklore_util").unixToISO8601(timestamp)
 end
 
 ---BookloreSync:_detectBookType.

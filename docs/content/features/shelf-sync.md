@@ -47,13 +47,15 @@ flowchart TD
 
 ### Three-phase execution
 
-Shelf sync runs in three phases. Each network operation happens in a subprocess so the UI thread is not blocked, but a modal status dialog is shown for the duration and the device is otherwise not usable:
+Shelf sync runs in three phases:
 
 | Phase | What happens |
 |-------|-------------|
-| **Phase 1** | A subprocess fetches the shelf from the server and retrieves the full book list. |
-| **Phase 2** | For each book, a subprocess checks whether the file already exists and downloads it if not. The status dialog updates its title for each book. |
-| **Phase 3** | Back on the UI thread, the local database is updated in a single transaction and (if enabled) any removed books are deleted from disk. |
+| **Phase 1** | The shelf is fetched from the server via a direct API call (a single short request — the brief freeze is acceptable on e-ink). The delta against the cached shelf state is computed: new books are queued for download, removed books are marked for deletion. |
+| **Phase 2** | Removed books are deleted from disk immediately (deletions are instant file operations and run before any downloads to avoid timing issues with the async download loop). If **Delete removed shelf books** is enabled, local files no longer present on the shelf are removed. The shelf state is persisted after deletions so a subsequent sync doesn't need to re-scan. |
+| **Phase 3** | New books are downloaded one at a time, each in its own subprocess. The UI thread polls the subprocess progress by checking the destination file size on disk, updating an **InfoMessage progress bar** with byte counts (`Xs / Y MB (Z%)`) and e-book title. Between polls the KOReader event loop runs, which means the progress bar actually renders on e-ink displays. Each book is hashed after download and queued for a single-transaction DB commit. |
+
+A summary dialog appears after all phases finish, showing counts for downloaded, already-on-device, removed, and failed books. The dialog is scheduled on the next event-loop tick (via `UIManager:scheduleIn`) so it renders cleanly on e-ink after all sync cleanup (file manager refresh, wifi teardown) is done.
 
 A persistent **Cancel** button is shown throughout. Pressing it finishes the current book cleanly before stopping, so no partial downloads are left behind.
 
@@ -89,15 +91,15 @@ If the device is offline at the time of deletion, the removal is queued and retr
 
 1. Open **Tools → BookLore Sync → Shelf Sync**.
 2. Open **Select Shelf**.
-3. Choose **Select shelf (Standard + Magic)** to load all accessible standard and Magic shelves, then pick one.
-4. Optionally edit the source name manually:
-   - **Shelf source name** when using a standard shelf source.
-   - **Magic Shelf name** when using a Magic shelf source.
-5. Optionally change the **Download directory** (see [Download directory](#download-directory) below).
-6. Optionally enable **Auto-sync shelf on wake** to download books automatically 15 seconds after the device wakes from suspend, once Wi-Fi is connected.
-7. Optionally enable **Delete removed shelf books** to remove local files when a book is no longer on the shelf.
-8. Optionally enable **Use original server filename** (default: **on**) to save downloaded books using the server's own filename instead of deriving it from the book title.
-9. Optionally enable **Also delete sidecar (.sdr) on removal** to also remove the KOReader reading-progress folder when a book is deleted. This option is only active when **Delete removed shelf books** is also enabled.
+3. Choose **Select shelf (Standard + Magic)** to load all accessible standard and Magic shelves from BookLore, then pick one. The current source type and name are shown above the selector.
+4. Optionally edit the source name manually via the **Shelf source name** (standard) or **Magic Shelf name** (Magic) entry. Changing the name clears the cached shelf ID so it's resolved again on the next sync.
+5. Optionally change the **Download dir** (see [Download directory](#download-directory) below). A **Reset** button restores the auto-detected path.
+6. Optionally change **Minimum free space** — the disk-space threshold (in MB) below which sync stops before downloading the next book. Default: `500 MB`.
+7. Optionally toggle:
+   - **Auto-sync shelf on wake** — pulls the shelf 15 seconds after device wake, once Wi-Fi is connected.
+   - **Delete removed shelf books** — removes local files no longer on the shelf during sync. Disabled by default for safety.
+   - **Use original server filename** — saves books using the server's filename instead of deriving from the title. Enabled by default.
+   - **Also delete sidecar (.sdr) on removal** — removes KOReader reading-progress sidecars when a book is deleted. Only active when **Delete removed shelf books** is enabled.
 
 ### Shelf source resolution behavior
 
@@ -184,12 +186,13 @@ Use **Force full re-sync** after manual filesystem changes (for example, if down
 
 ## Cancelling a running sync
 
-A **Cancel** button is shown in the status dialog during sync. Tapping it:
+During downloads, a dialog with a **Cancel** button is shown. The dialog cannot be dismissed by tapping outside it — only the explicit Cancel button stops the sync:
 
 1. Sets a cancellation flag.
-2. Waits for the **current book** to finish downloading cleanly.
-3. Flushes all completed book cache entries to the database.
-4. Shows a summary of how many books were processed before cancellation.
+2. The current book's subprocess finishes downloading cleanly (no partial files).
+3. All completed book cache entries are flushed to the database.
+4. Any pending deletions are completed.
+5. A summary dialog shows what was processed before cancellation.
 
 Cancelling does **not** leave partial or corrupt book files on disk.
 
@@ -232,4 +235,8 @@ When **Delete removed shelf books** is enabled and a book is deleted during sync
 
 ## Credits
 
-Shelf sync was originally created in a fork made by [cporcellijr](https://github.com/cporcellijr) and has since been significantly reworked with a three-phase subprocess architecture, ID-tagged filenames with original-filename and title-derived modes, improved SDR sidecar detection and cleanup, a two-way deletion flow, and a cancellable progress dialog.
+Shelf sync was originally created in a fork made by [cporcellijr](https://github.com/cporcellijr).
+
+## Acknowledgements
+
+The download-progress-tracking API method (`APIClient:downloadBookWithProgress`), the reworked shelf sync dialog with progress bar, and the associated progress display during book downloads were inspired by work from [0xstillb](https://github.com/0xstillb).

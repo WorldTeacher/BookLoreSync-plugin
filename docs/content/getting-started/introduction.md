@@ -27,6 +27,7 @@ Beyond session tracking, the plugin also supports:
 - **Per-book tracking toggle** - disable session tracking for individual books (reference books, cookbooks, etc.) without affecting the rest of your library.
 - **Book deletion sync** - removing a book from KOReader notifies BookLore to remove it from your library too.
 - **Auto-update** - the plugin can check for and install updates from GitHub without leaving KOReader.
+- **Book recommendations** - finishing a book fetches similar titles from your BookLore server, lets you browse details and download recommended books directly.
 
 ---
 
@@ -47,6 +48,7 @@ Beyond session tracking, the plugin also supports:
 | Per-book tracking toggle | Fully implemented |
 | Book deletion sync | Fully implemented |
 | File manager long-press actions | Fully implemented |
+| Book recommendations (post-finish) | Fully implemented |
 | EPUB CFI position for annotations | EPUB only |
 | Auto-update from GitHub | Fully implemented |
 | Supported formats: EPUB, PDF, CBZ, CBR | Fully implemented |

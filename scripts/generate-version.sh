@@ -71,11 +71,23 @@ echo "  Type: $VERSION_TYPE"
 echo "  Commit: $GIT_COMMIT"
 echo "  Build Date: $BUILD_DATE"
 
-# Also update _meta.lua with version
+# Also update _meta.lua with version (preserve branding fallback block)
 META_FILE="bookloresync.koplugin/_meta.lua"
 
 cat > "$META_FILE" <<EOF
-local _ = require("gettext")
+local _raw = require("gettext")
+local ok_branding, Branding = pcall(require, "booklore_branding")
+if not ok_branding or type(Branding) ~= "table" then
+    Branding = {
+        apply = function(text)
+            return text
+        end,
+    }
+end
+
+local function _(text)
+    return Branding.apply(_raw(text))
+end
 return {
     name = "bookloresync",
     fullname = _("Booklore Sync"),

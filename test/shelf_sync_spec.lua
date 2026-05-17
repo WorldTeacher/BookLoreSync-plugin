@@ -133,13 +133,14 @@ package.preload["gettext"] = function()
 end
 
 package.preload["ui/uimanager"] = function()
-  return {
+    return {
     scheduleIn     = function(_, _, fn) if fn then fn() end end,
     nextTick       = function(_, fn)    if fn then fn() end end,
     show           = function() end,
     close          = function() end,
     preventStandby = function() end,
     allowStandby   = function() end,
+    forceRePaint   = function() end,
   }
 end
 
@@ -246,85 +247,6 @@ local BookloreSync = require("main")
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
-local function make_plugin(overrides)
-  overrides = overrides or {}
-  local p = setmetatable({
-    sync_in_progress    = false,
-    silent_messages     = true,  -- suppress UIManager:show in tests
-    server_url          = "http://localhost:8080",
-    booklore_username   = "testuser",
-    booklore_password   = "testpass",
-    booklore_shelf_name = "My Shelf",
-    booklore_sync_source_type = "static",
-    booklore_magic_shelf_name = "Magic Shelf",
-    booklore_magic_shelf_id = nil,
-    shelf_id            = nil,
-    download_dir        = "/tmp/test-dl",
-    delete_removed_shelf_books = false,
-    secure_logs         = false,
-    db = {
-      db_path = "/tmp/test-settings/booklore-sync.sqlite",
-      beginTransaction = function() end,
-      commit           = function() end,
-      rollback         = function() end,
-      saveBookCache    = function() end,
-      getBookByFilePath = function() return nil end,
-      getBookByBookId  = function() return nil end,
-      updateFilePath   = function() end,
-      getShelfState    = function() return nil end,
-      saveShelfState   = function() end,
-      clearShelfState  = function() end,
-    },
-    settings = {
-      saveSetting = function() end,
-      flush       = function() end,
-    },
-    api = {
-      getBookFileSize = function()
-        return nil, "not implemented"
-      end,
-    },
-    logInfo = function() end,
-    logWarn = function() end,
-    logErr  = function() end,
-  }, { __index = BookloreSync })
-  for k, v in pairs(overrides) do p[k] = v end
-  return p
-end
-
-local function make_lfs_stub(opts)
-  -- opts.download_dir_exists: bool (default true)
-  -- opts.files: table of filepath -> bool (true = file exists)
-  -- opts.dir_entries: list of filename strings yielded by lfs.dir("/tmp/test-dl")
-  opts = opts or {}
-  local dir_exists = opts.download_dir_exists ~= false
-  local files = opts.files or {}
-  local dir_entries = opts.dir_entries or {}
-  return {
-    attributes = function(path, attr)
-      if attr == "mode" then
-        if files[path] then return "file" end
-        if path == "/tmp/test-dl" and dir_exists then return "directory" end
-        return nil
-      end
-      return nil
-    end,
-    mkdir = function() return true end,
-    dir   = function(dirpath)
-      if dirpath == "/tmp/test-dl" then
-        local i = 0
-        local all = { ".", ".." }
-        for _, e in ipairs(dir_entries) do table.insert(all, e) end
-        return function()
-          i = i + 1
-          return all[i]
-        end
-      end
-      return function() return nil end
-    end,
-  }
-end
-
 local function make_api_stub(opts)
   opts = opts or {}
   -- opts.resolve_ok, opts.resolve_id, opts.resolve_error, opts.books_ok, opts.books, opts.download_ok
@@ -334,6 +256,9 @@ local function make_api_stub(opts)
     new = function()
       return {
         init = function() end,
+        getBookFileSize = function()
+          return opts.book_file_size or nil, (opts.book_file_size and nil) or "not found"
+        end,
         resolveShelfSource = function(_, source_id, source_name)
           if opts.resolve_ok == false then
             return false, opts.resolve_error or { code = 500, message = "resolve error" }
@@ -401,6 +326,12 @@ local function make_db_stub(opts)
       return {
         init = function() end,
         close = function() end,
+        db_path = "/tmp/test-settings/booklore-sync.sqlite",
+        beginTransaction = function() end,
+        commit           = function() end,
+        rollback         = function() end,
+        saveBookCache    = function() end,
+        updateFilePath   = function() end,
         getBookByFilePath = function(_, fp)
           return opts.cached and opts.cached[fp] or nil
         end,
@@ -419,6 +350,73 @@ local function make_db_stub(opts)
       }
     end,
   }
+end
+
+local function make_lfs_stub(opts)
+  -- opts.download_dir_exists: bool (default true)
+  -- opts.files: table of filepath -> bool (true = file exists)
+  -- opts.dir_entries: list of filename strings yielded by lfs.dir("/tmp/test-dl")
+  opts = opts or {}
+  local dir_exists = opts.download_dir_exists ~= false
+  local files = opts.files or {}
+  local dir_entries = opts.dir_entries or {}
+  return {
+    attributes = function(path, attr)
+      if attr == "mode" then
+        if files[path] then return "file" end
+        if path == "/tmp/test-dl" and dir_exists then return "directory" end
+        return nil
+      end
+      return nil
+    end,
+    mkdir = function() return true end,
+    dir   = function(dirpath)
+      if dirpath == "/tmp/test-dl" then
+        local i = 0
+        local all = { ".", ".." }
+        for _, e in ipairs(dir_entries) do table.insert(all, e) end
+        return function()
+          i = i + 1
+          return all[i]
+        end
+      end
+      return function() return nil end
+    end,
+  }
+end
+
+local function make_plugin(overrides)
+  overrides = overrides or {}
+  local api_opts = overrides.api_opts or {}
+  local db_opts = overrides.db_opts or {}
+  local default_api = make_api_stub(api_opts).new()
+  local default_db = make_db_stub(db_opts).new()
+  local p = setmetatable({
+    sync_in_progress    = false,
+    silent_messages     = true,  -- suppress UIManager:show in tests
+    server_url          = "http://localhost:8080",
+    booklore_username   = "testuser",
+    booklore_password   = "testpass",
+    booklore_shelf_name = "My Shelf",
+    booklore_sync_source_type = "static",
+    booklore_magic_shelf_name = "Magic Shelf",
+    booklore_magic_shelf_id = nil,
+    shelf_id            = nil,
+    download_dir        = "/tmp/test-dl",
+    delete_removed_shelf_books = false,
+    secure_logs         = false,
+    db = default_db,
+    settings = {
+      saveSetting = function() end,
+      flush       = function() end,
+    },
+    api = default_api,
+    logInfo = function() end,
+    logWarn = function() end,
+    logErr  = function() end,
+  }, { __index = BookloreSync })
+  for k, v in pairs(overrides) do p[k] = v end
+  return p
 end
 
 -- ── Tests ────────────────────────────────────────────────────────────────────
@@ -491,7 +489,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     end
     package.preload["booklore_database"]    = function() return make_db_stub() end
 
-    local p = make_plugin()
+    local p = make_plugin({ api_opts = { resolve_ok = false, resolve_error = { code = 403, message = 'forbidden' } } })
     local callback_called, callback_ok = false, nil
     p:syncFromBookloreShelf(true, function(ok) callback_called = true; callback_ok = ok end)
 
@@ -528,6 +526,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       booklore_source_shelf_id = 55,
       booklore_source_shelf_name = "Legacy Name",
       booklore_shelf_name = "Legacy Name",
+      api_opts = { resolve_id = 55 },
     })
     p:syncFromBookloreShelf(true)
 
@@ -548,6 +547,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     local p = make_plugin({
       booklore_source_shelf_id = 77,
       booklore_source_shelf_name = "Private Shelf",
+      api_opts = { resolve_ok = false, resolve_error = { code = 403, message = 'forbidden' } },
     })
     local callback_ok, callback_msg = nil, nil
     p:syncFromBookloreShelf(true, function(ok, msg)
@@ -615,6 +615,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       booklore_sync_source_type = "magic",
       booklore_magic_shelf_name = "Auto Magic",
       booklore_magic_shelf_id = nil,
+      api_opts = { magic_resolve_id = 91, magic_resolve_name = "Auto Magic", magic_books = {} },
     })
     p:syncFromBookloreShelf(true)
 
@@ -628,7 +629,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     package.preload["booklore_api_client"]  = function() return make_api_stub({ books_ok = false }) end
     package.preload["booklore_database"]    = function() return make_db_stub() end
 
-    local p = make_plugin()
+    local p = make_plugin({ api_opts = { books_ok = false, magic_resolve_id = 91, magic_books = {} } })
     local callback_ok = nil
     p:syncFromBookloreShelf(true, function(ok) callback_ok = ok end)
 
@@ -641,7 +642,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     package.preload["booklore_api_client"]  = function() return make_api_stub({ books = {} }) end
     package.preload["booklore_database"]    = function() return make_db_stub() end
 
-    local p = make_plugin()
+    local p = make_plugin({ api_opts = { books = {} } })
     local callback_ok = nil
     p:syncFromBookloreShelf(true, function(ok) callback_ok = ok end)
 
@@ -673,7 +674,17 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       })
     end
 
-    local p = make_plugin({ delete_removed_shelf_books = true })
+    local p = make_plugin({
+      delete_removed_shelf_books = true,
+      api_opts = { books = {} },
+      db_opts = {
+        shelf_state = { books_json = '[{"id":2},{"id":3}]', synced_at = 1715000000 },
+        cached_by_id = {
+          [2] = { file_path = gone_file_1, book_id = 2 },
+          [3] = { file_path = gone_file_2, book_id = 3 },
+        },
+      },
+    })
     p.db.getBookByBookId = function(_, bid)
       bid = tonumber(bid)
       if bid == 2 then return { file_path = gone_file_1 } end
@@ -707,7 +718,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     package.preload["booklore_api_client"]  = function() return make_api_stub({ shelf_id = 99, books = {} }) end
     package.preload["booklore_database"]    = function() return make_db_stub() end
 
-    local p = make_plugin({ shelf_id = 1 })
+    local p = make_plugin({ shelf_id = 1 , api_opts = { resolve_id = 99 }})
     local saved = {}
     p.settings.saveSetting = function(_, k, v) saved[k] = v end
     p:syncFromBookloreShelf(true)
@@ -772,7 +783,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       return make_db_stub()
     end
 
-    local p = make_plugin()
+    local p = make_plugin({ api_opts = { books = { { id = 7, title = "NewBook", authors = "Jane Doe", isbn10 = "1234567890", isbn13 = "9781234567897", pagecount = 321, extension = "epub" } } } })
     local saved = {}
     p.db.saveBookCache = function(_, fp, hash, bid, title, author, isbn10, isbn13, server_pagecount)
       table.insert(saved, {
@@ -836,7 +847,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       return make_db_stub()
     end
 
-    local p = make_plugin()
+    local p = make_plugin({ api_opts = { books = { { id = 1, title = 'Test', extension = 'epub' } } } })
     p.db.commit = function() error("disk full") end
 
     local callback_ok = nil
@@ -868,7 +879,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       })
     end
 
-    local p = make_plugin({ delete_removed_shelf_books = true })
+    local p = make_plugin({ delete_removed_shelf_books = true , api_opts = { books = { { id = 1, title = 'ShelfBook', extension = 'epub' } } }})
     p.db.getBookByFilePath = function(_, fp)
       if fp == old_file then
         return { book_id = 5 }
@@ -939,7 +950,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       return make_db_stub()
     end
 
-    local p = make_plugin({ delete_removed_shelf_books = true })
+    local p = make_plugin({ delete_removed_shelf_books = true, api_opts = { books = {} } })
     local removed = {}
     local real_remove = os.remove
     os.remove = function(path) table.insert(removed, path); return true end
@@ -968,7 +979,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       return make_db_stub()
     end
 
-    local p = make_plugin()
+    local p = make_plugin({ api_opts = { books = { { id = 1, title = 'NoExt', extension = '' } } } })
     local warn_called = false
     p.logWarn = function(...) warn_called = true end
     local saved = {}
@@ -1016,7 +1027,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       return make_db_stub()
     end
 
-    local p = make_plugin()
+    local p = make_plugin({ api_opts = { books = { { id = 1, title = 'MyBook', extension = 'epub' } } } })
     local renamed_from, renamed_to
     local real_rename = os.rename
     os.rename = function(from, to)
@@ -1066,7 +1077,14 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       })
     end
 
-    local p = make_plugin({ shelf_id = 42 })
+    local p = make_plugin({
+      shelf_id = 42,
+      api_opts = { books = cached_books },
+      db_opts = {
+        shelf_state = { books_json = cached_json, synced_at = 1000 },
+        cached = { [filepath] = { book_id = 1 } },
+      },
+    })
     local saved_count = 0
     p.db.saveBookCache = function() saved_count = saved_count + 1 end
     local shelf_state_saved = false
@@ -1107,7 +1125,13 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       })
     end
 
-    local p = make_plugin()
+    local p = make_plugin({
+      api_opts = { books = curr_books },
+      db_opts = {
+        shelf_state = { books_json = json.encode(prev_books), synced_at = 1000 },
+        cached = { [old_filepath] = { book_id = 1 } },
+      },
+    })
     local saved = {}
     p.db.saveBookCache = function(_, fp, hash, bid, title)
       table.insert(saved, { bid = bid, title = title })
@@ -1155,7 +1179,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       })
     end
 
-    local p = make_plugin({ delete_removed_shelf_books = true })
+    local p = make_plugin({ delete_removed_shelf_books = true, api_opts = { books = curr_books } })
     p.db.getBookByBookId = function(_, bid)
       if tonumber(bid) == 2 then
         return { book_id = 2, file_path = gone_file }
@@ -1196,7 +1220,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       return make_db_stub()
     end
 
-    local p = make_plugin()
+    local p = make_plugin({ api_opts = { shelf_id = 7, books = { { id = 1, title = 'A', extension = 'epub' }, { id = 2, title = 'B', extension = 'pdf' }, { id = 3, title = 'C', extension = 'epub' }, { id = 4, title = 'D', extension = 'epub' }, { id = 5, title = 'E', extension = 'epub' }, { id = 6, title = 'F', extension = 'epub' }, { id = 7, title = 'G', extension = 'epub' } } } })
     local saved_shelf_id, saved_json
     p.db.saveShelfState = function(_, shelf_id, books_json)
       saved_shelf_id = shelf_id
@@ -1227,7 +1251,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       return make_db_stub()
     end
 
-    local p = make_plugin()
+    local p = make_plugin({ api_opts = { books = { { id = 1, title = 'A', extension = 'epub' } } } })
     -- Inject cancel by patching the ButtonDialog to set cancel_requested via the
     -- UIManager show hook.  We intercept the show() call for the ButtonDialog and
     -- call its Cancel button callback immediately.
@@ -1245,7 +1269,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     p.db.saveShelfState = function() shelf_state_saved = true end
 
     local callback_ok = nil
-    p:syncFromBookloreShelf(true, function(ok) callback_ok = ok end)
+    p:syncFromBookloreShelf(false, function(ok) callback_ok = ok end)
 
     UIManager.show = real_show
 
@@ -1269,7 +1293,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       return make_db_stub()
     end
 
-    local p = make_plugin()
+    local p = make_plugin({ api_opts = { books = { { id = 1, title = 'A', extension = 'epub' } } } })
     p.db.commit = function() error("disk full") end
 
     local shelf_state_saved = false
@@ -1302,7 +1326,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       return make_db_stub({ shelf_state = nil })
     end
 
-    local p = make_plugin()
+    local p = make_plugin({ api_opts = { books = { { id = 1, title = 'A', extension = 'epub' }, { id = 2, title = 'B', extension = 'epub' } } } })
     local saved = {}
     p.db.saveBookCache = function(_, fp, hash, bid)
       table.insert(saved, bid)
@@ -1343,6 +1367,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       booklore_username = "booklore-user",
       booklore_password = "booklore-pass",
       min_free_space_mb = 500,
+      api_opts = { books = { { id = 21, title = "CredCheck", extension = "epub" } } },
     })
 
     local got_username, got_password
@@ -1378,7 +1403,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       return make_db_stub({ shelf_state = nil })
     end
 
-    local p = make_plugin({ min_free_space_mb = 500 })
+    local p = make_plugin({ min_free_space_mb = 500 , api_opts = { books = { { id = 1, title = 'Big', extension = 'epub', fileSizeKb = 500000 } } }})
     p.api.getBookFileSize = function()
       return 100 * 1024 * 1024, nil
     end

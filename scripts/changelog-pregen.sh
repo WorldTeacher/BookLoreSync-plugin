@@ -54,6 +54,16 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     exit 1
 fi
 
+# Detect if this is a develop / unreleased build.
+# On the develop branch, the changelog header uses "Unreleased" instead of a
+# predicted version number.
+IS_UNRELEASED=0
+if [ -n "${CI_COMMIT_BRANCH:-}" ] && [ "$CI_COMMIT_BRANCH" = "develop" ]; then
+    IS_UNRELEASED=1
+elif [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "develop" ]; then
+    IS_UNRELEASED=1
+fi
+
 update_docs_changelog() {
     local -a tag_names=()
     local -a tag_versions=()
@@ -89,14 +99,52 @@ update_docs_changelog() {
         tag_names+=("$tag")
         tag_versions+=("$normalized_version")
     done < <(
-        git for-each-ref --format='%(refname:short)' refs/tags \
-            | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $0, v }' \
-            | sort -t $'\t' -k2,2Vr
+        git tag \
+            | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) { split(v, a, "."); printf "%010d%010d%010d\t%s\t%s\n", a[1], a[2], a[3], $0, v } }' \
+            | sort -k1,1rn \
+            | cut -f2,3
     )
 
     if [ "${#tag_names[@]}" -eq 0 ]; then
-        echo "ERROR: no semantic version tags found" >&2
-        exit 1
+        # No semantic version tags found — on develop before first release
+        # or on a repo without tags.  Generate an Unreleased-only changelog.
+        {
+            printf '+++\n'
+            printf 'title = "Changelog"\n'
+            printf 'description = "Full version history for the BookLore Sync plugin."\n'
+            printf 'weight = 4\n'
+            printf '+++\n\n'
+            printf '# Changelog\n\n'
+            printf 'All notable changes to the BookLore Sync plugin are documented here.\n\n'
+            printf '%s\n\n' '---'
+            printf '## Unreleased (unknown)\n\n'
+            while IFS= read -r -d $'\x1e' entry; do
+                [ -z "$entry" ] && continue
+                entry="${entry#$'\n'}"
+                local subject="${entry%%$'\x1f'*}"
+                local body="${entry#*$'\x1f'}"
+                local subject_text="$subject"
+                if [[ "$subject" =~ ^([a-zA-Z]+)(\(([[:alnum:]_./-]+)\))?(!)?:[[:space:]](.+)$ ]]; then
+                    local commit_type="${BASH_REMATCH[1],,}"
+                    local scope="${BASH_REMATCH[3]:-}"
+                    local description="${BASH_REMATCH[5]}"
+                    if [ -n "$scope" ]; then
+                        subject_text="**${scope}:** ${description}"
+                    else
+                        subject_text="$description"
+                    fi
+                    case "$commit_type" in
+                        feat)   printf '* %s\n' "$subject_text" ;;
+                        fix)    printf '* %s\n' "$subject_text" ;;
+                        perf)   printf '* %s\n' "$subject_text" ;;
+                        *)      ;;
+                    esac
+                fi
+            done < <(git log --no-merges --reverse --pretty=tformat:'%s%x1f%b%x1e' HEAD)
+            printf '\n'
+        } > "$DOCS_CHANGELOG_FILE"
+        echo "Updated $DOCS_CHANGELOG_FILE (Unreleased only, no tags found)"
+        return
     fi
 
     {
@@ -109,8 +157,24 @@ update_docs_changelog() {
         printf 'All notable changes to the BookLore Sync plugin are documented here.\n\n'
         printf '%s\n\n' '---'
 
-        local latest_tag="${tag_names[0]}"
-        local latest_version="${tag_versions[0]}"
+        local latest_tag=""
+        local latest_version=""
+        local up_i
+        for up_i in "${!tag_names[@]}"; do
+            local candidate_tag="${tag_names[$up_i]}"
+            if git merge-base --is-ancestor "$candidate_tag" HEAD 2>/dev/null; then
+                latest_tag="$candidate_tag"
+                latest_version="${tag_versions[$up_i]}"
+                break
+            fi
+        done
+        if [ -z "$latest_tag" ]; then
+            # Fallback: no semver tag on this branch — treat as Unreleased-only
+            # (falls through to the no-tags-found path above, but in practice
+            # this shouldn't be reached since we already handle that case)
+            latest_tag="${tag_names[0]:-}"
+            latest_version="${tag_versions[0]:-}"
+        fi
         local upcoming_date
         upcoming_date="$(date -u +%Y-%m-%d)"
 
@@ -232,7 +296,11 @@ update_docs_changelog() {
                 next_upcoming_version="${up_major}.${up_minor}.${up_patch}"
             fi
 
-            printf '## %s (%s)\n\n' "$next_upcoming_version" "$upcoming_date"
+            if [ "$IS_UNRELEASED" -eq 1 ]; then
+                printf '## Unreleased (unknown)\n\n'
+            else
+                printf '## %s (%s)\n\n' "$next_upcoming_version" "$upcoming_date"
+            fi
 
             if [ "${#up_features[@]}" -gt 0 ]; then
                 printf '### Features\n\n'
@@ -427,7 +495,25 @@ if [ "$DOCS_MODE" -eq 1 ]; then
     exit 0
 fi
 
-latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+get_latest_semver_tag() {
+    git tag --merged HEAD \
+        | awk 'BEGIN { OFS="\t" } { v=$0; sub(/^v/, "", v); if (v ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) { split(v, a, "."); printf "%010d%010d%010d\t%s\n", a[1], a[2], a[3], $0 } }' \
+        | sort -k1,1rn \
+        | head -n1 \
+        | cut -f2
+}
+
+latest_tag="$(get_latest_semver_tag || true)"
+
+# Fallback to closest reachable tag only when no semver tag exists at all.
+if [ -z "$latest_tag" ]; then
+    latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+fi
+
+if [ -n "$latest_tag" ] && ! git merge-base --is-ancestor "$latest_tag" HEAD; then
+    echo "WARN: latest semantic tag '$latest_tag' is not an ancestor of HEAD; generating changelog against global latest tag." >&2
+fi
+
 log_range="HEAD"
 
 if [ -n "$latest_tag" ]; then
@@ -597,7 +683,9 @@ if [ "$has_release_commit" -eq 0 ]; then
 fi
 
 {
-    if [ -n "$latest_tag" ] && [ -n "$repo_url" ]; then
+    if [ "$IS_UNRELEASED" -eq 1 ]; then
+        printf '## Unreleased (unknown)\n\n'
+    elif [ -n "$latest_tag" ] && [ -n "$repo_url" ]; then
         printf '## [%s](%s/compare/%s...%s) (%s)\n\n' "$next_version" "$repo_url" "$latest_tag" "$next_version" "$release_date"
     elif [ -n "$latest_tag" ]; then
         printf '## %s (%s)\n\n' "$next_version" "$release_date"
@@ -642,7 +730,9 @@ fi
 
 echo "Created $OUTPUT_FILE"
 
-if [ -n "$latest_tag" ]; then
+if [ "$IS_UNRELEASED" -eq 1 ]; then
+    echo "Unreleased changes (no version predicted)"
+elif [ -n "$latest_tag" ]; then
     echo "Based on commits in range: $latest_tag..HEAD"
 else
     echo "Based on all commits (no existing tag found)"

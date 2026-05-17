@@ -75,6 +75,14 @@ hide_page_list = true
     </div>
   </a>
 
+  <a class="section-card" href="recommendations/">
+    <div class="section-card__icon">💡</div>
+    <div class="section-card__body">
+      <div class="section-card__title">Recommendations</div>
+      <div class="section-card__desc">Post-finish book recommendations from your BookLore server — browse similar titles and download recommended books directly.</div>
+    </div>
+  </a>
+
   <a class="section-card" href="gestures/">
     <div class="section-card__icon">👆</div>
     <div class="section-card__body">

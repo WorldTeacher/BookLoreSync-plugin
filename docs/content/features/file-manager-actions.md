@@ -113,3 +113,15 @@ The reading session section reports synced and pending totals from both local hi
 Extracts highlights, notes, and related metadata directly from the book's `.sdr` sidecar and prepares them for sync.
 
 Use this when annotation data exists in KOReader sidecar files but has not yet been reflected in BookLore, or when you want to trigger sidecar-based extraction without opening the book.
+
+---
+
+## Get Recommendations
+
+Fetches book recommendations from your BookLore server for a matched book and displays them in a selection dialog — without needing to open the book first.
+
+Tapping **Get recommendations** opens a list of up to 10 recommended titles. Selecting one shows details (title, author, description, series info, page count) with options to **Fetch** (download the book) or return to the list.
+
+> **Requirement:** The book must be matched to a BookLore entry, BookLore account credentials must be configured, and a network connection must be available.
+
+See [Recommendations](@/features/recommendations.md) for full details on the recommendations feature.

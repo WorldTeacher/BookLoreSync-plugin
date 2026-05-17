@@ -15,7 +15,7 @@ Supports both .sdr folders and hash-based DocSettings.
 --]]--
 
 local DocSettings = require("docsettings")
-local logger = require("logger")
+local util = require("booklore_util")
 
 local BookloreMetadataExtractor = {}
 
@@ -38,29 +38,14 @@ Log message using plugin logger
 --]]
 ---BookloreMetadataExtractor:log.
 function BookloreMetadataExtractor:log(level, ...)
-    if not self.plugin then
-        -- Fallback to native logger if plugin not available
-        if level == "info" then
-            logger.info("MetadataExtractor:", ...)
-        elseif level == "warn" then
-            logger.warn("MetadataExtractor:", ...)
-        elseif level == "err" then
-            logger.err("MetadataExtractor:", ...)
-        elseif level == "dbg" then
-            logger.dbg("MetadataExtractor:", ...)
-        end
-        return
-    end
-    
-    -- Use plugin logger (handles redaction automatically)
     if level == "info" then
-        self.plugin:logInfo("MetadataExtractor:", ...)
+        util.logInfo(self.plugin, "MetadataExtractor:", ...)
     elseif level == "warn" then
-        self.plugin:logWarn("MetadataExtractor:", ...)
+        util.logWarn(self.plugin, "MetadataExtractor:", ...)
     elseif level == "err" then
-        self.plugin:logErr("MetadataExtractor:", ...)
+        util.logErr(self.plugin, "MetadataExtractor:", ...)
     elseif level == "dbg" then
-        self.plugin:logDbg("MetadataExtractor:", ...)
+        util.logDbg(self.plugin, "MetadataExtractor:", ...)
     end
 end
 

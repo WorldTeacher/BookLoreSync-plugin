@@ -1,3 +1,20 @@
+# [4.4.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.3.0...4.4.0) (2026-05-17)
+
+
+### Bug Fixes
+
+* **build-versioned-docs:** handle missing tags on main branch gracefully ([6911bf8](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/6911bf881390c3ceb4bb5b3be8fd2a8b4786108e))
+* **download:** Refactor joinDownloadPath function and update file path handling ([a668048](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/a6680485fdf5432f8704e3e84df260c588f5b845))
+* **review:** prevent multi-arg log data loss in util.redactUrls ([189bdcd](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/189bdcd8cbe8ca5bce170a49ea31a398506dc904))
+* **review:** prevent multi-arg log data loss in util.redactUrls ([7920f96](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/7920f96ae4a7cf902a7c3880830481b0866d60f7))
+
+
+### Features
+
+* **docs:** add version selector ([d20ae91](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/d20ae91dcbeed1655de7eedfce573e5c299dcb0b))
+* **redommendations:** Add post-finish book recommendations feature ([4a9598e](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/4a9598ec4851a131c3f43bb0c13c79ee5c212f2c))
+* **shelf-sync:** improved download dialog, handling ([f922edc](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/f922edc4bf34c0d89d1057d69c80af293330a3d8))
+
 # [4.3.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.2.0...4.3.0) (2026-05-10)
 
 

@@ -284,6 +284,6 @@ push-tag-to-github:
     - git config --global --add safe.directory "$CI_PROJECT_DIR"
   script:
     - echo "Pushing tag $CI_COMMIT_TAG to GitHub..."
-    - git remote add github "https://github.com/WorldTeacher/BookLoreSync-plugin.git"
+    - git remote add github "https://${GITHUB_TOKEN}@github.com/WorldTeacher/BookLoreSync-plugin.git"
     - git push github "$CI_COMMIT_TAG"
     - echo "Tag $CI_COMMIT_TAG pushed to GitHub successfully."

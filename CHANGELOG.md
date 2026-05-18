@@ -1,3 +1,10 @@
+## [4.4.1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.4.0...4.4.1) (2026-05-18)
+
+
+### Bug Fixes
+
+* **shelf-sync:** check if dialog title can be set, fixing crash ([99e863c](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/99e863cb514712da429552163051a135b6df3b26))
+
 # [4.4.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.3.0...4.4.0) (2026-05-17)
 
 

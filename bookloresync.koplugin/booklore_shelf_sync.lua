@@ -154,22 +154,28 @@ function M.new(deps)
 
         local self_for_callback = self
         if progress_widget then
-            -- Update existing dialog's title
-            progress_widget:setTitle(table.concat(lines, "\n"))
-        else
-            progress_widget = ButtonDialog:new{
-                dismissable = false,
-                title = table.concat(lines, "\n"),
-                buttons = {{ {
-                    text = _("Stop syncing"),
-                    callback = function()
-                        self_for_callback._shelf_sync_cancelled = true
-                        -- Dialog stays open so the user sees the current download finish.
-                    end,
-                } }},
-            }
-            UIManager:show(progress_widget)
+            -- Update existing dialog's title if possible
+            -- InfoMessage doesn't have setTitle — if that fails close it and
+            -- fall through to create a ButtonDialog instead.
+            local ok = pcall(progress_widget.setTitle, progress_widget, table.concat(lines, "\n"))
+            if ok then
+                return
+            end
+            pcall(UIManager.close, UIManager, progress_widget)
         end
+
+        progress_widget = ButtonDialog:new{
+            dismissable = false,
+            title = table.concat(lines, "\n"),
+            buttons = {{ {
+                text = _("Stop syncing"),
+                callback = function()
+                    self_for_callback._shelf_sync_cancelled = true
+                    -- Dialog stays open so the user sees the current download finish.
+                end,
+            } }},
+        }
+        UIManager:show(progress_widget)
     end
 
     local function closeProgress()

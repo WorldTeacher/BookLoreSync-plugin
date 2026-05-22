@@ -37,7 +37,11 @@ fi
 rm -f luacov.stats.out luacov.report.out coverage.xml
 
 echo "Running Busted test suite"
-busted --coverage --output utfTerminal --pattern "_spec%.lua$" test
+busted --coverage --pattern "_spec%.lua$" test
+
+echo ""
+echo "Running Python schema tests"
+python3 spec/test_database_schema.py
 
 echo "Generating luacov text report"
 luacov

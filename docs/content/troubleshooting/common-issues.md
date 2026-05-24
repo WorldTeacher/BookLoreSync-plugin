@@ -141,15 +141,15 @@ You can disable that integration toggle if you want to control Sync Mode manuall
 **Resolution:**
 
 1. Verify **BookLore Account** credentials in **Settings → Connection Setup → Configure BookLore Account**.
-2. Re-select the source from **Tools → BookLore Sync → Shelf Sync → Select Shelf → Select shelf (Standard + Magic)**.
-3. If you manually edited source names, confirm you edited the field matching the active source type:
-   - **Shelf source name** for standard shelves
+2. Re-select the shelves from **Tools → BookLore Sync → Shelf Sync → Select Shelf → Select shelf**.
+3. If you manually edited source names, confirm you edited the correct field:
+   - **Shelf source name** for regular shelves
    - **Magic Shelf name** for Magic Shelves
 4. For private standard shelves, prefer selecting from the shelf picker so the explicit source ID is saved.
 
 **Verification:**
 
-- Run **Sync from BookLore Shelf**.
+- Run **Sync regular shelf**, **Sync magic shelf**, or **Sync both shelves** as appropriate.
 - If resolution succeeds, sync moves past metadata loading and begins per-book processing.
 
 ---

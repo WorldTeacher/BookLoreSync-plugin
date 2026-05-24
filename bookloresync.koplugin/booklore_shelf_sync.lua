@@ -17,6 +17,72 @@ function M.new(deps)
         return util.joinDownloadPath(dir, name)
     end
 
+    local function ensureDirExists(path)
+        local lfs = require("libs/libkoreader-lfs")
+        local current = tostring(path or "")
+        if current == "" then return false end
+
+        if lfs.attributes(current, "mode") == "directory" then
+            return true
+        end
+
+        local parts = {}
+        for part in current:gmatch("[^/]+") do
+            table.insert(parts, part)
+        end
+
+        local prefix = current:sub(1, 1) == "/" and "/" or ""
+        local cursor = prefix
+        for _, part in ipairs(parts) do
+            if cursor == "" or cursor == "/" then
+                cursor = prefix .. part
+            else
+                cursor = cursor .. "/" .. part
+            end
+            if lfs.attributes(cursor, "mode") ~= "directory" then
+                local ok = lfs.mkdir(cursor)
+                if not ok and lfs.attributes(cursor, "mode") ~= "directory" then
+                    return false
+                end
+            end
+        end
+
+        return lfs.attributes(current, "mode") == "directory"
+    end
+
+    --[[--
+    Check whether a book_id is still present in the other shelf's cached state.
+    If so, we should NOT delete the local file — the other shelf still needs it.
+    --]]
+    local function bookIdStillOnOtherShelf(self, current_target, book_id)
+        local other_shelf_id
+        local other_target
+        if current_target == "magic" then
+            other_shelf_id = tonumber(self.booklore_source_shelf_id) or tonumber(self.shelf_id)
+            other_target = "regular"
+        else
+            other_shelf_id = tonumber(self.booklore_magic_shelf_id)
+            other_target = "magic"
+        end
+        if not other_shelf_id then
+            return false  -- no other shelf configured
+        end
+        local state = self.db:getShelfState(other_shelf_id, other_target)
+        if not state or type(state.books_json) ~= "string" then
+            return false  -- no cached state for other shelf
+        end
+        local ok_dec, decoded = pcall(json.decode, state.books_json)
+        if not ok_dec or type(decoded) ~= "table" then
+            return false
+        end
+        for _, b in ipairs(decoded) do
+            if tonumber(b.id) == book_id then
+                return true
+            end
+        end
+        return false
+    end
+
     function module.detectDefaultDownloadDir(_self)
         local lfs = require("libs/libkoreader-lfs")
 
@@ -50,7 +116,7 @@ function M.new(deps)
 
     -- generateFilename delegates to util.generateFilename (shared logic).
     -- File hashing uses util.calculateBookHash inside the download loop.
-    function module.syncFromBookloreShelf(self, silent, on_complete)
+    function module.syncFromBookloreShelf(self, silent, on_complete, sync_target, suppress_summary)
     if silent == nil then silent = (self.ui and self.ui.document and true or false) end
 
     if self.sync_in_progress then
@@ -73,19 +139,23 @@ function M.new(deps)
         return false, msg
     end
 
+    local target = tostring(sync_target or "regular")
+    if target ~= "regular" and target ~= "magic" then
+        target = "regular"
+    end
+
+    local download_dir    = self.download_dir
+
     -- Ensure download directory exists
     local lfs = require("libs/libkoreader-lfs")
-    if lfs.attributes(self.download_dir, "mode") ~= "directory" then
-        local ok_mkdir = lfs.mkdir(self.download_dir)
-        if not ok_mkdir then
-            local msg = T(_("Cannot create download directory: %1"), self.download_dir)
-            self:logErr("BookloreSync: syncFromBookloreShelf -", msg)
-            if not silent and not self.silent_messages then
-                UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
-            end
-            if on_complete then on_complete(false, msg) end
-            return false, msg
+    if not ensureDirExists(download_dir) then
+        local msg = T(_("Cannot create download directory: %1"), download_dir)
+        self:logErr("BookloreSync: syncFromBookloreShelf -", msg)
+        if not silent and not self.silent_messages then
+            UIManager:show(InfoMessage:new{ text = msg, timeout = 3 })
         end
+        if on_complete then on_complete(false, msg) end
+        return false, msg
     end
 
     self.sync_in_progress = true
@@ -98,11 +168,9 @@ function M.new(deps)
     local sub_password    = self.booklore_password
     local db_name         = self.db.db_path:match("([^/]+)$") or "booklore-sync.sqlite"
 
-    local download_dir    = self.download_dir
     local delete_removed  = self.delete_removed_shelf_books
     local use_original_filename = self.shelf_use_original_filename
     local delete_sdr      = self.delete_sdr_on_book_delete
-    local source_type = (self.booklore_sync_source_type == "magic") and "magic" or "static"
 
     -- ── Phase 0: resolve credentials and refresh API client ────────────────
     self:refreshEffectiveServerUrl()
@@ -206,8 +274,8 @@ function M.new(deps)
         self:logInfo("BookloreSync: syncFromBookloreShelf -", total_msg)
         if on_complete then on_complete(ok, total_msg) end
 
-        -- Always show the summary dialog when sync was triggered manually (not silent).
-        if not silent then
+        -- Show the summary dialog when sync was triggered manually (not silent) and not suppressed for chained syncs.
+        if not silent and not suppress_summary then
             UIManager:scheduleIn(0, function()
                 local lines = {}
                 lines[#lines + 1] = _("Shelf Sync Complete")
@@ -260,7 +328,7 @@ function M.new(deps)
         UIManager:forceRePaint()
     end
 
-    if source_type == "magic" then
+    if target == "magic" then
         local magic_ok, magic_source = self.api:resolveMagicShelfSource(
             self.booklore_magic_shelf_id, self.booklore_magic_shelf_name,
             self.booklore_username, self.booklore_password)
@@ -378,15 +446,16 @@ function M.new(deps)
         end
     end
 
-    -- Update shelf_id if changed
-    if shelf_id ~= self.shelf_id then
+    -- Keep legacy shelf_id pointer aligned to the regular shelf only.
+    -- This avoids using a magic shelf id in regular-shelf deletion/unassign paths.
+    if target == "regular" and shelf_id ~= self.shelf_id then
         self.shelf_id = shelf_id
         self.settings:saveSetting("shelf_id", self.shelf_id)
         self.settings:flush()
     end
 
     -- Read cached shelf state for delta computation
-    cached_state = self.db:getShelfState(shelf_id)
+    cached_state = self.db:getShelfState(shelf_id, target)
 
     -- ── Delta computation: diff current shelf against cached state ──────────
     local prev_books = {}
@@ -436,26 +505,107 @@ function M.new(deps)
 
     -- Nothing to do at all — finish immediately.
     if total_new == 0 and total_del == 0 then
-        closeProgress()
-        -- Persist shelf state (updates synced_at timestamp even when nothing changed)
-        local ok_enc, books_json = pcall(json.encode, books)
-        if ok_enc and books_json then
-            self.db:saveShelfState(shelf_id, books_json)
-            self:logInfo('BookloreSync: shelf state saved for shelf_id', shelf_id)
+        -- Sanity check 1: if the shelf has books but their files are missing
+        -- from disk, the files were likely removed externally.  Don't trust
+        -- the delta — re-queue all books for download.
+        if #books > 0 then
+            local lfs_local = require("libs/libkoreader-lfs")
+            local any_missing = false
+            for _i, b in ipairs(books) do
+                local bid = tonumber(b.id)
+                if bid then
+                    local cached = nil
+                    if self.db.getBookByBookIdInDir then
+                        cached = self.db:getBookByBookIdInDir(bid, download_dir)
+                    end
+                    if (not cached or not cached.file_path) and self.db.getBookByBookId then
+                        cached = self.db:getBookByBookId(bid)
+                    end
+                    if not cached or not cached.file_path
+                        or lfs_local.attributes(cached.file_path, "mode") ~= "file" then
+                        any_missing = true
+                        break
+                    end
+                end
+            end
+            if any_missing then
+                self:logWarn("BookloreSync: shelf is up to date per cache but " .. tostring(#books) .. " book(s) missing from disk - re-queuing all books")
+                books_to_download = {}
+                for _i, b in ipairs(books) do
+                    table.insert(books_to_download, b)
+                end
+                total_new = #books_to_download
+                -- Also clear the cached shelf state so the next delta is clean
+                self.db:clearShelfState(shelf_id, target)
+            end
         end
-        self:logInfo("BookloreSync: syncFromBookloreShelf - shelf up to date")
-        self.sync_in_progress = false
-        if on_complete then on_complete(true, _("Shelf up to date")) end
-        if not silent then
-            UIManager:scheduleIn(0, function()
-                UIManager:show(InfoMessage:new{
-                    text = _("Shelf up to date - Everything is already synced."),
-                    timeout = 3,
-                })
-                UIManager:forceRePaint()
-            end)
+
+        -- Sanity check 2: if cache says no delta but local stale files remain in
+        -- the active download directory, remove them when delete_removed is enabled.
+        -- This catches stale local rows/files that are outside the current shelf
+        -- state but were not part of the immediate prev->curr delta.
+        local stale_deleted = 0
+        if total_new == 0 and delete_removed and self.db.getAllCachedBooks then
+            local lfs_local = require("libs/libkoreader-lfs")
+            local all_cached = self.db:getAllCachedBooks() or {}
+            local dir_prefix = tostring(download_dir or ""):gsub("/+$", "") .. "/"
+            for _i, cached in ipairs(all_cached) do
+                local bid = cached and tonumber(cached.book_id)
+                local fp = cached and tostring(cached.file_path or "") or ""
+                if bid and fp ~= "" and fp:sub(1, #dir_prefix) == dir_prefix
+                    and lfs_local.attributes(fp, "mode") == "file"
+                    and not curr_books[bid]
+                    and not bookIdStillOnOtherShelf(self, target, bid) then
+                    if os.remove(fp) then
+                        stale_deleted = stale_deleted + 1
+                        if delete_sdr then
+                            local sdr_dirs = self:getSdrPaths(fp)
+                            for _j, sdr_dir in ipairs(sdr_dirs) do
+                                local ok_rm, err_rm = self:_deleteDirRecursive(sdr_dir)
+                                if not ok_rm then
+                                    self:logErr("BookloreSync: Failed to delete sidecar: " .. tostring(sdr_dir) .. " | " .. tostring(err_rm))
+                                end
+                            end
+                        end
+                    else
+                        result.failed = result.failed + 1
+                    end
+                end
+            end
+            if stale_deleted > 0 then
+                result.deleted = (result.deleted or 0) + stale_deleted
+                self:logWarn("BookloreSync: removed stale local shelf file(s): " .. tostring(stale_deleted))
+            end
         end
-        return
+
+        if total_new == 0 then
+            -- Persist shelf state (updates synced_at timestamp even when nothing changed)
+            local ok_enc, books_json = pcall(json.encode, books)
+            if ok_enc and books_json then
+                self.db:saveShelfState(shelf_id, target, books_json)
+                self:logInfo('BookloreSync: shelf state saved for shelf_id', shelf_id)
+            end
+
+            if stale_deleted > 0 then
+                finishSync(true)
+                return
+            end
+
+            closeProgress()
+            self:logInfo("BookloreSync: syncFromBookloreShelf - shelf up to date")
+            self.sync_in_progress = false
+            if on_complete then on_complete(true, _("Shelf up to date")) end
+            if not silent then
+                UIManager:scheduleIn(0, function()
+                    UIManager:show(InfoMessage:new{
+                        text = _("Shelf up to date - Everything is already synced."),
+                        timeout = 3,
+                    })
+                    UIManager:forceRePaint()
+                end)
+            end
+            return
+        end
     end
 
     -- ── Phase 2: sequential download loop ───────────────────────────────────
@@ -591,26 +741,71 @@ function M.new(deps)
     local deleted = 0
     if delete_removed then
         if not first_sync then
+            -- Delta-path deletion: remove every local file in the active download
+            -- directory whose book_id disappeared from this shelf.
+            local removed_lookup = {}
             for _i, removed_id in ipairs(books_to_delete) do
-                local cached = self.db:getBookByBookId(removed_id)
-                if cached and cached.file_path then
-                    local fp = cached.file_path
-                    if lfs.attributes(fp, "mode") == "file" then
-                        if os.remove(fp) then
-                            deleted = deleted + 1
-                            if delete_sdr then
-                                local sdr_dirs = self:getSdrPaths(fp)
-                                for _j, sdr_dir in ipairs(sdr_dirs) do
-                                    local ok_rm, err_rm = self:_deleteDirRecursive(sdr_dir)
-                                    if not ok_rm then
-                                        self:logErr("BookloreSync: Failed to delete sidecar:", sdr_dir, err_rm)
-                                    end
-                                end
+                local bid = tonumber(removed_id)
+                if bid then
+                    removed_lookup[bid] = true
+                end
+            end
+
+            local dir_prefix = tostring(download_dir or ""):gsub("/+$", "") .. "/"
+            local seen_path = {}
+
+            local function queueDeletePath(fp, bid)
+                fp = tostring(fp or "")
+                if fp == "" then return end
+                if fp:sub(1, #dir_prefix) ~= dir_prefix then return end
+                if seen_path[fp] then return end
+                seen_path[fp] = true
+                if lfs.attributes(fp, "mode") ~= "file" then return end
+
+                if bid and bookIdStillOnOtherShelf(self, target, bid) then
+                    self:logInfo("BookloreSync: delta skip deletion of bookId=" .. tostring(bid) .. " - still on other shelf")
+                    return
+                end
+
+                if os.remove(fp) then
+                    deleted = deleted + 1
+                    if delete_sdr then
+                        local sdr_dirs = self:getSdrPaths(fp)
+                        for _j, sdr_dir in ipairs(sdr_dirs) do
+                            local ok_rm, err_rm = self:_deleteDirRecursive(sdr_dir)
+                            if not ok_rm then
+                                self:logErr("BookloreSync: Failed to delete sidecar: " .. tostring(sdr_dir) .. " | " .. tostring(err_rm))
                             end
-                        else
-                            result.failed = result.failed + 1
                         end
                     end
+                else
+                    result.failed = result.failed + 1
+                end
+            end
+
+            -- Pass 1: bulk scan (captures multiple rows per book_id when present)
+            if self.db.getAllCachedBooks then
+                local all_cached = self.db:getAllCachedBooks() or {}
+                for _i, cached in ipairs(all_cached) do
+                    local bid = cached and tonumber(cached.book_id)
+                    if bid and removed_lookup[bid] then
+                        queueDeletePath(cached.file_path, bid)
+                    end
+                end
+            end
+
+            -- Pass 2: per-id fallback (covers lightweight DB stubs and single-row lookups)
+            for _i, removed_id in ipairs(books_to_delete) do
+                local bid = tonumber(removed_id)
+                local cached = nil
+                if self.db.getBookByBookIdInDir then
+                    cached = self.db:getBookByBookIdInDir(removed_id, download_dir)
+                end
+                if (not cached or not cached.file_path) and self.db.getBookByBookId then
+                    cached = self.db:getBookByBookId(removed_id)
+                end
+                if cached and cached.file_path then
+                    queueDeletePath(cached.file_path, bid)
                 end
             end
         else
@@ -623,19 +818,24 @@ function M.new(deps)
                         local cached = self.db and self.db:getBookByFilePath(fp)
                         local lid = cached and cached.book_id
                         if lid and not shelf_book_ids[lid] then
-                            if os.remove(fp) then
-                                deleted = deleted + 1
-                                if delete_sdr then
-                                    local sdr_dirs = self:getSdrPaths(fp)
-                                    for _j, sdr_dir in ipairs(sdr_dirs) do
-                                        local ok_rm, err_rm = self:_deleteDirRecursive(sdr_dir)
-                                        if not ok_rm then
-                                            self:logErr('BookloreSync: Failed to delete sidecar:', sdr_dir, err_rm)
+                            -- First-sync cross-check: if the other shelf has this book, keep the file.
+                            if bookIdStillOnOtherShelf(self, target, lid) then
+                                self:logInfo("BookloreSync: first-sync skip deletion of bookId=" .. tostring(lid) .. " - still on other shelf")
+                            else
+                                if os.remove(fp) then
+                                    deleted = deleted + 1
+                                    if delete_sdr then
+                                        local sdr_dirs = self:getSdrPaths(fp)
+                                        for _j, sdr_dir in ipairs(sdr_dirs) do
+                                            local ok_rm, err_rm = self:_deleteDirRecursive(sdr_dir)
+                                            if not ok_rm then
+                                                self:logErr('BookloreSync: Failed to delete sidecar: ' .. tostring(sdr_dir) .. ' | ' .. tostring(err_rm))
+                                            end
                                         end
                                     end
+                                else
+                                    result.failed = result.failed + 1
                                 end
-                            else
-                                result.failed = result.failed + 1
                             end
                         end
                     end
@@ -651,7 +851,7 @@ function M.new(deps)
             -- Persist shelf state for next delta
             local ok_enc, books_json = pcall(json.encode, books)
             if ok_enc and books_json then
-                self.db:saveShelfState(shelf_id, books_json)
+                self.db:saveShelfState(shelf_id, target, books_json)
                 self:logInfo('BookloreSync: shelf state saved for shelf_id', shelf_id)
             end
             finishSync(true)
@@ -769,7 +969,7 @@ function M.new(deps)
             -- Persist shelf state now that downloads are complete.
             local ok_enc, books_json = pcall(json.encode, books)
             if ok_enc and books_json then
-                self.db:saveShelfState(shelf_id, books_json)
+                self.db:saveShelfState(shelf_id, target, books_json)
                 self:logInfo('BookloreSync: shelf state saved for shelf_id', shelf_id)
             end
             finishSync(true)

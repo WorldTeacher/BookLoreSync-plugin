@@ -1,3 +1,10 @@
+# [4.5.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.4.1...4.5.0) (2026-05-24)
+
+
+### Features
+
+* **shelf-sync:** allow use of both shelf types together ([4cb83a6](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/4cb83a6ebd6ac37e55b7f51f2c7c4972b21d4b46))
+
 ## [4.4.1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.4.0...4.4.1) (2026-05-18)
 
 

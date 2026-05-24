@@ -25,13 +25,15 @@ if ! command -v busted &>/dev/null; then
 fi
 
 if ! command -v luacov &>/dev/null; then
-    echo "ERROR: luacov not found in PATH (install via luarocks install luacov)" >&2
-    exit 1
+    echo "WARNING: luacov not found in PATH - coverage reports will use Python fallback" >&2
+    LUACOV_MISSING=1
 fi
 
-if ! command -v luacov-cobertura &>/dev/null; then
-    echo "ERROR: luacov-cobertura not found in PATH (install via luarocks install luacov-cobertura)" >&2
-    exit 1
+if command -v luacov-cobertura &>/dev/null && luacov-cobertura --help &>/dev/null 2>&1; then
+    COBERTURA_OK=1
+else
+    echo "WARNING: luacov-cobertura not available - will use Python converter" >&2
+    COBERTURA_OK=0
 fi
 
 rm -f luacov.stats.out luacov.report.out coverage.xml
@@ -43,20 +45,31 @@ echo ""
 echo "Running Python schema tests"
 python3 spec/test_database_schema.py
 
-echo "Generating luacov text report"
-luacov
+if [ -z "${LUACOV_MISSING:-}" ]; then
+    echo "Generating luacov text report"
+    luacov
+else
+    echo "Skipping luacov text report (luacov not available)"
+fi
 
-echo "Generating Cobertura XML report"
-luacov-cobertura -o coverage.xml
+if [ "${COBERTURA_OK:-0}" = "1" ]; then
+    echo "Generating Cobertura XML report"
+    luacov-cobertura -o coverage.xml
+else
+    echo "Generating Cobertura XML report (Python converter)"
+    python3 "$SCRIPT_DIR/luacov-to-cobertura.py" luacov.stats.out coverage.xml
+fi
 
 if [ ! -f coverage.xml ]; then
     echo "ERROR: coverage.xml was not generated" >&2
     exit 1
 fi
 
-TOTAL_COVERAGE=$(awk '/^Summary/{found=1} found && /^Total/{print $NF; exit}' luacov.report.out)
-if [ -n "${TOTAL_COVERAGE:-}" ]; then
-    echo "TOTAL_COVERAGE=${TOTAL_COVERAGE}"
+if [ -f luacov.report.out ]; then
+    TOTAL_COVERAGE=$(awk '/^Summary/{found=1} found && /^Total/{print $NF; exit}' luacov.report.out)
+    if [ -n "${TOTAL_COVERAGE:-}" ]; then
+        echo "TOTAL_COVERAGE=${TOTAL_COVERAGE}"
+    fi
 fi
 
 echo "All tests passed and coverage artifacts generated"

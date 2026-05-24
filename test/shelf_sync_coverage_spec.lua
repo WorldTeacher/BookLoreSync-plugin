@@ -307,9 +307,15 @@ local function make_db_stub(opts)
         getBookByBookId = function(_, bid)
           return opts.cached_by_id and opts.cached_by_id[tonumber(bid)] or nil
         end,
-        getBookByBookIdInDir = function(_, bid)
+        getBookByBookIdInDir = function(_, bid, dir_prefix)
           local row = opts.cached_by_id and opts.cached_by_id[tonumber(bid)] or nil
-          return row
+          if not row then return nil end
+          if not dir_prefix or dir_prefix == "" then return row end
+          local fp = row.file_path
+          if type(fp) == "string" and fp:sub(1, #dir_prefix) == dir_prefix then
+            return row
+          end
+          return nil
         end,
         getShelfState = function(_, _shelf_id, _shelf_target)
           return opts.shelf_state or nil
@@ -330,11 +336,18 @@ local function make_lfs_stub(opts)
   local dir_exists = opts.download_dir_exists ~= false
   local files = opts.files or {}
   local dir_entries = opts.dir_entries or {}
+  local dirs = {
+    ["/"] = true,
+    ["/tmp"] = true,
+  }
+  if dir_exists then
+    dirs["/tmp/test-dl"] = true
+  end
   return {
     attributes = function(path, attr)
       if attr == "mode" then
         if files[path] then return "file" end
-        if path == "/tmp/test-dl" and dir_exists then return "directory" end
+        if dirs[path] then return "directory" end
         return nil
       end
       if attr == "size" then
@@ -343,7 +356,10 @@ local function make_lfs_stub(opts)
       end
       return nil
     end,
-    mkdir = function() return true end,
+    mkdir = function(path)
+      dirs[path] = true
+      return true
+    end,
     dir   = function(dirpath)
       if dirpath == "/tmp/test-dl" then
         local i = 0

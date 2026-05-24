@@ -131,7 +131,7 @@ For one-shot upload/download actions, this behavior is applied when the action h
 - **Sync Pending Now**
 - **Pull current book progress**
 - **Push current book progress**
-- **Sync from Booklore Shelf**
+- **Sync Shelves**
 - **Re-sync All Historical**
 - **Sync Re-matched Sessions**
 - **Re-sync Stored Metadata**

@@ -12,7 +12,7 @@ local LuaSettings = require("luasettings")
 local logger = require("logger")
 
 local Database = {
-    VERSION = 27,  -- Current database schema version
+    VERSION = 28,  -- Current database schema version
     db_path = nil,
     conn = nil,
 }
@@ -716,6 +716,36 @@ Database.migrations = {
 
     -- Migration 27: Store KOReader pagecount captured with each pending session.
     [27] = {},
+    -- Migration 28: Composite index for book_id+file_path lookups and
+    -- shelf_target column to namespace cached shelf state per target type.
+    [28] = {
+        [[
+            CREATE INDEX IF NOT EXISTS idx_book_cache_book_id_path ON book_cache(book_id, file_path);
+        ]],
+        [[
+            CREATE TABLE IF NOT EXISTS shelf_state_v2 (
+                shelf_id     INTEGER NOT NULL,
+                shelf_target TEXT    NOT NULL DEFAULT 'regular',
+                books_json   TEXT    NOT NULL,
+                synced_at    INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (shelf_id, shelf_target)
+            );
+        ]],
+        [[
+            INSERT OR REPLACE INTO shelf_state_v2 (shelf_id, shelf_target, books_json, synced_at)
+            SELECT shelf_id, 'regular', books_json, synced_at
+            FROM shelf_state;
+        ]],
+        [[
+            DROP TABLE IF EXISTS shelf_state;
+        ]],
+        [[
+            ALTER TABLE shelf_state_v2 RENAME TO shelf_state;
+        ]],
+        [[
+            CREATE INDEX IF NOT EXISTS idx_shelf_state_target_id ON shelf_state(shelf_target, shelf_id);
+        ]],
+    },
 }
 
 -- Post-migration hooks: Lua functions run after the SQL transaction commits.
@@ -1281,6 +1311,50 @@ function Database:getBookByBookId(book_id)
         break
     end
     
+    stmt:close()
+    return book
+end
+
+---Database:getBookByBookIdInDir.
+function Database:getBookByBookIdInDir(book_id, dir_prefix)
+    book_id = tonumber(book_id)
+    local base = tostring(dir_prefix or "")
+    if not book_id or base == "" then
+        return nil
+    end
+
+    base = base:gsub("/+$", "")
+
+    local stmt = self.conn:prepare([[
+        SELECT id, file_path, file_hash, book_id, title, author, last_accessed, server_pagecount
+        FROM book_cache
+        WHERE book_id = ?
+          AND file_path LIKE ?
+        LIMIT 1
+    ]])
+
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: getBookByBookIdInDir - failed to prepare:", self.conn:errmsg())
+        return nil
+    end
+
+    stmt:bind(book_id, base .. "/%")
+
+    local book = nil
+    for row in stmt:rows() do
+        book = {
+            id = tonumber(row[1]),
+            file_path = tostring(row[2]),
+            file_hash = tostring(row[3]),
+            book_id = row[4] and tonumber(row[4]) or nil,
+            title = row[5] and tostring(row[5]) or nil,
+            author = row[6] and tostring(row[6]) or nil,
+            last_accessed = row[7] and tonumber(row[7]) or nil,
+            server_pagecount = row[8] and tonumber(row[8]) or nil,
+        }
+        break
+    end
+
     stmt:close()
     return book
 end
@@ -4851,17 +4925,18 @@ Retrieve the cached shelf state for a shelf.
 @return table|nil  { books_json=string, synced_at=number } or nil if not cached
 --]]
 ---Database:getShelfState.
-function Database:getShelfState(shelf_id)
+function Database:getShelfState(shelf_id, shelf_target)
     shelf_id = tonumber(shelf_id)
     if not shelf_id then return nil end
+    shelf_target = (shelf_target == "magic") and "magic" or "regular"
     local stmt = self.conn:prepare([[
-        SELECT books_json, synced_at FROM shelf_state WHERE shelf_id = ?
+        SELECT books_json, synced_at FROM shelf_state WHERE shelf_id = ? AND shelf_target = ?
     ]])
     if not stmt then
         self.plugin:logErr("BookloreSync Database: getShelfState - failed to prepare:", self.conn:errmsg())
         return nil
     end
-    stmt:bind(shelf_id)
+    stmt:bind(shelf_id, shelf_target)
     local result = nil
     for row in stmt:rows() do
         result = {
@@ -4882,22 +4957,23 @@ Uses INSERT OR REPLACE so repeated calls simply overwrite the previous row.
 @param books_json  string  JSON-encoded array of book objects from the API
 --]]
 ---Database:saveShelfState.
-function Database:saveShelfState(shelf_id, books_json)
+function Database:saveShelfState(shelf_id, shelf_target, books_json)
     shelf_id = tonumber(shelf_id)
+    shelf_target = (shelf_target == "magic") and "magic" or "regular"
     if not shelf_id or type(books_json) ~= "string" then
         self.plugin:logErr("BookloreSync Database: saveShelfState - invalid arguments")
         return false
     end
     local stmt = self.conn:prepare([[
-        INSERT OR REPLACE INTO shelf_state (shelf_id, books_json, synced_at)
-        VALUES (?, ?, strftime('%s', 'now'))
+        INSERT OR REPLACE INTO shelf_state (shelf_id, shelf_target, books_json, synced_at)
+        VALUES (?, ?, ?, strftime('%s', 'now'))
     ]])
     if not stmt then
         self.plugin:logErr("BookloreSync Database: saveShelfState - failed to prepare:", self.conn:errmsg())
         return false
     end
     local ok, err = pcall(function()
-        stmt:bind(shelf_id, books_json)
+        stmt:bind(shelf_id, shelf_target, books_json)
         stmt:step()
     end)
     stmt:close()
@@ -4915,16 +4991,17 @@ a full pass.
 @param shelf_id  number  Shelf ID
 --]]
 ---Database:clearShelfState.
-function Database:clearShelfState(shelf_id)
+function Database:clearShelfState(shelf_id, shelf_target)
     shelf_id = tonumber(shelf_id)
     if not shelf_id then return end
-    local stmt = self.conn:prepare("DELETE FROM shelf_state WHERE shelf_id = ?")
+    shelf_target = (shelf_target == "magic") and "magic" or "regular"
+    local stmt = self.conn:prepare("DELETE FROM shelf_state WHERE shelf_id = ? AND shelf_target = ?")
     if not stmt then
         self.plugin:logErr("BookloreSync Database: clearShelfState - failed to prepare:", self.conn:errmsg())
         return
     end
     local ok, err = pcall(function()
-        stmt:bind(shelf_id)
+        stmt:bind(shelf_id, shelf_target)
         stmt:step()
     end)
     stmt:close()

@@ -57,8 +57,10 @@ function M.new(deps)
 
     if not self.is_enabled then return end
     if self.booklore_username == "" or self.booklore_password == "" then return end
-    if self.booklore_sync_source_type == "magic" then
-        self:logInfo("BookloreSync: notifyBookloreOnDeletion - skipping shelf unassign for magic shelf source")
+    local regular_shelf_id = tonumber(self.booklore_source_shelf_id) or tonumber(self.shelf_id)
+    local magic_shelf_id = tonumber(self.booklore_magic_shelf_id)
+    if not regular_shelf_id and magic_shelf_id then
+        self:logInfo("BookloreSync: notifyBookloreOnDeletion - skipping shelf unassign for magic-only shelf config")
         return
     end
 
@@ -104,7 +106,7 @@ function M.new(deps)
             local token_ok, token = self.api:getOrRefreshBearerToken(self.booklore_username, self.booklore_password, false)
             if not token_ok then error(token or "Failed to obtain auth token") end
 
-            local shelf_id = tonumber(self.booklore_source_shelf_id) or self.shelf_id
+            local shelf_id = regular_shelf_id
             if not shelf_id then error("No shelf_id configured - cannot unassign book from shelf") end
 
             local headers = {

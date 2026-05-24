@@ -81,10 +81,9 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `booklore_shelf_name` | string | `"KOReader"` | Active shelf source display name (shared runtime label for standard and Magic shelf sources) |
-| `booklore_sync_source_type` | string | `"static"` | Shelf source type: `"static"` (standard shelf) or `"magic"` (Magic Shelf) |
-| `booklore_source_shelf_name` | string | `"KOReader"` | Standard shelf source name (used when source type is `"static"`) |
+| `booklore_source_shelf_name` | string | `"KOReader"` | Regular shelf source name |
 | `booklore_source_shelf_id` | integer | `nil` | Explicit standard shelf source ID. If set, resolution uses this ID before name fallback |
-| `booklore_magic_shelf_name` | string | `"KOReader"` | Magic Shelf source name (used when source type is `"magic"`) |
+| `booklore_magic_shelf_name` | string | `"KOReader"` | Magic Shelf source name |
 | `booklore_magic_shelf_id` | integer | `nil` | Explicit Magic Shelf source ID. If set, resolution uses this ID before name fallback |
 | `shelf_id` | integer | `nil` | Cached ID of the resolved shelf (set automatically after first sync) |
 | `download_dir` | string | *(auto)* | Local directory where downloaded books are saved; resolved from KOReader's `home_dir` setting, then device default, then known platform paths (`/mnt/onboard/Books`, `/sdcard/Books`). Always a `Books` subdirectory. |

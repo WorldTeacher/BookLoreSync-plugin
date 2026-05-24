@@ -338,6 +338,14 @@ local function make_db_stub(opts)
         getBookByBookId = function(_, bid)
           return opts.cached_by_id and opts.cached_by_id[tonumber(bid)] or nil
         end,
+        getBookByBookIdInDir = function(_, bid, dir_prefix)
+          local by_dir = opts.cached_by_id_in_dir or {}
+          local per_book = by_dir[tonumber(bid)]
+          if type(per_book) == "table" then
+            return per_book[dir_prefix]
+          end
+          return nil
+        end,
         getShelfState = function(_, _shelf_id)
           return opts.shelf_state or nil
         end,
@@ -360,16 +368,26 @@ local function make_lfs_stub(opts)
   local dir_exists = opts.download_dir_exists ~= false
   local files = opts.files or {}
   local dir_entries = opts.dir_entries or {}
+  local dirs = {
+    ["/"] = true,
+    ["/tmp"] = true,
+  }
+  if dir_exists then
+    dirs["/tmp/test-dl"] = true
+  end
   return {
     attributes = function(path, attr)
       if attr == "mode" then
         if files[path] then return "file" end
-        if path == "/tmp/test-dl" and dir_exists then return "directory" end
+        if dirs[path] then return "directory" end
         return nil
       end
       return nil
     end,
-    mkdir = function() return true end,
+    mkdir = function(path)
+      dirs[path] = true
+      return true
+    end,
     dir   = function(dirpath)
       if dirpath == "/tmp/test-dl" then
         local i = 0
@@ -397,8 +415,8 @@ local function make_plugin(overrides)
     server_url          = "http://localhost:8080",
     booklore_username   = "testuser",
     booklore_password   = "testpass",
-    booklore_shelf_name = "My Shelf",
-    booklore_sync_source_type = "static",
+    booklore_source_shelf_name = "My Shelf",
+    booklore_source_shelf_id = nil,
     booklore_magic_shelf_name = "Magic Shelf",
     booklore_magic_shelf_id = nil,
     shelf_id            = nil,
@@ -560,7 +578,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     assert.is_false(p.sync_in_progress)
   end)
 
-  it("uses magic shelf adapter when source type is magic", function()
+  it("uses magic shelf adapter when sync target is magic", function()
     package.preload["libs/libkoreader-lfs"] = function() return make_lfs_stub() end
     package.preload["booklore_api_client"]  = function()
       return {
@@ -568,7 +586,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
           return {
             init = function() end,
             resolveShelfSource = function()
-              error("resolveShelfSource should not be called for magic source")
+              error("resolveShelfSource should not be called for magic target")
             end,
             resolveMagicShelfSource = function(_, magic_id, magic_name)
               assert.are.equal(88, magic_id)
@@ -576,7 +594,7 @@ describe("BookloreSync:syncFromBookloreShelf", function()
               return true, { id = 88, name = "Magic Picks", source = "id" }
             end,
             getBooksInShelf = function()
-              error("getBooksInShelf should not be called for magic source")
+              error("getBooksInShelf should not be called for magic target")
             end,
             getBooksInMagicShelf = function(_, magic_id)
               assert.are.equal(88, magic_id)
@@ -590,13 +608,15 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     package.preload["booklore_database"]    = function() return make_db_stub() end
 
     local p = make_plugin({
-      booklore_sync_source_type = "magic",
       booklore_magic_shelf_name = "Magic Picks",
       booklore_magic_shelf_id = 88,
+      shelf_id = 7,
     })
-    p:syncFromBookloreShelf(true)
+    p:syncFromBookloreShelf(true, nil, "magic")
 
-    assert.are.equal(88, p.shelf_id)
+    -- Legacy shelf_id must stay bound to regular shelf only
+    assert.are.equal(7, p.shelf_id)
+    assert.are.equal("Magic Picks", p.booklore_magic_shelf_name)
     assert.is_false(p.sync_in_progress)
   end)
 
@@ -612,14 +632,14 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     package.preload["booklore_database"]    = function() return make_db_stub() end
 
     local p = make_plugin({
-      booklore_sync_source_type = "magic",
       booklore_magic_shelf_name = "Auto Magic",
       booklore_magic_shelf_id = nil,
+      shelf_id = 55,
       api_opts = { magic_resolve_id = 91, magic_resolve_name = "Auto Magic", magic_books = {} },
     })
-    p:syncFromBookloreShelf(true)
+    p:syncFromBookloreShelf(true, nil, "magic")
 
-    assert.are.equal(91, p.shelf_id)
+    assert.are.equal(55, p.shelf_id)
     assert.are.equal("Auto Magic", p.booklore_magic_shelf_name)
     assert.is_false(p.sync_in_progress)
   end)
@@ -685,10 +705,12 @@ describe("BookloreSync:syncFromBookloreShelf", function()
         },
       },
     })
-    p.db.getBookByBookId = function(_, bid)
-      bid = tonumber(bid)
-      if bid == 2 then return { file_path = gone_file_1 } end
-      if bid == 3 then return { file_path = gone_file_2 } end
+    p.db.getBookByBookIdInDir = function(_, bid, dir)
+      if dir == "/tmp/test-dl" then
+        bid = tonumber(bid)
+        if bid == 2 then return { file_path = gone_file_1 } end
+        if bid == 3 then return { file_path = gone_file_2 } end
+      end
       return nil
     end
 
@@ -1179,9 +1201,9 @@ describe("BookloreSync:syncFromBookloreShelf", function()
       })
     end
 
-    local p = make_plugin({ delete_removed_shelf_books = true, api_opts = { books = curr_books } })
-    p.db.getBookByBookId = function(_, bid)
-      if tonumber(bid) == 2 then
+    local p = make_plugin({ delete_removed_shelf_books = true, api_opts = { books = curr_books }, shelf_id = 7 })
+    p.db.getBookByBookIdInDir = function(_, bid, dir)
+      if dir == "/tmp/test-dl" and tonumber(bid) == 2 then
         return { book_id = 2, file_path = gone_file }
       end
       return nil

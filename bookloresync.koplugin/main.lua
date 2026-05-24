@@ -23,6 +23,7 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local Menu = require("ui/widget/menu")
 local json = require("json")
 local Settings = require("booklore_settings")
+local util = require("booklore_util")
 local Database = require("booklore_database")
 local APIClient = require("booklore_api_client")
 local HardcoverClient = require("hardcover_api_client")
@@ -818,15 +819,18 @@ function BookloreSync:init()
 
     -- Shelf sync settings
     self.booklore_shelf_name         = self.settings:readSetting("booklore_shelf_name")  or "KOReader"
-    self.booklore_sync_source_type   = self.settings:readSetting("booklore_sync_source_type") or "static"
-    if self.booklore_sync_source_type ~= "magic" then
-        self.booklore_sync_source_type = "static"
-    end
     self.booklore_source_shelf_name  = self.settings:readSetting("booklore_source_shelf_name") or self.booklore_shelf_name
     self.booklore_source_shelf_id    = tonumber(self.settings:readSetting("booklore_source_shelf_id"))
     self.booklore_magic_shelf_name   = self.settings:readSetting("booklore_magic_shelf_name") or self.booklore_shelf_name
     self.booklore_magic_shelf_id     = tonumber(self.settings:readSetting("booklore_magic_shelf_id"))
     self.shelf_id                    = self.settings:readSetting("shelf_id")
+    if not self.booklore_source_shelf_id and self.shelf_id then
+        self:logWarn("BookloreSync: legacy shelf_id (%s) found without booklore_source_shelf_id — consider re-selecting shelves via Select shelf to migrate.", tostring(self.shelf_id))
+        UIManager:show(InfoMessage:new{
+            text = _("Your shelf sync configuration uses a legacy shelf ID. Re-select your shelves via Tools → Booklore Sync → Shelf Sync → Select Shelf → Select shelf to ensure library sync works correctly."),
+            timeout = 10,
+        })
+    end
     self.download_dir                = self.settings:readSetting("download_dir")
                                        or self:_detectDefaultDownloadDir()
     self.auto_sync_shelf_on_resume   = self.settings:readSetting("auto_sync_shelf_on_resume")
@@ -1090,8 +1094,20 @@ function BookloreSync:registerDispatcherActions()
     })
     Dispatcher:registerAction("booklore_sync_shelf", {
         category = "none",
-        event = "SyncBookloreShelf",
-        title = _("BookLoreSync: Sync Booklore Shelf"),
+        event = "SyncBookloreShelfBoth",
+        title = _("BookLoreSync: Sync Booklore Shelves (Both)"),
+        general = true,
+    })
+    Dispatcher:registerAction("booklore_sync_shelf_regular", {
+        category = "none",
+        event = "SyncBookloreShelfRegular",
+        title = _("BookLoreSync: Sync Booklore Shelf (Regular)"),
+        general = true,
+    })
+    Dispatcher:registerAction("booklore_sync_shelf_magic", {
+        category = "none",
+        event = "SyncBookloreShelfMagic",
+        title = _("BookLoreSync: Sync Booklore Shelf (Magic)"),
         general = true,
     })
     Dispatcher:registerAction("booklore_pull_current_book_progress", {
@@ -1108,7 +1124,7 @@ function BookloreSync:registerDispatcherActions()
     })
 end
 
----BookloreSync:onSyncBookloreShelf.
+---BookloreSync:showWifiUnavailableInfo.
 function BookloreSync:showWifiUnavailableInfo(wifi_text, airplane_text, timeout)
     local message = wifi_text
     if self:isAirplaneModeActive() then
@@ -1120,8 +1136,8 @@ function BookloreSync:showWifiUnavailableInfo(wifi_text, airplane_text, timeout)
     })
 end
 
----BookloreSync:onSyncBookloreShelf.
-function BookloreSync:onSyncBookloreShelf()
+---BookloreSync:runShelfSyncWithWifi.
+function BookloreSync:runShelfSyncWithWifi(sync_targets)
     if not (self.booklore_username and self.booklore_username ~= "" and
             self.booklore_password and self.booklore_password ~= "") then
         UIManager:show(InfoMessage:new{
@@ -1130,45 +1146,73 @@ function BookloreSync:onSyncBookloreShelf()
         })
         return true
     end
+
     local was_connected = self:isNetworkConnected()
+    local targets = sync_targets or { "regular" }
+
+    local function finishWifiLifecycle()
+        if was_connected then
+            return
+        end
+
+        -- Respect KOReader's global post-WiFi policy (leave on / turn off / prompt)
+        -- after shelf sync actually completes.
+        local handled = false
+        if type(NetworkMgr.afterWifiAction) == "function" then
+            local ok_after, after_err = pcall(function()
+                if type(NetworkMgr.setBeforeActionFlag) == "function" then
+                    NetworkMgr:setBeforeActionFlag()
+                end
+                NetworkMgr:afterWifiAction()
+            end)
+            if ok_after then
+                handled = true
+                self:logInfo("BookloreSync: Shelf sync completed KOReader after-WiFi action")
+            else
+                self:logWarn("BookloreSync: Shelf sync post-WiFi action failed:", tostring(after_err))
+            end
+        end
+
+        if not handled then
+            local ok_disconnect, disconnected = pcall(function()
+                return self:disconnectNetwork()
+            end)
+            if not ok_disconnect then
+                self:logWarn("BookloreSync: Shelf sync fallback WiFi disable crashed:", tostring(disconnected))
+            elseif disconnected then
+                self:logInfo("BookloreSync: Shelf sync disabled WiFi via fallback")
+            else
+                self:logWarn("BookloreSync: Shelf sync could not disable WiFi via fallback")
+            end
+        end
+    end
+
+    local function runTargetAt(index)
+        local target = targets[index]
+        if not target then
+            finishWifiLifecycle()
+            return
+        end
+
+        local is_last = (index == #targets)
+        local target_label = (target == "magic") and _("Magic Shelf") or _("Regular Shelf")
+
+        -- When chaining to the next target, show a transition so the user knows what's coming.
+        if index > 1 then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Now syncing: %1..."), target_label),
+                timeout = 3,
+            })
+            UIManager:forceRePaint()
+        end
+
+        self:syncFromBookloreShelf(false, function()
+            runTargetAt(index + 1)
+        end, target, not is_last)
+    end
 
     self:_requestWifi(_("sync Booklore shelf"), function()
-        self:syncFromBookloreShelf(false, function()
-            if was_connected then
-                return
-            end
-
-            -- Respect KOReader's global post-WiFi policy (leave on / turn off / prompt)
-            -- after shelf sync actually completes.
-            local handled = false
-            if type(NetworkMgr.afterWifiAction) == "function" then
-                local ok_after, after_err = pcall(function()
-                    if type(NetworkMgr.setBeforeActionFlag) == "function" then
-                        NetworkMgr:setBeforeActionFlag()
-                    end
-                    NetworkMgr:afterWifiAction()
-                end)
-                if ok_after then
-                    handled = true
-                    self:logInfo("BookloreSync: Shelf sync completed KOReader after-WiFi action")
-                else
-                    self:logWarn("BookloreSync: Shelf sync post-WiFi action failed:", tostring(after_err))
-                end
-            end
-
-            if not handled then
-                local ok_disconnect, disconnected = pcall(function()
-                    return self:disconnectNetwork()
-                end)
-                if not ok_disconnect then
-                    self:logWarn("BookloreSync: Shelf sync fallback WiFi disable crashed:", tostring(disconnected))
-                elseif disconnected then
-                    self:logInfo("BookloreSync: Shelf sync disabled WiFi via fallback")
-                else
-                    self:logWarn("BookloreSync: Shelf sync could not disable WiFi via fallback")
-                end
-            end
-        end)
+        runTargetAt(1)
     end, function()
         self:showWifiUnavailableInfo(
             _("WiFi not enabled - shelf sync skipped"),
@@ -1176,6 +1220,21 @@ function BookloreSync:onSyncBookloreShelf()
         )
     end)
     return true
+end
+
+---BookloreSync:onSyncBookloreShelfRegular.
+function BookloreSync:onSyncBookloreShelfRegular()
+    return self:runShelfSyncWithWifi({ "regular" })
+end
+
+---BookloreSync:onSyncBookloreShelfMagic.
+function BookloreSync:onSyncBookloreShelfMagic()
+    return self:runShelfSyncWithWifi({ "magic" })
+end
+
+---BookloreSync:onSyncBookloreShelfBoth.
+function BookloreSync:onSyncBookloreShelfBoth()
+    return self:runShelfSyncWithWifi({ "regular", "magic" })
 end
 
 ---BookloreSync:hasOpenDocumentForProgressSync.
@@ -4283,6 +4342,139 @@ function BookloreSync:addToMainMenu(menu_items)
     end
 
     local source_selector
+    local standard_shelves = {}
+    local magic_shelves = {}
+
+    local function persistShelfSelection()
+        self.shelf_id = nil
+        self.settings:saveSetting("shelf_id", nil)
+
+        if standard_shelves.selected then
+            local item = standard_shelves.selected
+            self.booklore_shelf_name = item.shelf_name
+            self.booklore_source_shelf_name = item.shelf_name
+            self.booklore_source_shelf_id = item.shelf_id
+            self.settings:saveSetting("booklore_shelf_name", item.shelf_name)
+            self.settings:saveSetting("booklore_source_shelf_name", item.shelf_name)
+            self.settings:saveSetting("booklore_source_shelf_id", item.shelf_id)
+        end
+
+        if magic_shelves.selected then
+            local item = magic_shelves.selected
+            self.booklore_shelf_name = item.shelf_name
+            self.booklore_magic_shelf_name = item.shelf_name
+            self.booklore_magic_shelf_id = item.shelf_id
+            self.settings:saveSetting("booklore_shelf_name", item.shelf_name)
+            self.settings:saveSetting("booklore_magic_shelf_name", item.shelf_name)
+            self.settings:saveSetting("booklore_magic_shelf_id", item.shelf_id)
+        end
+
+        self.settings:flush()
+    end
+
+    local function showUnifiedSyncPrompt()
+        local regular_name = standard_shelves.selected and standard_shelves.selected.shelf_name or _("(not selected)")
+        local magic_name = magic_shelves.selected and magic_shelves.selected.shelf_name or _("(not selected)")
+
+        UIManager:show(ConfirmBox:new{
+            text = T(_("Regular shelf: %1\nMagic shelf: %2\n\nSync now?"), regular_name, magic_name),
+            ok_text = _("Sync"),
+            cancel_text = _("Later"),
+            ok_callback = function()
+                local has_regular = standard_shelves.selected ~= nil
+                local has_magic = magic_shelves.selected ~= nil
+                if has_regular and has_magic then
+                    self:onSyncBookloreShelfBoth()
+                elseif has_regular then
+                    self:onSyncBookloreShelfRegular()
+                elseif has_magic then
+                    self:onSyncBookloreShelfMagic()
+                else
+                    UIManager:show(InfoMessage:new{ text = _("No shelf selected"), timeout = 2 })
+                end
+            end,
+        })
+    end
+
+    local function openMagicShelfSelector()
+        if not magic_shelves or #magic_shelves == 0 then
+            UIManager:show(ConfirmBox:new{
+                text = _("No Magic Shelves available. Continue with regular shelf only?"),
+                ok_text = _("Continue"),
+                cancel_text = _("Cancel"),
+                ok_callback = function()
+                    persistShelfSelection()
+                    -- Clear any previously-configured magic shelf
+                    self.booklore_magic_shelf_name = nil
+                    self.booklore_magic_shelf_id = nil
+                    self.settings:saveSetting("booklore_magic_shelf_name", nil)
+                    self.settings:saveSetting("booklore_magic_shelf_id", nil)
+                    self.settings:flush()
+                    showUnifiedSyncPrompt()
+                end,
+            })
+            return
+        end
+
+        -- Prepend a skip entry so user can opt out of a Magic Shelf
+        table.insert(magic_shelves, 1, {
+            text = _("--- Skip (no Magic Shelf) ---"),
+            is_skip = true,
+        })
+
+        local function finaliseSelection()
+            persistShelfSelection()
+            -- Clear the shelf type the user deliberately chose NOT to include
+            if not standard_shelves.selected then
+                self.booklore_source_shelf_name = nil
+                self.booklore_source_shelf_id = nil
+                self.shelf_id = nil
+                self.settings:saveSetting("booklore_source_shelf_name", nil)
+                self.settings:saveSetting("booklore_source_shelf_id", nil)
+                self.settings:saveSetting("shelf_id", nil)
+            end
+            if not magic_shelves.selected then
+                self.booklore_magic_shelf_name = nil
+                self.booklore_magic_shelf_id = nil
+                self.settings:saveSetting("booklore_magic_shelf_name", nil)
+                self.settings:saveSetting("booklore_magic_shelf_id", nil)
+            end
+            -- Legacy shelf_name: only clear when neither shelf provides a name
+            if not standard_shelves.selected and not magic_shelves.selected then
+                self.booklore_shelf_name = nil
+                self.settings:saveSetting("booklore_shelf_name", nil)
+            end
+            self.settings:flush()
+            showUnifiedSyncPrompt()
+        end
+
+        local magic_selector
+        magic_selector = Menu:new{
+            title = _("Select Magic Shelf"),
+            item_table = magic_shelves,
+            single_line = false,
+            multilines_show_more_text = true,
+            fullscreen = true,
+            onMenuSelect = function(menu_widget, item)
+                UIManager:close(magic_selector)
+                if item.is_skip then
+                    magic_shelves.selected = nil
+                    if not standard_shelves.selected then
+                        -- Both skipped — nothing to do
+                        UIManager:show(InfoMessage:new{
+                            text = _("No shelf selected. Shelf sync will not run until a shelf is configured."),
+                            timeout = 4,
+                        })
+                        return
+                    end
+                else
+                    magic_shelves.selected = item
+                end
+                finaliseSelection()
+            end,
+        }
+        UIManager:show(magic_selector)
+    end
 
     local function boolLabel(value)
         if value == true then return _("yes") end
@@ -4312,19 +4504,22 @@ function BookloreSync:addToMainMenu(menu_items)
             return
         end
 
-        self:refreshEffectiveServerUrl()
-        self.api:init(self.server_url, self.username, self.password, self.db)
+        self:_requestWifi(_("load shelves"), function()
+            self:refreshEffectiveServerUrl()
+            self.api:init(self.server_url, self.username, self.password, self.db)
 
-        local loading = InfoMessage:new{ text = _("Loading shelves...") }
-        UIManager:show(loading)
+            local loading = InfoMessage:new{ text = _("Loading shelves...") }
+            UIManager:show(loading)
 
-        UIManager:scheduleIn(0, function()
+            UIManager:scheduleIn(0, function()
             local standard_ok, standard_or_err = self.api:getAccessibleShelves(self.booklore_username, self.booklore_password)
             local magic_ok, magic_or_err = self.api:getMagicShelves(self.booklore_username, self.booklore_password)
 
             UIManager:close(loading)
 
             local item_table = {}
+            local standard_items = {}
+            local magic_items = {}
 
             if standard_ok then
                 for i, shelf in ipairs(standard_or_err or {}) do
@@ -4343,12 +4538,14 @@ function BookloreSync:addToMainMenu(menu_items)
                             _("Public"), boolLabel(is_public),
                             _("# Titles"), tostring(title_count or "?")
                         )
-                        table.insert(item_table, {
+                        local row = {
                             text = text,
                             shelf_id = id,
                             shelf_name = name,
                             source_kind = "static",
-                        })
+                        }
+                        table.insert(item_table, row)
+                        table.insert(standard_items, row)
                     end
                 end
             end
@@ -4386,12 +4583,14 @@ function BookloreSync:addToMainMenu(menu_items)
                             _("Public"), boolLabel(is_public),
                             _("# Titles"), tostring(title_count or "?")
                         )
-                        table.insert(item_table, {
+                        local row = {
                             text = text,
                             shelf_id = id,
                             shelf_name = name,
                             source_kind = "magic",
-                        })
+                        }
+                        table.insert(item_table, row)
+                        table.insert(magic_items, row)
                     end
                 end
             end
@@ -4403,6 +4602,14 @@ function BookloreSync:addToMainMenu(menu_items)
                     return a_name < b_name
                 end
                 return tostring(a.source_kind or "") < tostring(b.source_kind or "")
+            end)
+
+            table.sort(standard_items, function(a, b)
+                return tostring(a.shelf_name or ""):lower() < tostring(b.shelf_name or ""):lower()
+            end)
+
+            table.sort(magic_items, function(a, b)
+                return tostring(a.shelf_name or ""):lower() < tostring(b.shelf_name or ""):lower()
             end)
 
             if #item_table == 0 then
@@ -4423,52 +4630,53 @@ function BookloreSync:addToMainMenu(menu_items)
                 return
             end
 
+            standard_shelves = standard_items
+            magic_shelves = magic_items
+            standard_shelves.selected = nil
+            magic_shelves.selected = nil
+
+            if #standard_shelves == 0 then
+                UIManager:show(ConfirmBox:new{
+                    text = _("No regular shelves available. Continue with Magic Shelf only?"),
+                    ok_text = _("Continue"),
+                    cancel_text = _("Cancel"),
+                    ok_callback = function()
+                        openMagicShelfSelector()
+                    end,
+                })
+                return
+            end
+
+            -- Prepend a skip entry so user can opt out of a regular shelf
+            table.insert(standard_shelves, 1, {
+                text = _("--- Skip (no regular shelf) ---"),
+                is_skip = true,
+            })
+
             source_selector = Menu:new{
-                title = _("Select Shelf"),
-                item_table = item_table,
+                title = _("Select Regular Shelf"),
+                item_table = standard_shelves,
                 single_line = false,
                 multilines_show_more_text = true,
                 fullscreen = true,
                 onMenuSelect = function(menu_widget, item)
                     UIManager:close(source_selector)
-                    self.shelf_id = nil
-                    self.settings:saveSetting("shelf_id", nil)
-                    if item.source_kind == "magic" then
-                        self.booklore_sync_source_type = "magic"
-                        self.booklore_shelf_name = item.shelf_name
-                        self.booklore_magic_shelf_name = item.shelf_name
-                        self.booklore_magic_shelf_id = item.shelf_id
-                        self.booklore_source_shelf_id = nil
-                        self.settings:saveSetting("booklore_sync_source_type", "magic")
-                        self.settings:saveSetting("booklore_shelf_name", item.shelf_name)
-                        self.settings:saveSetting("booklore_magic_shelf_name", item.shelf_name)
-                        self.settings:saveSetting("booklore_magic_shelf_id", item.shelf_id)
-                        self.settings:saveSetting("booklore_source_shelf_id", nil)
+                    if item.is_skip then
+                        standard_shelves.selected = nil
                     else
-                        self.booklore_sync_source_type = "static"
-                        self.booklore_shelf_name = item.shelf_name
-                        self.booklore_source_shelf_name = item.shelf_name
-                        self.booklore_source_shelf_id = item.shelf_id
-                        self.booklore_magic_shelf_id = nil
-                        self.settings:saveSetting("booklore_sync_source_type", "static")
-                        self.settings:saveSetting("booklore_shelf_name", item.shelf_name)
-                        self.settings:saveSetting("booklore_source_shelf_name", item.shelf_name)
-                        self.settings:saveSetting("booklore_source_shelf_id", item.shelf_id)
-                        self.settings:saveSetting("booklore_magic_shelf_id", nil)
+                        standard_shelves.selected = item
                     end
-                    self.settings:flush()
-                    UIManager:show(ConfirmBox:new{
-                        text = T(_("Selected shelf: %1\n\nSync now?"), item.shelf_name),
-                        ok_text = _("Yes"),
-                        cancel_text = _("No"),
-                        ok_callback = function()
-                            self:onSyncBookloreShelf()
-                        end,
-                    })
+                    openMagicShelfSelector()
                 end,
             }
             UIManager:show(source_selector)
         end)
+    end, function()
+        self:showWifiUnavailableInfo(
+            _("WiFi not enabled - shelf selector cancelled"),
+            _("Airplane mode is enabled - shelf selector cancelled")
+        )
+    end)
     end
 
     local base_menu = {}
@@ -5003,21 +5211,61 @@ function BookloreSync:addToMainMenu(menu_items)
         text = _("Shelf Sync"),
         sub_item_table = {
             {
-                text = _("Sync Booklore Shelf"),
-                help_text = _("Syncronizes the selected shelf with KOReader. Downloads books on the shelf to the device and optionally deletes local files for removed shelf books. Syncs metadata like title/author and can optionally use original server filenames. Requires a shelf to be selected and WiFi connection. Shelf removal for static shelves only"),
+                text = _("Sync regular shelf"),
+                help_text = _("Synchronizes the configured regular shelf with KOReader. Downloads missing books and optionally deletes local files for books removed from the regular shelf."),
                 callback = function()
-                    self:onSyncBookloreShelf()
+                    self:onSyncBookloreShelfRegular()
                 end,
             },
             {
-                text = _("Force full re-sync"),
-                help_text = _("Clear the cached shelf state and perform a full sync pass. Useful after manually deleting downloaded books so the plugin re-downloads them."),
+                text = _("Sync magic shelf"),
+                help_text = _("Synchronizes the configured magic shelf with KOReader. Downloads missing books and optionally deletes local files for books removed from the magic shelf."),
                 callback = function()
-                    if self.db and self.shelf_id then
-                        self.db:clearShelfState(self.shelf_id)
-                    end
-                    self:onSyncBookloreShelf()
+                    self:onSyncBookloreShelfMagic()
                 end,
+            },
+            {
+                text = _("Sync both shelves"),
+                help_text = _("Runs regular shelf sync, then magic shelf sync in sequence."),
+                callback = function()
+                    self:onSyncBookloreShelfBoth()
+                end,
+            },
+            {
+                text = _("Re-sync shelves"),
+                help_text = _("Clear cached shelf state and perform a full sync pass. Useful after manually deleting downloaded books so the plugin re-downloads them."),
+                sub_item_table = {
+                    {
+                        text = _("Re-sync regular shelf"),
+                        callback = function()
+                            if self.db and self.booklore_source_shelf_id then
+                                self.db:clearShelfState(self.booklore_source_shelf_id, "regular")
+                            end
+                            self:onSyncBookloreShelfRegular()
+                        end,
+                    },
+                    {
+                        text = _("Re-sync magic shelf"),
+                        callback = function()
+                            if self.db and self.booklore_magic_shelf_id then
+                                self.db:clearShelfState(self.booklore_magic_shelf_id, "magic")
+                            end
+                            self:onSyncBookloreShelfMagic()
+                        end,
+                    },
+                    {
+                        text = _("Re-sync both shelves"),
+                        callback = function()
+                            if self.db and self.booklore_source_shelf_id then
+                                self.db:clearShelfState(self.booklore_source_shelf_id, "regular")
+                            end
+                            if self.db and self.booklore_magic_shelf_id then
+                                self.db:clearShelfState(self.booklore_magic_shelf_id, "magic")
+                            end
+                            self:onSyncBookloreShelfBoth()
+                        end,
+                    },
+                },
             },
             {
                 text = _("Sync Behavior"),
@@ -5106,18 +5354,17 @@ function BookloreSync:addToMainMenu(menu_items)
                 sub_item_table = {
                     {
                         text_func = function()
-                            local source_type = (self.booklore_sync_source_type == "magic") and _("Magic") or _("Standard")
-                            local source_name = self.booklore_shelf_name or ""
-                            if source_name == "" then
-                                source_name = _("(not set)")
-                            end
-                            return T(_("Current source: %1 | %2"), source_type, source_name)
+                            local regular_name = self.booklore_source_shelf_name or ""
+                            if regular_name == "" then regular_name = _("(not set)") end
+                            local magic_name = self.booklore_magic_shelf_name or ""
+                            if magic_name == "" then magic_name = _("(not set)") end
+                            return T(_("Current sources: Regular=%1 | Magic=%2"), regular_name, magic_name)
                         end,
                         enabled = false,
                     },
                     {
-                        text = _("Select shelf (Standard + Magic)"),
-                        help_text = _("Load all accessible standard and Magic shelves from Booklore and pick one as sync source."),
+                        text = _("Select shelf"),
+                        help_text = _("Load all accessible shelves from Booklore. Pick the shelves you want to sync — regular, Magic, or both. Skip a shelf type to leave it unconfigured."),
                         keep_menu_open = true,
                         callback = function()
                             openShelfSelector()
@@ -5125,12 +5372,9 @@ function BookloreSync:addToMainMenu(menu_items)
                     },
                     {
                         text_func = function()
-                            return T(_("Shelf source name: %1"), self.booklore_source_shelf_name)
+                            return T(_("Shelf source name: %1"), self.booklore_source_shelf_name or _("(not set)"))
                         end,
                         help_text = _("Name of the standard shelf source to sync."),
-                        enabled_func = function()
-                            return self.booklore_sync_source_type ~= "magic"
-                        end,
                         keep_menu_open = true,
                         callback = function()
                             local dialog
@@ -5166,12 +5410,9 @@ function BookloreSync:addToMainMenu(menu_items)
                     },
                     {
                         text_func = function()
-                            return T(_("Magic Shelf name: %1"), self.booklore_magic_shelf_name)
+                            return T(_("Magic Shelf name: %1"), self.booklore_magic_shelf_name or _("(not set)"))
                         end,
                         help_text = _("Name of the Magic Shelf source to sync."),
-                        enabled_func = function()
-                            return self.booklore_sync_source_type == "magic"
-                        end,
                         keep_menu_open = true,
                         callback = function()
                             local dialog
@@ -5230,6 +5471,7 @@ function BookloreSync:addToMainMenu(menu_items)
                                     {
                                         text     = _("Reset"),
                                         callback = function()
+                                            local old_dir = self.download_dir
                                             self.download_dir = self:_detectDefaultDownloadDir()
                                             self.settings:saveSetting("download_dir", self.download_dir)
                                             self.settings:flush()
@@ -5238,6 +5480,9 @@ function BookloreSync:addToMainMenu(menu_items)
                                                 text = T(_("Reset to: %1"), self.download_dir),
                                                 timeout = 2,
                                             })
+                                            if old_dir ~= self.download_dir then
+                                                self:_offerMoveShelfItems(old_dir, self.download_dir)
+                                            end
                                         end,
                                     },
                                     {
@@ -5246,9 +5491,15 @@ function BookloreSync:addToMainMenu(menu_items)
                                         callback = function()
                                             local val = dialog:getInputText()
                                             if val and val ~= "" then
+                                                local old_dir = self.download_dir
                                                 self.download_dir = val
                                                 self.settings:saveSetting("download_dir", val)
                                                 self.settings:flush()
+                                                UIManager:close(dialog)
+                                                if old_dir ~= val then
+                                                    self:_offerMoveShelfItems(old_dir, val)
+                                                end
+                                                return
                                             end
                                             UIManager:close(dialog)
                                         end,
@@ -8574,8 +8825,10 @@ function BookloreSync:_scheduleWakeSync()
         end
 
         self.needs_wake_sync = false
-        self:logInfo("BookloreSync: Running delayed wake sync")
-        self:syncFromBookloreShelf(true)
+        self:logInfo("BookloreSync: Running delayed wake sync (regular + magic)")
+        self:syncFromBookloreShelf(true, function()
+            self:syncFromBookloreShelf(true, nil, "magic")
+        end, "regular")
     end)
 end
 
@@ -8909,8 +9162,8 @@ function BookloreSync:_detectDefaultDownloadDir()
 end
 
 ---BookloreSync:syncFromBookloreShelf.
-function BookloreSync:syncFromBookloreShelf(silent, on_complete)
-    return ShelfSyncModule.syncFromBookloreShelf(self, silent, on_complete)
+function BookloreSync:syncFromBookloreShelf(silent, on_complete, sync_target, suppress_summary)
+    return ShelfSyncModule.syncFromBookloreShelf(self, silent, on_complete, sync_target, suppress_summary)
 end
 
 ---BookloreSync:_generateFilename.
@@ -11517,6 +11770,99 @@ function BookloreSync:fetchAndStoreHardcoverIds()
 
     -- Bootstrap the recursive chain
     process_next(1)
+end
+
+--[[--
+Offer to move items from an old download directory to a new one when
+the user changes the shelf folder setting.
+
+Scans the old directory for any entries (files and subdirectories) and
+if any are found, presents a ConfirmBox asking whether to move them.
+
+@param old_dir string  Previous download directory path
+@param new_dir string  New download directory path
+--]]--
+---BookloreSync:_offerMoveShelfItems.
+function BookloreSync:_offerMoveShelfItems(old_dir, new_dir)
+    if not old_dir or old_dir == "" or not new_dir or new_dir == "" then return end
+    if old_dir == new_dir then return end
+    if lfs.attributes(old_dir, "mode") ~= "directory" then return end
+
+    -- Collect only shelf-synced entries: files matching the
+    -- _{numericID}.ext pattern and their .sdr sidecar directories.
+    -- This excludes unrelated files (manually added books, config, etc.).
+    local shelf_entry_pattern = "^.+_%d+%.[^.]+$"
+    local entries = {}
+    for entry in lfs.dir(old_dir) do
+        if entry ~= "." and entry ~= ".."
+            and entry:match(shelf_entry_pattern) then
+            table.insert(entries, entry)
+        end
+    end
+
+    if #entries == 0 then return end
+
+    UIManager:show(ConfirmBox:new{
+        text = T(_("The download directory has changed.\n\nOld location: %1\nNew location: %2\n\nThere are %3 item(s) in the old directory.\nDo you want to move them to the new location?"),
+            old_dir, new_dir, #entries),
+        ok_text = _("Move items"),
+        cancel_text = _("Keep in place"),
+        ok_callback = function()
+            self:_moveShelfItems(entries, old_dir, new_dir)
+        end,
+    })
+end
+
+--[[--
+Move a list of directory entries from one directory to another.
+
+Creates the target directory if it does not already exist, then
+os.rename's each entry.  Files and subdirectories (.sdr sidecar
+directories etc.) are moved together so reading progress is preserved.
+
+@param entries table   Array of entry names (basename only)
+@param old_dir string  Source directory
+@param new_dir string  Destination directory
+--]]--
+---BookloreSync:_moveShelfItems.
+function BookloreSync:_moveShelfItems(entries, old_dir, new_dir)
+    -- Ensure the new directory exists
+    if lfs.attributes(new_dir, "mode") ~= "directory" then
+        local ok = lfs.mkdir(new_dir)
+        if not ok then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Failed to create new download directory: %1"), new_dir),
+            })
+            return
+        end
+    end
+
+    local moved = 0
+    local failed = 0
+    for _, entry in ipairs(entries) do
+        local src = old_dir .. "/" .. entry
+        local dst = new_dir .. "/" .. entry
+        local ok = os.rename(src, dst)
+        if ok then
+            moved = moved + 1
+        elseif lfs.attributes(src, "mode") ~= nil then
+            -- Source still exists, the rename genuinely failed
+            -- (likely cross-device move which os.rename cannot handle)
+            failed = failed + 1
+        end
+        -- Source no longer exists: moved by another process — skip quietly
+    end
+
+    local msg
+    if failed == 0 then
+        msg = T(_("Moved %1 item(s) to the new download directory."), moved)
+    else
+        msg = T(_("Moved %1 item(s) to the new directory. Failed: %2."), moved, failed)
+    end
+    UIManager:show(InfoMessage:new{
+        text = msg,
+        timeout = 3,
+    })
 end
 
 return BookloreSync

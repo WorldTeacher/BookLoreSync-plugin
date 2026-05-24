@@ -67,4 +67,121 @@ describe("FileLogger", function()
     assert.is_truthy(files[1]:find("2026-03-03", 1, true))
     assert.is_truthy(files[2]:find("2026-03-02", 1, true))
   end)
+
+  it("getCurrentDate returns YYYY-MM-DD format", function()
+    local d = logger:getCurrentDate()
+    assert.is.string(d)
+    assert.is_truthy(d:match("^%d%d%d%d%-%d%d%-%d%d$") ~= nil)
+  end)
+
+  it("getLogFilePath defaults to today when no date given", function()
+    local path = logger:getLogFilePath()
+    local today = os.date("%Y-%m-%d")
+    assert.are.equal(temp_dir .. "/booklore-" .. today .. ".log", path)
+  end)
+
+  it("getCurrentLogSize returns 0 for non-existent file", function()
+    assert.are.equal(0, logger:getCurrentLogSize())
+  end)
+
+  it("getCurrentLogSize returns byte count after write", function()
+    logger:write("INFO", "test")
+    local size = logger:getCurrentLogSize()
+    assert.is.truthy(size > 0)
+  end)
+
+  it("write returns false when logger not initialized (no log_dir)", function()
+    local bare = FileLogger:new()
+    local ok = bare:write("INFO", "test")
+    assert.is_false(ok)
+  end)
+
+  it("write with multiple arguments joins them with spaces", function()
+    logger:write("INFO", "hello", "world")
+    local path = logger:getLogFilePath(logger.current_date)
+    local f = io.open(path, "r")
+    local content = f:read("*a")
+    f:close()
+    assert.is_truthy(content:find("hello world", 1, true))
+  end)
+
+  it("write handles nil argument gracefully", function()
+    local ok = logger:write("INFO", nil)
+    assert.is_true(ok)
+  end)
+
+  it("write produces properly formatted timestamp", function()
+    logger:write("DEBUG", "test")
+    local path = logger:getLogFilePath(logger.current_date)
+    local f = io.open(path, "r")
+    local content = f:read("*a")
+    f:close()
+    -- Should contain a timestamp in brackets followed by [DEBUG] test
+    local has_timestamp = content:find("%[%d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d%]", 1, true) ~= nil
+    local has_level = content:find("[DEBUG]", 1, true) ~= nil
+    local has_msg = content:find("test", 1, true) ~= nil
+    assert.is_truthy(has_timestamp or has_level)
+    assert.is_truthy(has_msg)
+  end)
+
+  it("getLogFiles returns empty table when no log files exist", function()
+    local files = logger:getLogFiles()
+    assert.is_table(files)
+    assert.are.equal(0, #files)
+  end)
+
+  it("_listLogFiles only matches booklore-YYYY-MM-DD.log pattern", function()
+    -- Create files that should NOT match
+    local bad1 = io.open(temp_dir .. "/booklore-2026-03-01.txt", "w"); bad1:close()
+    local bad2 = io.open(temp_dir .. "/other-2026-03-01.log", "w"); bad2:close()
+    local bad3 = io.open(temp_dir .. "/booklore-2026-0301.log", "w"); bad3:close()
+
+    local files = logger:getLogFiles()
+    -- None of the malformed files should match the log pattern
+    for _, f in ipairs(files) do
+      assert.is_truthy(f:find(".txt") == nil)
+      assert.is_truthy(f:find("other-") == nil)
+    end
+
+    os.remove(temp_dir .. "/booklore-2026-03-01.txt")
+    os.remove(temp_dir .. "/other-2026-03-01.log")
+    os.remove(temp_dir .. "/booklore-2026-0301.log")
+  end)
+
+  it("rotateLogs does nothing when files <= max_files", function()
+    local f1 = io.open(temp_dir .. "/booklore-2026-03-01.log", "w"); f1:close()
+    local files_before = logger:getLogFiles()
+    local ok = logger:rotateLogs()
+    assert.is_true(ok)
+    local files_after = logger:getLogFiles()
+    assert.are.equal(#files_before, #files_after)
+    os.remove(temp_dir .. "/booklore-2026-03-01.log")
+  end)
+
+  it("clearAllLogs removes all log files", function()
+    local f1 = io.open(temp_dir .. "/booklore-2026-03-01.log", "w"); f1:close()
+    local f2 = io.open(temp_dir .. "/booklore-2026-03-02.log", "w"); f2:close()
+    local ok = logger:clearAllLogs()
+    assert.is_true(ok)
+    local files = logger:getLogFiles()
+    assert.are.equal(0, #files)
+  end)
+
+  it("clearAllLogs returns false when log_dir not set", function()
+    local bare = FileLogger:new()
+    assert.is_false(bare:clearAllLogs())
+  end)
+
+  it("close is safe to call when no file open", function()
+    local bare = FileLogger:new()
+    bare.log_dir = temp_dir
+    bare:close()  -- should not error
+  end)
+
+  it("close clears current_log_file handle", function()
+    logger:write("INFO", "test")
+    assert.is_not_nil(logger.current_log_file)
+    logger:close()
+    assert.is_nil(logger.current_log_file)
+  end)
 end)

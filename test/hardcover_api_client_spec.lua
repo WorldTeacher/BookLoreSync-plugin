@@ -64,6 +64,10 @@ package.preload["json"] = function()
       if raw == "bad-json" then
         error("decode failure")
       end
+      -- Preserve the actual response shape for error testing
+      if raw:find('"errors"', 1, true) then
+        return { errors = { { message = "Field not found" } } }
+      end
       return { data = { ok = true } }
     end,
   }
@@ -193,5 +197,154 @@ describe("HardcoverClient", function()
     assert.is_true(ok)
     assert.is_nil(err)
     assert.are.equal(4.5, observed_rating)
+  end)
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- ISBN handling
+  -- ═════════════════════════════════════════════════════════════════════════
+
+  it("strips hyphens and spaces from ISBN before lookup", function()
+    local observed_isbn = nil
+    client.query = function(_, _, vars)
+      observed_isbn = vars.isbn
+      return { editions = { { book = { id = "77" } } } }, nil
+    end
+
+    local id, err = client:findBookByIsbn("978-1-234-56789-0", "token")
+    assert.is_nil(err)
+    assert.are.equal(77, id)
+    assert.are.equal("9781234567890", observed_isbn)
+  end)
+
+  it("handles ISBN with spaces", function()
+    local observed_isbn = nil
+    client.query = function(_, _, vars)
+      observed_isbn = vars.isbn
+      return { editions = { { book = { id = "1" } } } }, nil
+    end
+
+    client:findBookByIsbn("978 1234567890", "token")
+    -- spaces are stripped; 13 chars = ISBN-13
+    assert.are.equal("9781234567890", observed_isbn)
+  end)
+
+  it("returns error for nil ISBN", function()
+    local id, err = client:findBookByIsbn(nil, "token")
+    assert.is_nil(id)
+    assert.are.equal("No ISBN provided", err)
+  end)
+
+  it("returns error for empty ISBN", function()
+    local id, err = client:findBookByIsbn("", "token")
+    assert.is_nil(id)
+    assert.are.equal("No ISBN provided", err)
+  end)
+
+  it("returns error when no editions found for ISBN", function()
+    client.query = function()
+      return { editions = {} }, nil
+    end
+
+    local id, err = client:findBookByIsbn("9781234567890", "token")
+    assert.is_nil(id)
+    assert.is_truthy(err:find("No Hardcover edition found", 1, true))
+  end)
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- Rating conversion edge cases
+  -- ═════════════════════════════════════════════════════════════════════════
+
+  it("converts KOReader rating 10 to Hardcover 5.0", function()
+    local observed_rating = nil
+    client.getUserId = function() return 1, nil end
+    client.findUserBookId = function() return 1, nil end
+    client.query = function(_, _, vars)
+      observed_rating = vars.rating
+      return { update_user_book = { user_book = { id = 1 } } }, nil
+    end
+
+    client:submitRating(123, 10, "token")
+    assert.are.equal(5.0, observed_rating)
+  end)
+
+  it("converts KOReader rating 1 (minimum valid) to Hardcover 0.5", function()
+    local observed_rating = nil
+    client.getUserId = function() return 1, nil end
+    client.findUserBookId = function() return 1, nil end
+    client.query = function(_, _, vars)
+      observed_rating = vars.rating
+      return { update_user_book = { user_book = { id = 1 } } }, nil
+    end
+
+    client:submitRating(123, 1, "token")
+    assert.are.equal(0.5, observed_rating)
+  end)
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- getUserId
+  -- ═════════════════════════════════════════════════════════════════════════
+
+  it("fetches user id from API when not cached", function()
+    client.db = {
+      getHardcoverUserId = function() return nil end,
+      saveHardcoverUserId = function() end,
+    }
+    -- me{} query returns an array: data.me = [{ id = 55 }]
+    client.query = function()
+      return { me = { { id = 55 } } }, nil
+    end
+
+    local uid, err = client:getUserId("token")
+    assert.is_nil(err)
+    assert.are.equal(55, uid)
+  end)
+
+  it("returns error when user id query fails", function()
+    client.db = {
+      getHardcoverUserId = function() return nil end,
+      saveHardcoverUserId = function() end,
+    }
+    client.query = function()
+      return nil, "auth error"
+    end
+
+    local uid, err = client:getUserId("token")
+    assert.is_nil(uid)
+    assert.are.equal("auth error", err)
+  end)
+
+  it("handles missing token in getUserId", function()
+    local uid, err = client:getUserId(nil)
+    assert.is_nil(uid)
+    assert.are.equal("Hardcover token not configured", err)
+  end)
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- GraphQL error handling
+  -- ═════════════════════════════════════════════════════════════════════════
+
+  it("returns error when GraphQL response contains errors", function()
+    -- Make https return a JSON body with an 'errors' field
+    https.request = function(req)
+      if req.sink then
+        req.sink('{"errors":[{"message":"Field not found"}]}')
+      end
+      return 1, 200, {}
+    end
+
+    local data, err = client:query("query { bad }", nil, "jwt")
+    assert.is_nil(data)
+    assert.is_truthy(err:find("Field not found", 1, true))
+  end)
+
+  it("handles decode-failure JSON in GraphQL response", function()
+    https.request = function(req)
+      if req.sink then req.sink("bad-json") end  -- triggers decode error
+      return 1, 200, {}
+    end
+
+    local data, err = client:query("query { ping }", nil, "jwt")
+    assert.is_nil(data)
+    assert.is_truthy(err ~= nil)
   end)
 end)

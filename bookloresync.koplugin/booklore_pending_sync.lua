@@ -94,10 +94,15 @@ function module.syncPendingDeletions(self, silent)
 
     if not self.db then return 0, 0 end
 
-    if self.booklore_sync_source_type == "magic" then
+    local regular_shelf_id = tonumber(self.booklore_source_shelf_id) or tonumber(self.shelf_id)
+    local magic_shelf_id = tonumber(self.booklore_magic_shelf_id)
+
+    -- If only a magic shelf is configured, queued deletions can never be
+    -- unassigned from a regular shelf source; clear them immediately.
+    if not regular_shelf_id and magic_shelf_id then
         local deletions = self.db:getPendingDeletions()
         if deletions and #deletions > 0 then
-            self:logInfo("BookloreSync: syncPendingDeletions - clearing", #deletions, "queued deletion(s) for magic shelf source")
+            self:logInfo("BookloreSync: syncPendingDeletions - clearing", #deletions, "queued deletion(s) for magic-only shelf config")
             for _, deletion in ipairs(deletions) do
                 self.db:removePendingDeletion(deletion.id)
             end
@@ -148,7 +153,7 @@ function module.syncPendingDeletions(self, silent)
             goto del_continue
         end
 
-        local shelf_id = tonumber(self.booklore_source_shelf_id) or self.shelf_id
+        local shelf_id = regular_shelf_id
         if not shelf_id then
             self:logWarn("BookloreSync: syncPendingDeletions - no shelf_id configured, cannot unassign book, skipping")
             self.db:incrementDeletionRetry(deletion.id)

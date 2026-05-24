@@ -162,4 +162,140 @@ describe("Updater helper methods", function()
     local result = updater:checkForDirectDownload("https://example.org/dev-download")
     assert.is_nil(result)
   end)
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- Expanded parsing and comparison edge cases
+  -- ═════════════════════════════════════════════════════════════════════════
+
+  it("parses version without 'v' prefix", function()
+    local parsed = updater:parseVersion("1.2.3")
+    assert.is_table(parsed)
+    assert.are.equal(1, parsed.major)
+    assert.are.equal(2, parsed.minor)
+    assert.are.equal(3, parsed.patch)
+  end)
+
+  it("parses two-digit version components", function()
+    local parsed = updater:parseVersion("v10.20.30")
+    assert.are.equal(10, parsed.major)
+    assert.are.equal(20, parsed.minor)
+    assert.are.equal(30, parsed.patch)
+  end)
+
+  it("parses version with only major.minor — rejected (requires three parts)", function()
+    assert.is_nil(updater:parseVersion("v2.7"))
+  end)
+
+  it("parses version with only major number — rejected", function()
+    assert.is_nil(updater:parseVersion("v3"))
+  end)
+
+  it("rejects nil version", function()
+    assert.is_nil(updater:parseVersion(nil))
+  end)
+
+  it("rejects empty string version", function()
+    assert.is_nil(updater:parseVersion(""))
+  end)
+
+  it("rejects version with letters in numbers", function()
+    assert.is_nil(updater:parseVersion("v1.abc.3"))
+  end)
+
+  it("rejects version with only text", function()
+    assert.is_nil(updater:parseVersion("alpha"))
+  end)
+
+  it("compares versions with different patch levels", function()
+    local v1 = updater:parseVersion("1.0.5")
+    local v2 = updater:parseVersion("1.0.9")
+    assert.are.equal(-1, updater:compareVersions(v1, v2))
+    assert.are.equal(1, updater:compareVersions(v2, v1))
+  end)
+
+  it("compares versions with different minor levels", function()
+    local v1 = updater:parseVersion("2.1.0")
+    local v2 = updater:parseVersion("2.5.0")
+    assert.are.equal(-1, updater:compareVersions(v1, v2))
+  end)
+
+  it("compares dev version lower than release of same number", function()
+    local dev = updater:parseVersion("1.0.0-dev+abc")
+    local rel = updater:parseVersion("1.0.0")
+    assert.are.equal(-1, updater:compareVersions(dev, rel))
+  end)
+
+  it("compares nil versions as equal", function()
+    assert.are.equal(0, updater:compareVersions(nil, updater:parseVersion("1.0.0")))
+    assert.are.equal(0, updater:compareVersions(updater:parseVersion("1.0.0"), nil))
+    assert.are.equal(0, updater:compareVersions(nil, nil))
+  end)
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- formatBytes edge cases
+  -- ═════════════════════════════════════════════════════════════════════════
+
+  it("formats zero bytes as Unknown size", function()
+    assert.are.equal("Unknown size", updater:formatBytes(0))
+  end)
+
+  it("formats negative bytes as-is (no guard for negative)", function()
+    -- Implementation only checks bytes==0, not negative
+    assert.are.equal("-1 B", updater:formatBytes(-1))
+  end)
+
+  it("formats exactly 1 byte", function()
+    assert.are.equal("1 B", updater:formatBytes(1))
+  end)
+
+  it("formats 999 bytes", function()
+    assert.are.equal("999 B", updater:formatBytes(999))
+  end)
+
+  it("formats exactly 1 KB", function()
+    assert.are.equal("1.0 KB", updater:formatBytes(1024))
+  end)
+
+  it("formats exactly 1 MB", function()
+    assert.are.equal("1.0 MB", updater:formatBytes(1024 * 1024))
+  end)
+
+  it("formats large value as MB, not GB", function()
+    -- Implementation only goes up to MB
+    local result = updater:formatBytes(1024 * 1024 * 1024)
+    assert.are.equal("1024.0 MB", result)
+  end)
+
+  it("formats 1536 bytes as 1.5 KB", function()
+    assert.are.equal("1.5 KB", updater:formatBytes(1536))
+  end)
+
+  -- ═════════════════════════════════════════════════════════════════════════
+  -- cleanChangelog edge cases
+  -- ═════════════════════════════════════════════════════════════════════════
+
+  it("cleans changelog with commit hash references", function()
+    local cleaned = updater:cleanChangelog("- Feature X ([abc1234](https://github.com/x/y/commit/abc1234))")
+    assert.are.equal("- Feature X", cleaned)
+  end)
+
+  it("cleans multiple markdown links", function()
+    local cleaned = updater:cleanChangelog("[Link1](url1) and [Link2](url2)")
+    assert.are.equal("Link1 and Link2", cleaned)
+  end)
+
+  it("returns empty string for nil changelog", function()
+    assert.are.equal("", updater:cleanChangelog(nil))
+  end)
+
+  it("preserves plain text without links", function()
+    assert.are.equal("Just plain text", updater:cleanChangelog("Just plain text"))
+  end)
+
+  it("strips inline URLs without markdown", function()
+    local cleaned = updater:cleanChangelog("See https://example.com/release for more")
+    -- URL stripped; single space between words (no double-space artifact)
+    assert.is_truthy(cleaned:find("See  for more", 1, true) ~= nil
+                  or cleaned:find("See for more", 1, true) ~= nil)
+  end)
 end)

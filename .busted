@@ -1,0 +1,6 @@
+return {
+  default = {
+    verbose = false,
+    lpath = "./bookloresync.koplugin/?.lua;./?.lua",
+  },
+}

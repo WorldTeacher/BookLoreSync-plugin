@@ -92,6 +92,8 @@ Settings are read and written via the menus in **Tools → BookLore Sync**. You 
 | `shelf_use_original_filename` | boolean | `true` | Save downloaded books using the server's original filename (stem + `_<id>`) instead of deriving the name from the book title |
 | `delete_sdr_on_book_delete` | boolean | `false` | When deleting a shelf book, also delete its `.sdr` sidecar directory. Only applies when `delete_removed_shelf_books` is also `true` |
 | `min_free_space_mb` | integer | `500` | Minimum free disk space threshold (in MB) required before downloading shelf books |
+| `magic_separate_folder` | boolean | `false` | Use a separate download directory for magic shelf downloads instead of the shared directory |
+| `magic_download_dir` | string | *(auto)* | Download directory for magic shelf books when `magic_separate_folder` is enabled. Defaults to `<download_dir>/Magic` |
 
 ---
 

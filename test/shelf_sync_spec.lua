@@ -1450,4 +1450,107 @@ describe("BookloreSync:syncFromBookloreShelf", function()
     assert.is_false(p.sync_in_progress)
   end)
 
+  -- ── Separate magic shelf download directory ─────────────────────────────
+
+  it("magic target uses magic_download_dir when magic_separate_folder is enabled", function()
+    package.preload["libs/libkoreader-lfs"] = function()
+      return {
+        attributes = function(path, attr)
+          if attr == "mode" then
+            if path == "/tmp/magic-dl" then return "directory" end
+            if path == "/tmp/test-dl" then return "directory" end
+            return nil
+          end
+          return nil
+        end,
+        mkdir = function() return true end,
+        dir   = function() return function() return nil end end,
+      }
+    end
+    package.preload["booklore_api_client"]  = function()
+      return make_api_stub({ magic_resolve_id = 88, magic_books = {} })
+    end
+    package.preload["booklore_database"]    = function() return make_db_stub() end
+
+    local p = make_plugin({
+      magic_separate_folder = true,
+      magic_download_dir = "/tmp/magic-dl",
+      booklore_magic_shelf_name = "Magic Picks",
+      booklore_magic_shelf_id = 88,
+    })
+    p:syncFromBookloreShelf(true, nil, "magic")
+    assert.is_false(p.sync_in_progress, "magic sync should complete when separate folder is enabled")
+  end)
+
+  it("magic target falls back to download_dir when magic_separate_folder is disabled", function()
+    local checked_paths = {}
+    package.preload["libs/libkoreader-lfs"] = function()
+      return {
+        attributes = function(path, attr)
+          table.insert(checked_paths, path)
+          if attr == "mode" then
+            if path == "/tmp/test-dl" then return "directory" end
+            return nil
+          end
+          return nil
+        end,
+        mkdir = function() return true end,
+        dir   = function() return function() return nil end end,
+      }
+    end
+    package.preload["booklore_api_client"]  = function()
+      return make_api_stub({ magic_resolve_id = 88, magic_books = {} })
+    end
+    package.preload["booklore_database"]    = function() return make_db_stub() end
+
+    local p = make_plugin({
+      magic_separate_folder = false,
+      magic_download_dir = "/tmp/magic-dl",
+      booklore_magic_shelf_name = "Magic Picks",
+      booklore_magic_shelf_id = 88,
+    })
+    p:syncFromBookloreShelf(true, nil, "magic")
+
+    -- ensureDirExists should have been called with download_dir, not magic_download_dir
+    local checked_dl = false
+    for _, path in ipairs(checked_paths) do
+      if path == "/tmp/test-dl" then checked_dl = true end
+    end
+    assert.is_true(checked_dl, "magic sync with separate folder disabled should check download_dir")
+  end)
+
+  it("regular target always uses download_dir regardless of magic_separate_folder", function()
+    local checked_paths = {}
+    package.preload["libs/libkoreader-lfs"] = function()
+      return {
+        attributes = function(path, attr)
+          table.insert(checked_paths, path)
+          if attr == "mode" then
+            if path == "/tmp/test-dl" then return "directory" end
+            return nil
+          end
+          return nil
+        end,
+        mkdir = function() return true end,
+        dir   = function() return function() return nil end end,
+      }
+    end
+    package.preload["booklore_api_client"]  = function()
+      return make_api_stub({ books = {} })
+    end
+    package.preload["booklore_database"]    = function() return make_db_stub() end
+
+    local p = make_plugin({
+      magic_separate_folder = true,
+      magic_download_dir = "/tmp/magic-dl",
+    })
+    p:syncFromBookloreShelf(true, nil, "regular")
+
+    local checked_dl = false
+    for _, path in ipairs(checked_paths) do
+      if path == "/tmp/test-dl" then checked_dl = true end
+    end
+    assert.is_true(checked_dl, "regular target should always use download_dir")
+  end)
+
 end)

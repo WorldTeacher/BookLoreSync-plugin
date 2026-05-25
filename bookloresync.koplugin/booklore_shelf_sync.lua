@@ -144,7 +144,12 @@ function M.new(deps)
         target = "regular"
     end
 
-    local download_dir    = self.download_dir
+    local download_dir
+    if target == "magic" and self.magic_separate_folder then
+        download_dir = self.magic_download_dir
+    else
+        download_dir = self.download_dir
+    end
 
     -- Ensure download directory exists
     local lfs = require("libs/libkoreader-lfs")

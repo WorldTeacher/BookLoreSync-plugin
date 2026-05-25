@@ -1359,6 +1359,26 @@ function Database:getBookByBookIdInDir(book_id, dir_prefix)
     return book
 end
 
+---Database:updateBookFilePath.
+function Database:updateBookFilePath(old_path, new_path)
+    old_path = tostring(old_path or "")
+    new_path = tostring(new_path or "")
+    if old_path == "" or new_path == "" then return false end
+
+    local stmt = self.conn:prepare("UPDATE book_cache SET file_path = ? WHERE file_path = ?")
+    if not stmt then
+        self.plugin:logErr("BookloreSync Database: updateBookFilePath - failed to prepare:", self.conn:errmsg())
+        return false
+    end
+
+    pcall(function()
+        stmt:bind(new_path, old_path)
+        stmt:step()
+    end)
+    stmt:close()
+    return true
+end
+
 ---Database:saveBookCache.
 function Database:saveBookCache(file_path, file_hash, book_id, title, author, isbn10, isbn13, server_pagecount)
     file_path = tostring(file_path or "")

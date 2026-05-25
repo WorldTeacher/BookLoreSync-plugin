@@ -1784,6 +1784,7 @@ function APIClient:getBooksInMagicShelf(magic_shelf_id, username, password)
                         authors = (type(entry.authors) == "table") and entry.authors or nil,
                     },
                     bookType = entry.primaryFileType or entry.bookType,
+                    primaryFile = entry.primaryFile,
                 }
                 table.insert(normalized, self:_normalizeShelfBookObject(mapped))
             end

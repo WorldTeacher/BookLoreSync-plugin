@@ -861,6 +861,14 @@ function BookloreSync:init()
     if self.short_title_length == nil then
         self.short_title_length = 30  -- Default: 30 characters before truncation
     end
+    self.magic_separate_folder = self.settings:readSetting("magic_separate_folder")
+    if self.magic_separate_folder == nil then
+        self.magic_separate_folder = false  -- Default: all in one folder
+    end
+    self.magic_download_dir = self.settings:readSetting("magic_download_dir")
+    if not self.magic_download_dir or self.magic_download_dir == "" then
+        self.magic_download_dir = (self.download_dir or "/Books") .. "/Magic"
+    end
 
     -- Resume/wake-sync state (not persisted - reset each session)
     self.last_auto_sync_time  = 0     -- unix timestamp of last auto-sync (cooldown guard)
@@ -5508,6 +5516,74 @@ function BookloreSync:addToMainMenu(menu_items)
                             }
                             UIManager:show(dialog)
                             dialog:onShowKeyboard()
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            return self.magic_separate_folder
+                                and _("Separate magic shelf folder: ON")
+                                or  _("Separate magic shelf folder: OFF")
+                        end,
+                        help_text = _("When enabled, magic shelf downloads use a separate folder instead of the shared download directory. You can set the path after enabling."),
+                        checked_func = function()
+                            return self.magic_separate_folder
+                        end,
+                        callback = function()
+                            local new_state = not self.magic_separate_folder
+                            if new_state then
+                                self:_promptForMagicFolder(function(accepted_path)
+                                    if not accepted_path then return end
+                                    self.magic_separate_folder = true
+                                    self.magic_download_dir = accepted_path
+                                    self.settings:saveSetting("magic_separate_folder", true)
+                                    self.settings:saveSetting("magic_download_dir", accepted_path)
+                                    self.settings:flush()
+                                    local lfs_local = require("libs/libkoreader-lfs")
+                                    if lfs_local.attributes(accepted_path, "mode") ~= "directory" then
+                                        lfs_local.mkdir(accepted_path)
+                                    end
+                                    self:_offerMoveMagicShelfItems()
+                                end)
+                            else
+                                self.magic_separate_folder = false
+                                self.settings:saveSetting("magic_separate_folder", false)
+                                self.settings:flush()
+                                self:_offerMoveMagicShelfBack()
+                                UIManager:show(InfoMessage:new{
+                                    text = _("Separate magic shelf folder disabled. Magic shelf downloads will use the main download directory."),
+                                    timeout = 3,
+                                })
+                            end
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            if self.magic_separate_folder then
+                                return T(_("Magic download dir: %1"), self.magic_download_dir)
+                            else
+                                return _("Magic download dir: (separate folder disabled)")
+                            end
+                        end,
+                        help_text = _("Download directory for magic shelf synced books. Only used when 'Separate magic shelf folder' is enabled."),
+                        enabled_func = function()
+                            return self.magic_separate_folder
+                        end,
+                        keep_menu_open = true,
+                        callback = function()
+                            self:_promptForMagicFolder(function(accepted_path)
+                                if not accepted_path then return end
+                                local old_dir = self.magic_download_dir
+                                self.magic_download_dir = accepted_path
+                                self.settings:saveSetting("magic_download_dir", accepted_path)
+                                self.settings:flush()
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("Magic download dir set to: %1"), accepted_path),
+                                    timeout = 2,
+                                })
+                                if old_dir ~= accepted_path then
+                                    self:_offerMoveMagicShelfItems()
+                                end
+                            end)
                         end,
                     },
                     {
@@ -11858,6 +11934,264 @@ function BookloreSync:_moveShelfItems(entries, old_dir, new_dir)
         msg = T(_("Moved %1 item(s) to the new download directory."), moved)
     else
         msg = T(_("Moved %1 item(s) to the new directory. Failed: %2."), moved, failed)
+    end
+    UIManager:show(InfoMessage:new{
+        text = msg,
+        timeout = 3,
+    })
+end
+
+--[[--
+Show an input dialog for setting the magic shelf download folder path.
+Calls the callback with the accepted path, or nil if cancelled.
+
+@param callback function(accepted_path|nil)
+--]]--
+---BookloreSync:_promptForMagicFolder.
+function BookloreSync:_promptForMagicFolder(callback)
+    local dialog
+    dialog = InputDialog:new{
+        title   = _("Magic shelf download folder"),
+        input   = self.magic_download_dir,
+        buttons = {{
+            {
+                text     = _("Cancel"),
+                callback = function()
+                    UIManager:close(dialog)
+                    if callback then callback(nil) end
+                end,
+            },
+            {
+                text     = _("Save"),
+                is_enter_default = true,
+                callback = function()
+                    local val = dialog:getInputText()
+                    if val and val ~= "" then
+                        if val == self.download_dir then
+                            UIManager:close(dialog)
+                            UIManager:show(InfoMessage:new{
+                                text = _("The magic folder cannot be the same as the main download directory."),
+                                timeout = 4,
+                            })
+                            if callback then callback(nil) end
+                            return
+                        end
+                        UIManager:close(dialog)
+                        if callback then callback(val) end
+                        return
+                    end
+                    UIManager:close(dialog)
+                    if callback then callback(nil) end
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+--[[--
+Fetch the list of book IDs currently on the magic shelf from the
+cached shelf state, with an API fallback if no cache exists yet.
+
+@return table|nil  Array of numeric book_ids, or nil on failure
+@return string|nil  Error message on failure
+--]]--
+---BookloreSync:_getMagicShelfBookIds.
+function BookloreSync:_getMagicShelfBookIds()
+    local magic_shelf_id = tonumber(self.booklore_magic_shelf_id)
+    if not magic_shelf_id then
+        return nil, "No magic shelf configured"
+    end
+
+    -- Try cached state first
+    local state = self.db and self.db:getShelfState(magic_shelf_id, "magic")
+    if state and type(state.books_json) == "string" then
+        local ok_dec, decoded = pcall(json.decode, state.books_json)
+        if ok_dec and type(decoded) == "table" then
+            local ids = {}
+            for _, b in ipairs(decoded) do
+                local bid = tonumber(b.id)
+                if bid then ids[bid] = true end
+            end
+            return ids
+        end
+    end
+
+    -- Fallback: fetch from API
+    if not self.api then return nil, "API not initialized" end
+    local ok_api, books_or_err = self.api:getBooksInMagicShelf(
+        magic_shelf_id, self.booklore_username, self.booklore_password)
+    if not ok_api then
+        return nil, "API fetch failed: " .. tostring(books_or_err)
+    end
+    local ids = {}
+    for _, book in ipairs(books_or_err) do
+        local bid = tonumber(book.id)
+        if bid then ids[bid] = true end
+    end
+    return ids
+end
+
+--[[--
+Check if a book_id exists in the other (regular) shelf's cached state.
+Used to prevent moving shared books that the regular shelf still needs.
+--]]--
+---BookloreSync:_isBookOnRegularShelf.
+function BookloreSync:_isBookOnRegularShelf(book_id)
+    local regular_shelf_id = tonumber(self.booklore_source_shelf_id) or tonumber(self.shelf_id)
+    if not regular_shelf_id then return false end
+    local state = self.db and self.db:getShelfState(regular_shelf_id, "regular")
+    if not state or type(state.books_json) ~= "string" then return false end
+    local ok_dec, decoded = pcall(json.decode, state.books_json)
+    if not ok_dec or type(decoded) ~= "table" then return false end
+    for _, b in ipairs(decoded) do
+        if tonumber(b.id) == book_id then return true end
+    end
+    return false
+end
+
+--[[--
+Collect shelf-synced file entries in a directory that match given book IDs.
+Each entry is { entry_name, book_id, old_path, new_path }.
+
+@param dir string  Directory to scan
+@param dest_dir string  Destination directory for the move
+@param magic_ids table  Set of magic shelf book IDs
+@return table  Array of move entries
+--]]--
+---BookloreSync:_collectMagicMoveEntries.
+function BookloreSync:_collectMagicMoveEntries(dir, dest_dir, magic_ids)
+    if lfs.attributes(dir, "mode") ~= "directory" then return {} end
+    local entries = {}
+    local shelf_entry_pattern = "^.+_(%d+)%.[^.]+$"
+
+    -- Scan DB for books matching magic shelf IDs in this directory
+    if self.db and self.db.getAllCachedBooks then
+        local all_cached = self.db:getAllCachedBooks() or {}
+        local dir_prefix = tostring(dir or ""):gsub("/+$", "") .. "/"
+        for _, cached in ipairs(all_cached) do
+            local bid = cached and tonumber(cached.book_id)
+            local fp = cached and tostring(cached.file_path or "") or ""
+            if bid and magic_ids[bid]
+                and fp:sub(1, #dir_prefix) == dir_prefix
+                and lfs.attributes(fp, "mode") == "file" then
+                -- Skip shared books
+                if not self:_isBookOnRegularShelf(bid) then
+                    local fname = fp:match("([^/]+)$")
+                    if fname then
+                        table.insert(entries, {
+                            entry = fname,
+                            book_id = bid,
+                            old_path = fp,
+                            new_path = (tostring(dest_dir or ""):gsub("/+$", "") .. "/" .. fname),
+                        })
+                    end
+                end
+            end
+        end
+    end
+
+    return entries
+end
+
+--[[--
+Offer to move magic shelf files from the main download directory to
+the magic download directory when the user enables the separate folder.
+
+Fetches the magic shelf book list (cached or API), finds matching files
+in the main download dir, and offers a ConfirmBox to move them.
+--]]--
+---BookloreSync:_offerMoveMagicShelfItems.
+function BookloreSync:_offerMoveMagicShelfItems()
+    local magic_ids, err = self:_getMagicShelfBookIds()
+    if not magic_ids then
+        UIManager:show(InfoMessage:new{
+            text = _("Could not load magic shelf book list. Sync the magic shelf first, then enable the separate folder."),
+            timeout = 5,
+        })
+        return
+    end
+
+    local entries = self:_collectMagicMoveEntries(self.download_dir, self.magic_download_dir, magic_ids)
+    if #entries == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No magic shelf files found in the main download directory."),
+            timeout = 3,
+        })
+        return
+    end
+
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Found %1 magic shelf file(s) in the main download folder.\\n\\nMove them to:\\n%2"),
+            #entries, self.magic_download_dir),
+        ok_text = _("Move"),
+        cancel_text = _("Keep in place"),
+        ok_callback = function()
+            self:_executeMoveEntries(entries)
+        end,
+    })
+end
+
+--[[--
+Offer to move magic shelf files back from the magic download directory
+to the main download directory when the user disables the separate folder.
+--]]--
+---BookloreSync:_offerMoveMagicShelfBack.
+function BookloreSync:_offerMoveMagicShelfBack()
+    local magic_ids, err = self:_getMagicShelfBookIds()
+    if not magic_ids then
+        -- No magic shelf configured or no cached state — nothing to move back
+        return
+    end
+
+    local entries = self:_collectMagicMoveEntries(self.magic_download_dir, self.download_dir, magic_ids)
+    if #entries == 0 then return end
+
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Found %1 magic shelf file(s) in the magic folder.\\n\\nMove them back to:\\n%2"),
+            #entries, self.download_dir),
+        ok_text = _("Move"),
+        cancel_text = _("Keep in place"),
+        ok_callback = function()
+            self:_executeMoveEntries(entries)
+        end,
+    })
+end
+
+--[[--
+Execute a list of move entries: rename files and update book_cache.
+An info message is shown after completion.
+
+@param entries table  Array of { entry, book_id, old_path, new_path }
+--]]--
+---BookloreSync:_executeMoveEntries.
+function BookloreSync:_executeMoveEntries(entries)
+    -- Ensure destination exists
+    local dest_dir = entries[1] and entries[1].new_path:match("^(.+)/[^/]+$") or ""
+    if dest_dir ~= "" and lfs.attributes(dest_dir, "mode") ~= "directory" then
+        lfs.mkdir(dest_dir)
+    end
+
+    local moved = 0
+    local failed = 0
+    for _, entry in ipairs(entries) do
+        local ok = os.rename(entry.old_path, entry.new_path)
+        if ok then
+            moved = moved + 1
+            if self.db then
+                self.db:updateBookFilePath(entry.old_path, entry.new_path)
+            end
+        elseif lfs.attributes(entry.old_path, "mode") ~= nil then
+            failed = failed + 1
+        end
+    end
+
+    local msg
+    if failed == 0 then
+        msg = T(_("Moved %1 item(s) to the new location."), moved)
+    else
+        msg = T(_("Moved %1 item(s). Failed: %2."), moved, failed)
     end
     UIManager:show(InfoMessage:new{
         text = msg,

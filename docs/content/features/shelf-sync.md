@@ -130,6 +130,19 @@ You can override this path via **Tools → BookLore Sync → Shelf Sync → Down
 
 A **Reset** button in that dialog restores the automatically detected path.
 
+### Separate magic shelf folder
+
+By default, magic shelf downloads use the same download directory as regular shelf downloads. You can optionally separate them:
+
+1. Open **Tools → BookLore Sync → Display & Storage**.
+2. Enable **Separate magic shelf folder: ON**.
+3. When prompted, enter a path for the magic shelf download directory. The plugin creates it if it does not exist.
+4. After confirming the path, the plugin offers to move existing magic shelf files from the shared directory to the new one.
+
+When enabled, the **Magic download dir** entry becomes editable and shows the current path. Magic shelf syncs will use this directory instead of the shared download directory. Shared books (present on both shelves) are left in the main download directory.
+
+To revert, disable the toggle. The plugin offers to move magic shelf files back to the shared download directory.
+
 ### Storage guard (minimum free space)
 
 Before each download, the plugin checks available disk space and enforces a minimum-free-space threshold.

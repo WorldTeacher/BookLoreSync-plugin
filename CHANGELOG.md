@@ -1,3 +1,11 @@
+# [4.6.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.5.0...4.6.0) (2026-05-25)
+
+
+### Features
+
+* **settings:** add support for separate magic shelf download directory ([1749ae1](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/1749ae1995113378d994291f009cf15de0ea6bb8))
+* **shelf-sync:** separate download folder for magic shelf ([e4c9ee7](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/commit/e4c9ee7d77f6c7194cb0e9b4b7ba0889a4e61ffa))
+
 # [4.5.0](https://gitlab.worldteacher.dev/wt-booklore/booklore-koreader-plugin/compare/4.4.1...4.5.0) (2026-05-24)
 
 
